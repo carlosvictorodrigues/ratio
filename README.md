@@ -1,40 +1,89 @@
-﻿# Ratio - Pesquisa Jurisprudencial
+# Ratio - Pesquisa Jurisprudencial
 
-Ratio is a local legal research application for STF/STJ jurisprudence.
+Assistente juridico local para pesquisa de jurisprudencia STF/STJ, com suporte a:
+- busca hibrida (semantica + lexical),
+- rerank juridico,
+- geracao de resposta com citacoes,
+- TTS,
+- indexacao de documentos do usuario em "Meu Acervo".
 
-This Git package is focused on running the app on the user's computer.
-It intentionally excludes scraping pipelines and large local databases.
+---
 
-## What is included
+## Visao geral rapida
 
-- Backend API (`backend/`)
+### Arquitetura
+
+```mermaid
+flowchart LR
+    U[Usuario] --> FE[Frontend<br/>http://127.0.0.1:5500]
+    FE --> API[Backend FastAPI<br/>http://127.0.0.1:8000]
+    API --> RAG[rag/query.py]
+    RAG --> LDB[(lancedb_store)]
+    RAG --> GEM[Gemini API]
+    API --> TTS[TTS Provider<br/>legacy_google ou gemini_native]
+    API --> ACV[Meu Acervo<br/>indexacao e busca]
+```
+
+### Pipeline de consulta
+
+```mermaid
+flowchart LR
+    Q[Consulta] --> E[Embeddings]
+    E --> H[Busca hibrida]
+    H --> R[Rerank]
+    R --> G[Geracao]
+    G --> V[Validacao]
+    V --> A[Resposta com fontes]
+```
+
+### Dois modos de uso
+
+1. Usuario final (recomendado): executa `Ratio.exe` a partir da pasta `dist\Ratio\`.
+2. Desenvolvimento: roda backend/frontend manualmente com Python.
+
+---
+
+## O que este pacote contem
+
+- API backend (`backend/`)
 - Frontend web (`frontend/`)
-- Query and reranking engine (`rag/query.py`)
-- Start/stop scripts for Windows
-- OSS docs, tests, and CI
+- Motor de busca e ranking (`rag/query.py`)
+- Scripts de inicializacao/encerramento para Windows
+- Testes e CI
 
-## What is not included
+## O que nao esta incluso
 
-- Raw scraping scripts for STF/STJ data collection
-- Large local datasets (`data/`)
-- Prebuilt vector index (`lancedb_store/`)
-- Generated outputs and runtime logs
+- Pipelines de scraping bruto STF/STJ
+- Datasets brutos muito grandes (`data/`)
+- Logs de execucao e arquivos temporarios locais
 
-## Requirements
+---
+
+## Requisitos
+
+### Para desenvolvimento
 
 - Python 3.10+
-- Gemini API key (`GEMINI_API_KEY`)
-- Internet on first reranker download
+- Chave Gemini (`GEMINI_API_KEY`)
+- Internet para primeira carga de modelos locais (reranker)
 
-Install dependencies:
+Instalacao:
 
 ```bash
 py -m pip install -r requirements.txt
 ```
 
+### Para usuario final (executavel)
+
+- Windows 10/11
+- Pasta `dist\Ratio\` completa (nao apenas o `.exe`)
+- Chave Gemini configurada no onboarding ou via `.env`
+
+---
+
 ## Build executavel .exe (Windows)
 
-Use o script de empacotamento:
+Use o script:
 
 ```text
 build_windows_exe.bat
@@ -49,31 +98,53 @@ dist\Ratio\Ratio.exe
 ```
 
 No computador final, o usuario nao precisa de Python instalado.
-O build inclui automaticamente `lancedb_store` em `dist\Ratio\` e cria backup preventivo do banco anterior em `build\database_backups\` quando existir.
+O build inclui `lancedb_store` em `dist\Ratio\` e gera backup preventivo de banco em `build\database_backups\` quando aplicavel.
 
-Passos para distribuir:
+### Distribuicao recomendada
 
-1. Envie a pasta completa `dist\Ratio\`.
-2. Inclua `.env` (opcional; a chave Gemini pode ser cadastrada no onboarding).
-3. O usuario final executa apenas `Ratio.exe`.
+1. Compactar e enviar a pasta inteira `dist\Ratio\`.
+2. Manter estrutura interna intacta (`_internal`, `lancedb_store`, `logs`).
+3. Usuario final executa apenas `Ratio.exe`.
 
-## Environment setup
+---
 
-1. Copy `.env.example` to `.env`.
-2. Configure at least:
+## Primeiro uso (usuario final)
+
+1. Extraia o ZIP para uma pasta local, por exemplo `C:\Ratio`.
+2. Execute `Ratio.exe`.
+3. Aguarde abrir no navegador `http://127.0.0.1:5500`.
+4. No modal inicial, informe a chave Gemini.
+5. Rode uma consulta de teste.
+
+### Diagnostico rapido
+
+| Sintoma | Causa comum | Acao |
+|---|---|---|
+| `Failed to fetch` no frontend | backend local nao iniciou | rodar `Ratio.exe` via terminal e verificar erros |
+| `http://127.0.0.1:8000/health` nao abre | porta 8000 bloqueada/ocupada ou backend caiu | checar firewall/antivirus/processo em 8000 |
+| travado em `Loading reranker model...` no primeiro uso | download/carga inicial do modelo local | aguardar; nas proximas consultas tende a ser bem mais rapido |
+
+---
+
+## Configuracao de ambiente (dev)
+
+1. Copie `.env.example` para `.env`.
+2. Configure no minimo:
 
 ```text
 GEMINI_API_KEY=...
 ```
 
-### TTS (provedor configuravel)
+---
 
-O endpoint `/api/tts` agora suporta dois provedores:
+## TTS (provedor configuravel)
+
+O endpoint `/api/tts` suporta dois provedores:
 
 - `legacy_google` (padrao): Google Cloud Text-to-Speech (`texttospeech.googleapis.com`) com voz Neural2.
 - `gemini_native`: caminho Gemini nativo (mantido como alternativa).
 
-Perfil padrao (rollback estavel):
+Perfil padrao estavel:
 
 ```text
 TTS_PROVIDER=legacy_google
@@ -84,9 +155,8 @@ GOOGLE_TTS_REQUEST_TIMEOUT_MS=45000
 ```
 
 Observacoes:
-
-- O perfil legado usa `speakingRate=1.2` e `pitch=-4.5` no backend.
-- Chave: `GOOGLE_TTS_API_KEY` ou `GEMINI_API_KEY` (fallback).
+- perfil legado usa `speakingRate=1.2` e `pitch=-4.5`.
+- chave usada: `GOOGLE_TTS_API_KEY` ou `GEMINI_API_KEY` (fallback).
 
 Opcional (caminho Gemini):
 
@@ -100,20 +170,24 @@ GEMINI_TTS_REQUEST_RETRY_ATTEMPTS=1
 GEMINI_TTS_MODEL_MAX_ATTEMPTS=2
 ```
 
+---
+
 ## Gemini API onboarding (antes do primeiro uso)
 
 1. Gere sua chave no Google AI Studio: <https://aistudio.google.com/apikey>.
 2. Clique em **Create API key** e copie a chave.
 3. No projeto, preencha `GEMINI_API_KEY` no arquivo `.env`.
-4. Verifique limites ativos da sua conta em:
+4. Verifique limites ativos da conta:
    - <https://ai.google.dev/gemini-api/docs/rate-limits>
-5. Se precisar aumentar limites, consulte:
+5. Se precisar aumentar limites:
    - <https://ai.google.dev/gemini-api/docs/billing>
+
+---
 
 ## Custos de referencia (snapshot 2026-02-24)
 
 Fonte oficial: <https://ai.google.dev/gemini-api/docs/pricing>  
-Estes valores podem mudar. Sempre valide na tabela oficial antes de uso intensivo.
+Valores podem mudar. Sempre confirme na tabela oficial.
 
 | Modelo | Cota gratuita | Preco de entrada (1M tokens) | Preco de saida (1M tokens) |
 |---|---|---|---|
@@ -122,57 +196,58 @@ Estes valores podem mudar. Sempre valide na tabela oficial antes de uso intensiv
 | `gemini-embedding-001` | Sim | US$ 0.15 | N/A |
 
 Notas:
-- Limites RPM/TPM/RPD dependem de modelo e tier da conta.
-- No Google AI Studio, a cota gratuita e os limites aparecem no painel de rate limit da propria conta.
-- O Ratio usa embeddings e geracao de texto; monitore consumo antes de processar lotes grandes.
+- Limites RPM/TPM/RPD dependem do modelo e tier da conta.
+- O Ratio usa embeddings e geracao; monitore consumo antes de lotes grandes.
 
-## Data package (required)
+---
 
-For real queries, the app needs a prebuilt LanceDB index.
+## Pacote de dados obrigatorio
 
-Expected path in project root:
+Para consultas reais, o app precisa de indice LanceDB preconstruido.
+
+Caminho esperado na raiz do projeto/pacote:
 
 ```text
 lancedb_store/
   jurisprudencia.lance/
 ```
 
-Without this folder, `/api/query` cannot return results.
+Sem essa pasta, `/api/query` nao retorna resultados.
+
+---
 
 ## Acervo (snapshot local)
 
-Reference snapshot measured on **2026-02-24** over `lancedb_store/jurisprudencia` (the same table used by `/api/query`).
+Snapshot medido em **2026-02-24** sobre `lancedb_store/jurisprudencia`.
 
-This snapshot is expected to evolve while ingestion jobs are running.
+### Pegada de armazenamento
 
-### Storage footprint
-
-| Component | Size (GB, decimal) | Size (GiB, binary) |
+| Componente | Tamanho (GB) | Tamanho (GiB) |
 |---|---:|---:|
-| `data/` (SQLite and raw local assets) | 14.905 GB | 13.882 GiB |
-| `lancedb_store/` (vector index + table files) | 8.559 GB | 7.971 GiB |
-| **Total local footprint** | **23.464 GB** | **21.853 GiB** |
+| `data/` (SQLite e ativos locais) | 14.905 GB | 13.882 GiB |
+| `lancedb_store/` (indice vetorial + tabelas) | 8.559 GB | 7.971 GiB |
+| **Total local** | **23.464 GB** | **21.853 GiB** |
 
-### Corpus size
+### Tamanho do corpus
 
-- Indexed documents: **471,366**
-- Non-empty `texto_integral`: **471,303**
-- Total `texto_integral` volume: **2,507,247,355 characters**
-- Total `texto_busca` volume: **1,738,788,368 characters**
+- Documentos indexados: **471,366**
+- `texto_integral` nao vazio: **471,303**
+- Volume total `texto_integral`: **2,507,247,355** caracteres
+- Volume total `texto_busca`: **1,738,788,368** caracteres
 
-### Physical-paper conversion (deterministic assumptions)
+### Conversao para paginas fisicas (estimativa)
 
-Assumption A (A4 legal print): **2,500 characters per page**
-- **1,002,899 pages**
-- **3,343 books** (300 pages/book)
+Cenario A (A4 juridico, 2.500 caracteres/pagina):
+- **1,002,899** paginas
+- **3,343** livros (300 paginas/livro)
 
-Assumption B (denser book layout): **2,100 characters per page**
-- **1,193,928 pages**
-- **3,980 books** (300 pages/book)
+Cenario B (layout mais denso, 2.100 caracteres/pagina):
+- **1,193,928** paginas
+- **3,980** livros (300 paginas/livro)
 
-### Distribution by document type (`texto_integral`)
+### Distribuicao por tipo (`texto_integral`)
 
-| Type | Documents | Characters | Pages (2,500 chars/page) | Books (300 pages) |
+| Tipo | Documentos | Caracteres | Paginas (2.500 chars/pag) | Livros (300 pag) |
 |---|---:|---:|---:|---:|
 | `monocratica` | 229,703 | 2,310,119,288 | 924,048 | 3,081 |
 | `acordao` | 223,077 | 180,007,985 | 72,004 | 241 |
@@ -184,37 +259,38 @@ Assumption B (denser book layout): **2,100 characters per page**
 | `sumula_vinculante` | 63 | 0 | 0 | 0 |
 | `acordao_sv` | 45 | 39,683 | 16 | 1 |
 
-`sumula_vinculante` is represented mainly via `texto_busca` in this snapshot, which is why `texto_integral` appears as zero for this type.
+---
 
-## Reranker download (required)
+## Download do reranker (obrigatorio)
 
-Default local reranker:
-
+Reranker local padrao:
 - `BAAI/bge-reranker-v2-m3`
 
-It is downloaded automatically on first query. To pre-download manually:
+Ele pode ser baixado/carregado no primeiro uso. Para preaquecer manualmente:
 
 ```bash
 py -c "from sentence_transformers import CrossEncoder; CrossEncoder('BAAI/bge-reranker-v2-m3')"
 ```
 
-## Run the application
+---
 
-### Windows scripts (recommended)
+## Como executar a aplicacao
 
-Quick control menu:
+### Scripts Windows (recomendado)
+
+Menu de controle:
 
 ```text
 controle_jurisai_web.bat
 ```
 
-Start:
+Iniciar:
 
 ```text
 iniciar_jurisai_web.bat
 ```
 
-Stop:
+Desligar:
 
 ```text
 desligar_jurisai_web.bat
@@ -226,7 +302,7 @@ Status:
 status_jurisai_web.bat
 ```
 
-### Manual mode
+### Modo manual
 
 Backend:
 
@@ -240,7 +316,7 @@ Frontend:
 py -m http.server 5500 --directory frontend
 ```
 
-Open `http://127.0.0.1:5500`.
+Abra `http://127.0.0.1:5500`.
 
 Health check:
 
@@ -248,18 +324,19 @@ Health check:
 curl http://127.0.0.1:8000/health
 ```
 
+---
+
 ## Fluxo amigavel (ZIP -> consulta -> desligar)
 
 1. Baixe o ZIP e extraia a pasta.
-2. Instale dependencias (`py -m pip install -r requirements.txt`).
+2. Instale dependencias (`py -m pip install -r requirements.txt`) se estiver em modo desenvolvimento.
 3. Inicie com `controle_jurisai_web.bat` (opcao 1) ou `iniciar_jurisai_web.bat`.
-4. Na primeira abertura, o modal **Primeiros passos com API Gemini** permite:
-   - colar a chave Gemini;
-   - validar a chave;
-   - salvar automaticamente no `.env`.
-5. Ajuste modelos/pesos no painel de configuracoes e clique em **Salvar ajustes**.
-6. Faça consultas normalmente.
+4. No primeiro acesso, configure a chave Gemini no onboarding.
+5. Ajuste modelos/pesos e clique em **Salvar ajustes**.
+6. Faça as consultas.
 7. Para encerrar, use `controle_jurisai_web.bat` (opcao 2) ou `desligar_jurisai_web.bat`.
+
+---
 
 ## Erros comuns e significado
 
@@ -267,35 +344,73 @@ curl http://127.0.0.1:8000/health
 |---|---|---|
 | `missing_api_key` | Chave Gemini ausente | Configurar chave no modal inicial ou `.env` |
 | `invalid_api_key` | Chave invalida | Gerar nova chave no AI Studio e colar novamente |
-| `api_key_not_active` | API/chave sem permissao ativa no projeto | Ativar Gemini API no projeto Google Cloud vinculado |
-| `quota_exhausted` | Cota gratuita/paga esgotada | Esperar reset da cota ou ajustar billing/limites |
-| `rate_limited` | Excesso de requisicoes por minuto | Reduzir paralelismo/frequencia |
-| `model_unavailable` | Modelo escolhido indisponivel para sua conta | Trocar o modelo nas configuracoes |
-| `upstream_unavailable` | Instabilidade temporaria do servico Gemini | Repetir tentativa em instantes |
+| `api_key_not_active` | API/chave sem permissao ativa | Ativar Gemini API no projeto Google Cloud vinculado |
+| `quota_exhausted` | Cota gratuita/paga esgotada | Aguardar reset da cota ou ajustar billing/limites |
+| `rate_limited` | Excesso de requisicoes por minuto | Reduzir frequencia/paralelismo |
+| `model_unavailable` | Modelo indisponivel para a conta | Trocar modelo nas configuracoes |
+| `upstream_unavailable` | Instabilidade temporaria do provedor | Tentar novamente em instantes |
 
-## Tests
+---
+
+## Observabilidade e logs
+
+Principais arquivos de runtime:
+- `logs/runtime/acervo_backend.log`
+- `logs/runtime/tts_backend.log`
+- `logs/runtime/meu_acervo_manifest.json`
+
+Arquivos de build:
+- `build/Ratio/warn-Ratio.txt`
+- `build/Ratio/xref-Ratio.html`
+
+---
+
+## Testes
+
+Suite completa:
 
 ```bash
 py -m pytest
 ```
 
-## Open source notes
+Suite principal do contrato/API/frontend:
 
-- Do not commit `.env` or API keys.
-- See:
+```bash
+py -m pytest -q tests/test_api_contract.py tests/test_frontend_sidebar_saved.py tests/test_packaging_support.py
+```
+
+---
+
+## Notas de codigo aberto
+
+- Nao versione `.env` ou chaves de API.
+- Consulte tambem:
   - `CONTRIBUTING.md`
   - `CODE_OF_CONDUCT.md`
   - `SECURITY.md`
   - `LICENSE`
 
+---
+
 ## Apoio ao projeto
 
-Se o Ratio for util no seu fluxo de pesquisa, considere apoiar o projeto:
+Se o Ratio for util no seu fluxo de pesquisa, seu apoio ajuda a manter e evoluir a plataforma.
 
-- GitHub Sponsors (configure o seu link): `https://github.com/sponsors/<seu-usuario>`
-- PIX (adicione sua chave/canal oficial no README e na interface)
+- GitHub Sponsors: <https://github.com/sponsors/carlosvictorodrigues>
+- Instagram: `@carlosvictorodrigues`
+- E-mail: `carlosvictorodrigues@gmail.com`
+- PIX (copia e cola):
 
-## Legal disclaimer
+```text
+00020126920014BR.GOV.BCB.PIX013607cdc77f-cd4b-44b8-a910-a254f58642f40230Apoie o Ratio - Jurisprudencia5204000053039865802BR5925Carlos Victor de Oliveira6009SAO PAULO621405102qCvdJp89F6304E670
+```
 
-Ratio is a research assistant. It is not a substitute for formal legal advice.
-Always verify primary sources before making legal decisions.
+O QR Code de apoio tambem esta na interface (modal "Sobre o Ratio", aba "Autor").
+
+---
+
+## Aviso legal
+
+O Ratio e um assistente de pesquisa.
+Nao substitui consultoria juridica formal.
+Sempre valide fontes primarias antes de decidir estrategicamente.
