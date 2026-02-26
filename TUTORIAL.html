@@ -1,0 +1,1743 @@
+<!doctype html>
+<html lang="pt-BR">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Tutorial Ratio - Manual do Usuário</title>
+  <link
+    href="https://fonts.googleapis.com/css2?family=DM+Mono:ital,wght@0,300;0,400;0,500;1,400&family=Instrument+Serif:ital@0;1&display=swap"
+    rel="stylesheet">
+  <style>
+    :root {
+      /* Tutorial Colors */
+      --bg: #f7f5f1;
+      --card: #ffffff;
+      --ink: #1e1a16;
+      --muted: #6c6359;
+      --line: #ddd5ca;
+      --accent: #0f172a;
+      --ok: #166534;
+      --warn: #92400e;
+
+      /* RAG Canvas Semantic Colors adapted for Light Mode */
+      --s1: #ffffff;
+      --s2: #f4efeb;
+      --border: #ddd5ca;
+      --border2: #c5beba;
+      --teal: #059669;
+      --amber: #d97706;
+      --red: #dc2626;
+      --green: #16a34a;
+      --text: #1e1a16;
+      --mid: #4a453f;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      font-family: Georgia, "Times New Roman", serif;
+      color: var(--ink);
+      background: linear-gradient(180deg, #f7f5f1 0%, #f1ece4 100%);
+      line-height: 1.55;
+    }
+
+    .wrap {
+      width: min(1120px, 96vw);
+      margin: 32px auto 64px;
+      display: grid;
+      grid-template-columns: 280px 1fr;
+      gap: 20px;
+    }
+
+    .toc,
+    .content {
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      box-shadow: 0 1px 6px rgba(0, 0, 0, 0.06);
+    }
+
+    .toc {
+      position: sticky;
+      top: 16px;
+      align-self: start;
+      padding: 18px;
+    }
+
+    .toc h1 {
+      margin: 0 0 6px;
+      font-size: 18px;
+      letter-spacing: 0.03em;
+      text-transform: uppercase;
+    }
+
+    .toc p {
+      margin: 0 0 14px;
+      color: var(--muted);
+      font-size: 14px;
+    }
+
+    .toc a {
+      display: block;
+      margin: 7px 0;
+      color: var(--accent);
+      text-decoration: none;
+      font-size: 14px;
+    }
+
+    .toc a:hover {
+      text-decoration: underline;
+    }
+
+    .content {
+      padding: 26px 28px;
+    }
+
+    h2 {
+      margin: 26px 0 10px;
+      font-size: 24px;
+      border-bottom: 1px solid var(--line);
+      padding-bottom: 6px;
+    }
+
+    h3 {
+      margin: 18px 0 8px;
+      font-size: 19px;
+    }
+
+    p {
+      margin: 8px 0;
+    }
+
+    ul,
+    ol {
+      margin: 8px 0 8px 22px;
+
+      li {
+        margin-bottom: 4px;
+      }
+    }
+
+    .note,
+    .ok,
+    .warn {
+      border-left: 4px solid;
+      padding: 10px 12px;
+      border-radius: 8px;
+      margin: 14px 0;
+      background: #fbfaf8;
+    }
+
+    .note {
+      border-color: #334155;
+    }
+
+    .ok {
+      border-color: var(--ok);
+    }
+
+    .warn {
+      border-color: var(--warn);
+    }
+
+    code,
+    pre {
+      font-family: Consolas, "Courier New", monospace;
+      background: #f3efe8;
+      border: 1px solid #e1d8cc;
+      border-radius: 6px;
+    }
+
+    code {
+      padding: 1px 6px;
+      font-size: 90%;
+    }
+
+    pre {
+      padding: 10px 12px;
+      overflow-x: auto;
+      white-space: pre;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 10px 0;
+      font-size: 15px;
+    }
+
+    th,
+    td {
+      border: 1px solid var(--line);
+      padding: 8px 10px;
+      text-align: left;
+      vertical-align: top;
+    }
+
+    th {
+      background: #f4f0e9;
+    }
+
+    @media (max-width: 980px) {
+      .wrap {
+        grid-template-columns: 1fr;
+      }
+
+      .toc {
+        position: static;
+      }
+    }
+
+    /* ─── ENRICHED VISUAL ELEMENTS ─── */
+    .auth-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      gap: 16px;
+      margin: 20px 0;
+    }
+
+    .auth-card {
+      background: #ffffff;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 16px;
+      position: relative;
+      overflow: hidden;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.02);
+      transition: transform 0.2s ease, box-shadow 0.2s;
+    }
+
+    .auth-card:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.06);
+    }
+
+    .auth-level {
+      position: absolute;
+      top: 0;
+      right: 0;
+      background: var(--bg);
+      padding: 4px 12px;
+      font-size: 14px;
+      font-weight: bold;
+      border-bottom-left-radius: 10px;
+      border-left: 1px solid var(--border);
+      border-bottom: 1px solid var(--border);
+    }
+
+    .auth-a {
+      border-left-color: #047857;
+      color: #047857;
+      background: #ecfdf5;
+    }
+
+    .auth-b {
+      border-left-color: #0369a1;
+      color: #0369a1;
+      background: #f0f9ff;
+    }
+
+    .auth-c {
+      border-left-color: #b45309;
+      color: #b45309;
+      background: #fffbeb;
+    }
+
+    .auth-d {
+      border-left-color: #64748b;
+      color: #64748b;
+      background: #f8fafc;
+    }
+
+    .auth-e {
+      border-left-color: #94a3b8;
+      color: #94a3b8;
+      background: #f1f5f9;
+    }
+
+    .auth-card h4 {
+      margin: 0 0 8px 0;
+      font-size: 16px;
+      color: var(--ink);
+      padding-right: 32px;
+    }
+
+    .auth-card p {
+      margin: 0;
+      font-size: 13.5px;
+      color: var(--muted);
+      line-height: 1.4;
+    }
+
+    .param-table {
+      width: 100%;
+      border-collapse: separate;
+      border-spacing: 0;
+      margin: 24px 0;
+      border-radius: 10px;
+      overflow: hidden;
+      border: 1px solid var(--border);
+    }
+
+    .param-table th,
+    .param-table td {
+      padding: 14px 16px;
+      border-bottom: 1px solid var(--border);
+      text-align: left;
+      font-size: 14px;
+      line-height: 1.45;
+    }
+
+    .param-table th {
+      background: #fbfaf8;
+      font-weight: 600;
+      color: var(--ink);
+      text-transform: uppercase;
+      font-size: 12px;
+      letter-spacing: 0.04em;
+    }
+
+    .param-table tr:last-child td {
+      border-bottom: none;
+    }
+
+    .param-name {
+      font-family: 'DM Mono', monospace;
+      font-weight: 500;
+      color: var(--accent);
+      background: #f3efe8;
+      padding: 4px 8px;
+      border-radius: 6px;
+      display: inline-block;
+      margin-bottom: 4px;
+    }
+
+    .param-desc {
+      color: var(--muted);
+      font-size: 13.5px;
+    }
+
+    .param-impact {
+      font-size: 13px;
+      margin-top: 8px;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+
+    .impact-up::before {
+      content: '↑ Se aumentar: ';
+      font-weight: 600;
+      color: #b45309;
+    }
+
+    .impact-down::before {
+      content: '↓ Se diminuir: ';
+      font-weight: 600;
+      color: #047857;
+    }
+
+    .param-group {
+      background: #e2e8f0 !important;
+      color: #334155 !important;
+      font-size: 11px !important;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      padding: 8px 16px !important;
+    }
+
+
+    /* ─── RAG VISUAL COMPONENTS (Integrated) ─── */
+    .app-visualizer {
+      width: 100%;
+      margin: 32px 0;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      font-family: 'DM Mono', monospace;
+    }
+
+    /* ─── QUERY BOX ─── */
+    .query-box {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 16px 20px;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.03);
+    }
+
+    .q-label {
+      font-size: 10px;
+      letter-spacing: .15em;
+      text-transform: uppercase;
+      color: var(--muted);
+      margin-bottom: 8px;
+      font-weight: 500;
+    }
+
+    .q-text {
+      font-family: 'Instrument Serif', serif;
+      font-size: 19px;
+      line-height: 1.5;
+      color: var(--ink);
+    }
+
+    .q-text .tok {
+      display: inline-block;
+      transition: all .25s ease;
+      border-radius: 4px;
+      padding: 0 2px;
+      margin: 0 1px;
+    }
+
+    .q-text .tok.lit {
+      color: #3b82f6;
+      background: rgba(59, 130, 246, 0.1);
+    }
+
+    .q-text .tok.key {
+      color: #047857;
+      background: rgba(16, 185, 129, 0.15);
+      border-bottom: 2px solid #10b981;
+    }
+
+    /* ─── STAGE ─── */
+    .stage {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      overflow: hidden;
+      position: relative;
+      height: 340px;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.03);
+    }
+
+    #bgCanvas {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      pointer-events: none;
+    }
+
+    .scene {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      opacity: 0;
+      transition: opacity .5s ease;
+      pointer-events: none;
+    }
+
+    .scene.on {
+      opacity: 1;
+    }
+
+    /* SCENE — TOKENIZE */
+    #scene-tok {
+      flex-direction: column;
+      gap: 16px;
+      padding: 24px;
+    }
+
+    .tok-grid {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      justify-content: center;
+    }
+
+    .tok-chip {
+      font-size: 12px;
+      padding: 5px 12px;
+      border-radius: 99px;
+      border: 1px solid var(--border2);
+      color: var(--mid);
+      background: var(--s2);
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      opacity: 0;
+      transform: scale(.85) translateY(6px);
+      transition: all .35s ease;
+    }
+
+    .tok-chip.show {
+      opacity: 1;
+      transform: scale(1) translateY(0);
+    }
+
+    .tok-chip.key-tok {
+      border-color: rgba(16, 185, 129, 0.4);
+      color: #047857;
+      background: rgba(16, 185, 129, 0.1);
+    }
+
+    .tok-idx {
+      font-size: 9px;
+      color: var(--muted);
+      min-width: 14px;
+    }
+
+    .tok-info {
+      font-size: 11px;
+      color: var(--muted);
+      text-align: center;
+    }
+
+    /* SCENE — EMBED */
+    #scene-embed {
+      flex-direction: column;
+      gap: 20px;
+      padding: 20px 28px;
+    }
+
+    .embed-title {
+      font-size: 10px;
+      letter-spacing: .15em;
+      text-transform: uppercase;
+      color: var(--muted);
+      text-align: center;
+      font-weight: 500;
+    }
+
+    .embed-items {
+      display: flex;
+      gap: 10px;
+      justify-content: center;
+      align-items: flex-end;
+    }
+
+    .embed-item {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 6px;
+      opacity: 0;
+      transform: translateY(12px);
+      transition: all .4s ease;
+    }
+
+    .embed-item.show {
+      opacity: 1;
+      transform: translateY(0);
+    }
+
+    .embed-word {
+      font-size: 11px;
+      color: var(--ink);
+      white-space: nowrap;
+      font-weight: 500;
+    }
+
+    .embed-bars {
+      display: flex;
+      gap: 2px;
+      align-items: flex-end;
+      height: 60px;
+    }
+
+    .embed-bar {
+      width: 6px;
+      border-radius: 2px 2px 0 0;
+      transition: height .6s ease;
+    }
+
+    .embed-arrow {
+      font-size: 18px;
+      color: var(--muted);
+      align-self: flex-end;
+      margin-bottom: 8px;
+    }
+
+    .embed-result {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      opacity: 0;
+      transform: translateY(10px);
+      transition: all .5s ease;
+      align-items: center;
+    }
+
+    .embed-result.show {
+      opacity: 1;
+      transform: translateY(0);
+    }
+
+    .embed-result-label {
+      font-size: 10px;
+      color: var(--muted);
+      letter-spacing: .12em;
+      text-transform: uppercase;
+    }
+
+    .embed-heatmap {
+      display: flex;
+      gap: 2px;
+    }
+
+    .hm-cell {
+      width: 10px;
+      height: 18px;
+      border-radius: 2px;
+    }
+
+    /* SCENE — SEARCH */
+    #scene-search {
+      padding: 0;
+      display: block;
+    }
+
+    /* SCENE — CHUNKS */
+    #scene-chunks {
+      flex-direction: column;
+      gap: 0;
+      padding: 12px 16px;
+      justify-content: flex-start;
+      overflow: hidden;
+    }
+
+    .chunk-card {
+      background: var(--s2);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 9px 12px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 6px;
+      width: 100%;
+      opacity: 0;
+      transform: translateX(-16px);
+      transition: all .4s ease;
+    }
+
+    .chunk-card.show {
+      opacity: 1;
+      transform: translateX(0);
+    }
+
+    .chunk-card.top {
+      border-color: rgba(15, 23, 42, 0.45);
+      background: rgba(15, 23, 42, 0.05);
+    }
+
+    .chunk-rank {
+      font-size: 10px;
+      color: var(--muted);
+      min-width: 20px;
+      text-align: center;
+      font-weight: 500;
+    }
+
+    .chunk-body {
+      flex: 1;
+    }
+
+    .chunk-src {
+      font-size: 10px;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+      color: var(--accent);
+      margin-bottom: 3px;
+      font-weight: bold;
+    }
+
+    .chunk-text {
+      font-size: 11px;
+      color: var(--mid);
+      line-height: 1.5;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      max-width: 400px;
+    }
+
+    .chunk-right {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-end;
+      gap: 4px;
+    }
+
+    .chunk-score {
+      font-size: 13px;
+      font-weight: bold;
+      color: var(--green);
+    }
+
+    .score-track {
+      width: 40px;
+      height: 4px;
+      background: var(--border2);
+      border-radius: 99px;
+      overflow: hidden;
+    }
+
+    .score-fill {
+      height: 100%;
+      border-radius: 99px;
+      width: 0%;
+      transition: width .8s cubic-bezier(.25, .46, .45, .94);
+    }
+
+    /* SCENE — GENERATE */
+    #scene-gen {
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 12px;
+      padding: 24px;
+    }
+
+    .gen-sources {
+      display: flex;
+      gap: 6px;
+      flex-wrap: wrap;
+    }
+
+    .gen-pill {
+      font-size: 10px;
+      padding: 4px 12px;
+      border-radius: 99px;
+      border: 1px solid rgba(15, 23, 42, 0.3);
+      background: rgba(15, 23, 42, 0.05);
+      color: var(--accent);
+      font-weight: 500;
+      opacity: 0;
+      transform: scale(.9);
+      transition: all .3s ease;
+    }
+
+    .gen-pill.show {
+      opacity: 1;
+      transform: scale(1);
+    }
+
+    .gen-label {
+      font-size: 10px;
+      letter-spacing: .12em;
+      text-transform: uppercase;
+      color: var(--muted);
+      font-weight: bold;
+    }
+
+    .gen-box {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 16px;
+      font-family: 'Instrument Serif', serif;
+      font-size: 16px;
+      color: var(--ink);
+      line-height: 1.6;
+      width: 100%;
+      min-height: 120px;
+    }
+
+    .cursor-blink {
+      display: inline-block;
+      width: 2px;
+      height: 16px;
+      background: var(--accent);
+      margin-left: 2px;
+      vertical-align: middle;
+      animation: cblink .75s step-end infinite;
+    }
+
+    @keyframes cblink {
+
+      0%,
+      100% {
+        opacity: 1;
+      }
+
+      50% {
+        opacity: 0;
+      }
+    }
+
+    /* SCENE — ANSWER */
+    #scene-ans {
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 14px;
+      padding: 28px;
+    }
+
+    .ans-header {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      width: 100%;
+    }
+
+    .ans-badge {
+      font-size: 10px;
+      letter-spacing: .12em;
+      text-transform: uppercase;
+      font-weight: bold;
+      padding: 5px 14px;
+      border-radius: 99px;
+      border: 1px solid rgba(22, 163, 74, .4);
+      background: rgba(22, 163, 74, .1);
+      color: var(--ok);
+    }
+
+    .ans-pills {
+      display: flex;
+      gap: 6px;
+      margin-left: auto;
+    }
+
+    .ans-pill {
+      font-size: 10px;
+      padding: 3px 10px;
+      border-radius: 99px;
+      background: var(--s2);
+      border: 1px solid var(--border2);
+      color: var(--muted);
+      font-weight: 500;
+    }
+
+    .ans-text {
+      font-family: 'Instrument Serif', serif;
+      font-size: 18px;
+      line-height: 1.65;
+      color: var(--ink);
+    }
+
+    .ans-text b {
+      color: var(--accent);
+      font-weight: bold;
+    }
+
+    .ans-text em {
+      font-style: italic;
+      color: #047857;
+    }
+
+    /* ─── TRACKER ─── */
+    .tracker {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 14px 20px;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.03);
+    }
+
+    .t-steps {
+      display: flex;
+      align-items: center;
+    }
+
+    .t-step {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 6px;
+      flex: 1;
+      position: relative;
+    }
+
+    .t-step+.t-step::before {
+      content: '';
+      position: absolute;
+      right: 50%;
+      left: -50%;
+      top: 10px;
+      height: 2px;
+      background: var(--border2);
+      transition: background .4s;
+      z-index: 0;
+    }
+
+    .t-step.done+.t-step::before {
+      background: var(--green);
+    }
+
+    .t-step.active+.t-step::before {
+      background: linear-gradient(90deg, var(--green), var(--border2));
+    }
+
+    .t-dot {
+      width: 22px;
+      height: 22px;
+      border-radius: 50%;
+      background: var(--s2);
+      border: 1px solid var(--border2);
+      font-size: 10px;
+      font-weight: bold;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--muted);
+      z-index: 1;
+      transition: all .3s;
+    }
+
+    .t-step.active .t-dot {
+      background: var(--accent);
+      border-color: var(--accent);
+      color: white;
+      box-shadow: 0 0 0 4px rgba(15, 23, 42, 0.15);
+      animation: dot-pulse 1.4s ease-in-out infinite;
+    }
+
+    .t-step.done .t-dot {
+      background: var(--green);
+      border-color: var(--green);
+      color: white;
+    }
+
+    @keyframes dot-pulse {
+
+      0%,
+      100% {
+        box-shadow: 0 0 0 3px rgba(15, 23, 42, 0.15);
+      }
+
+      50% {
+        box-shadow: 0 0 0 7px rgba(15, 23, 42, 0.05);
+      }
+    }
+
+    .t-label {
+      font-size: 9px;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+      color: var(--muted);
+      transition: color .3s;
+      font-weight: 600;
+    }
+
+    .t-step.active .t-label {
+      color: var(--accent);
+    }
+
+    .t-step.done .t-label {
+      color: var(--green);
+    }
+
+    .t-meta {
+      margin-top: 14px;
+      display: flex;
+      justify-content: space-between;
+      font-size: 11px;
+      color: var(--muted);
+      font-family: 'DM Mono', monospace;
+    }
+  </style>
+</head>
+
+<body>
+  <div class="wrap">
+    <aside class="toc">
+      <h1>Tutorial Ratio</h1>
+      <p>Manual completo para uso da plataforma e fluxo de inteligência artificial.</p>
+      <a href="#sec1">1. Visão Geral</a>
+      <a href="#sec2">2. O Banco de Dados</a>
+      <a href="#sec3">3. Como funciona a IA (O Fluxo RAG)</a>
+      <a href="#sec4">4. Ferramentas Inteligentes de Leitura</a>
+      <a href="#sec5">5. O Dossiê Documental e Filtros</a>
+      <a href="#sec6">6. Configurações, Reranker e Custos</a>
+      <a href="#sec7">7. Iniciar, Usar e Desligar</a>
+      <a href="#sec8">8. Dúvidas Comuns</a>
+    </aside>
+
+    <main class="content">
+      <h2 id="sec1">1. Visão Geral</h2>
+      <p>O <strong>Ratio</strong> é uma plataforma avançada de pesquisa jurisprudencial construída com Inteligência
+        Artificial. Diferente de chats comuns (como o ChatGPT), o Ratio não "tenta adivinhar" respostas jurídicas
+        puxando dados da internet livre. Ao invés disso, ele lê exclusivamente a nossa própria base de dados de
+        Jurisprudência e formula a resposta baseando-se apenas naquilo que efetivamente está nela registrado.</p>
+
+      <div class="ok">
+        <strong>Foco:</strong> Eliminar o risco de <em>"alucinações da IA"</em> ao restringir os documentos em que a IA
+        se baseia a um banco de dados rigoroso, local e de extrema qualidade.
+      </div>
+
+      <h2 id="sec2">2. O Banco de Dados <em>(Acervo Jurisprudencial)</em></h2>
+      <p>O cérebro do Ratio é alimentado por uma base jurisprudencial offline contendo mais de <strong>1.1 milhão de
+          documentos analisados</strong> e processados em um banco vetorial inteligente:</p>
+      <ul>
+        <li><strong>+ 223.000</strong> Acórdãos do STF</li>
+        <li><strong>+ 712.000</strong> Decisões Monocráticas do STF</li>
+        <li><strong>+ 16.000</strong> Informativos do STF e STJ</li>
+        <li><strong>Súmulas Integradas</strong> do STF</li>
+      </ul>
+      <p>Todo o acervo é pré-processado pela plataforma, convertendo textos e conceitos em <strong>vetores
+          matemáticos</strong>. Isso significa que, ao pesquisar, o Ratio sabe que "imposto sobre propriedade" tem
+        ligação semântica profunda com "IPTU", mesmo que a palavra exata não tenha sido digitada.</p>
+
+      <h2 id="sec3">3. Como funciona a IA (O Fluxo RAG)</h2>
+      <p>A tecnologia por trás do Ratio chama-se <strong>RAG</strong> <em>(Retrieval-Augmented Generation / Geração
+          Aumentada por Recuperação)</em>.</p>
+      <p>Na prática, sempre que você faz uma pergunta, a plataforma não tenta escrever a resposta de cabeça. Ela segue
+        regras rígidas:</p>
+      <ol>
+        <li>Traduz sua pergunta para tokens matemáticos (Embeddings);</li>
+        <li>Varre nossa base de 1.1M+ de documentos em microssegundos (Busca Vetorial Mista);</li>
+        <li>Reordena os documentos mais aderentes ao seu tema específico (Rerank);</li>
+        <li>Só então, ela entrega <strong>apenas</strong> esses fragmentos comprovados para a IA escrever a tese final.
+        </li>
+      </ol>
+      <div class="note">
+        <strong>A Regra de Ouro:</strong> O modelo opera sob o comando estrito de <em>"Não invente. Diga que não
+          encontrou se a resposta não constar nos documentos resgatados."</em>
+      </div>
+
+      <p>Abaixo, você pode observar o que acontece nos bastidores quando enviamos uma pergunta à pesquisa:</p>
+
+      <!-- RAG VISUALIZER INTEGRATION -->
+      <div class="app-visualizer">
+        <div class="query-box">
+          <div class="q-label">// Exemplo de trâmite de consulta</div>
+          <div class="q-text" id="qText"></div>
+        </div>
+
+        <div class="stage">
+          <canvas id="bgCanvas"></canvas>
+
+          <div class="scene" id="scene-tok">
+            <div class="tok-grid" id="tokGrid"></div>
+            <div class="tok-info" id="tokInfo"></div>
+          </div>
+
+          <div class="scene" id="scene-embed">
+            <div class="embed-title" id="embedTitle">Vetorizando conceitos da pergunta</div>
+            <div class="embed-items" id="embedItems"></div>
+            <div class="embed-result" id="embedResult">
+              <div class="embed-result-label">Assinatura semântica da busca</div>
+              <div class="embed-heatmap" id="embedHm"></div>
+            </div>
+          </div>
+
+          <canvas class="scene" id="scene-search" style="display:block;width:100%;height:100%;"></canvas>
+
+          <div class="scene" id="scene-chunks">
+            <div class="chunk-card" id="c0"></div>
+            <div class="chunk-card" id="c1"></div>
+            <div class="chunk-card" id="c2"></div>
+            <div class="chunk-card" id="c3"></div>
+            <div class="chunk-card" id="c4"></div>
+          </div>
+
+          <div class="scene" id="scene-gen">
+            <div class="gen-sources" id="genSrcs"></div>
+            <div class="gen-label">Avaliando dados e gerando tese</div>
+            <div class="gen-box" id="genBox"></div>
+          </div>
+
+          <div class="scene" id="scene-ans">
+            <div class="ans-header">
+              <div class="ans-badge">✓ Resposta Fundamentada</div>
+              <div class="ans-pills">
+                <div class="ans-pill">RE 573202</div>
+                <div class="ans-pill">STF / STJ</div>
+              </div>
+            </div>
+            <div class="ans-text">
+              A jurisprudência dominante do <b>STF</b> (RE 573202) firmou que contratos temporários com a
+              <b>Administração Pública</b> são regidos pelo <em>regime jurídico-administrativo</em>, sendo competente a
+              <b>Justiça Comum Estadual</b> — e não a Justiça do Trabalho — para dirimir os litígios decorrentes dessas
+              relações.
+            </div>
+          </div>
+        </div>
+
+        <div class="tracker">
+          <div class="t-steps" id="tSteps"></div>
+          <div class="t-meta">
+            <span id="tStatus">aguardando…</span>
+            <span id="tTime">0.0s</span>
+          </div>
+        </div>
+      </div>
+      <!-- END RAG VISUALIZER INTEGRATION -->
+
+      <h2 id="sec4">4. Ferramentas Inteligentes de Leitura</h2>
+      <p>O Ratio foi pensado para maximizar a sua produtividade enquanto pesquisa casos complexos. Para isso, ele conta
+        com ferramentas focadas em leitura ativa e acessibilidade:</p>
+      <ul>
+        <li><strong>Ouvir (Áudio Inteligente):</strong> A plataforma converte a resposta para áudio (Text-to-Speech) de
+          alta qualidade. De maneira inteligente, ela corrige a pronúncia e traduz siglas jurídicas (ex.: lê "REsp" como
+          "recurso especial" ou "HC" como "habeas corpus"), permitindo que você ouça a tese enquanto estuda ou digita os
+          detalhes de um documento processual paralelo.</li>
+        <li><strong>Explicar:</strong> Muitas vezes, uma tese exige um aprofundamento mais descritivo. O botão
+          "Explicar" gera um detalhamento didático de como o Ratio chegou àquela resposta, destrinchando os motivos.
+        </li>
+        <li><strong>Histórico e Consultas Salvas:</strong> Na barra lateral, você pode acessar todo o histórico de suas
+          pesquisas da sessão em andamento ou favoritar as consultas para leitura posterior.</li>
+      </ul>
+
+      <h2 id="sec5">5. O Dossiê Documental, Força Normativa e Filtros</h2>
+      <p>Para cada resposta fornecida, o Ratio não impõe mera confiança-cega. Ele entrega um <strong>Dossiê
+          Documental</strong>, onde você pode conferir de onde a Inteligência colheu exatamente as decisões na sua
+        própria tela.</p>
+
+      <h3>Níveis de Força Normativa (A a E)</h3>
+      <p>A pesquisa respeita os pesos jurídicos dos documentos para nortear a IA. No dossiê, você encontrará esse
+        indicador com a seguinte hierarquia visual e semântica de força:</p>
+
+      <div class="auth-grid">
+        <div class="auth-card">
+          <div class="auth-level auth-a">NÍVEL A</div>
+          <h4>Vinculante Forte</h4>
+          <p>O topo da cadeia hierárquica normativa. Composto pelas <strong>Súmulas Vinculantes</strong> e acórdãos com
+            teses firmadas em sede de <strong>Controle Concentrado</strong> de Constitucionalidade (STF).</p>
+        </div>
+        <div class="auth-card">
+          <div class="auth-level auth-b">NÍVEL B</div>
+          <h4>Precedente Qualificado</h4>
+          <p>Decisões que afetam múltiplos processos (Art. 927 do CPC). Contém os temas de <strong>Repercussão
+              Geral</strong> do STF, <strong>Recursos Repetitivos</strong> (Ritos STJ), IAC e IRDR.</p>
+        </div>
+        <div class="auth-card">
+          <div class="auth-level auth-c">NÍVEL C</div>
+          <h4>Observância Qualificada</h4>
+          <p>Possui peso indutivo muito forte. Reúne todo o corpo das antigas <strong>Súmulas (não vinculantes)</strong>
+            sedimentadas pela jurisprudência tanto do STF quanto do STJ.</p>
+        </div>
+        <div class="auth-card">
+          <div class="auth-level auth-d">NÍVEL D</div>
+          <h4>Não Vinculante / Orientativo</h4>
+          <p>A imensa massa da jurisprudência do dia a dia. Refere-se a <strong>Acórdãos comuns</strong> e
+            <strong>Decisões Monocráticas</strong>. Possui alto peso lexical para fundamentações factuais específicas.
+          </p>
+        </div>
+        <div class="auth-card" style="grid-column: 1 / -1; max-width: 50%;">
+          <div class="auth-level auth-e">NÍVEL E</div>
+          <h4>Material Editorial</h4>
+          <p>Resumos e publicações de caráter consultivo. Engloba os textos descritivos publicados nos cadernos de
+            <strong>Informativos de Jurisprudência</strong> (STF e STJ).
+          </p>
+        </div>
+      </div>
+
+      <div class="note">
+        <strong>Filtros Focados:</strong> Na aba de configurações da barra esquerda, você pode ligar e desligar
+        <strong>Tribunais</strong> (STF, STJ) ou <strong>Tipos de Documento</strong> (Acórdãos, Súmulas, Monocráticas).
+        Com o switch desativado, o motor RAG exclui sumariamente tais documentos da consulta.
+      </div>
+
+      <h2 id="sec6">6. Dicionário Visual de Parâmetros e Custos</h2>
+      <p>Na aba de engrenagem, o sistema permite tunar todas as 22 métricas do motor para extrair teses precisas. Eis o
+        que significa cada controle:</p>
+
+      <table class="param-table">
+        <tbody>
+          <tr>
+            <td colspan="2" class="param-group">Busca e Ranking</td>
+          </tr>
+          <tr>
+            <td style="width: 35%;">
+              <div class="param-name">Candidatos (Top-K)</div>
+            </td>
+            <td>
+              <div class="param-desc">Quantos milhares de documentos o banco separa no 1º corte híbrido.</div>
+              <div class="param-impact impact-up">Lê mais ampla jurisprudência. Aumenta custo computacional e latência.
+              </div>
+              <div class="param-impact impact-down">Veloz e certeiro, útil para Súmulas exatas, mas perigoso com teses
+                obscuras.</div>
+            </td>
+          </tr>
+          <tr>
+            <td>
+              <div class="param-name">Documentos Finais (Top-K)</div>
+            </td>
+            <td>
+              <div class="param-desc">Quantos documentos sobrevivem ao Rerefino (Reranker) e vão para leitura visual.
+              </div>
+              <div class="param-impact impact-up">Inclui diversidade maior de fontes na resposta final.</div>
+              <div class="param-impact impact-down">Resposta mais focada, sem ruídos e contradições.</div>
+            </td>
+          </tr>
+          <tr>
+            <td>
+              <div class="param-name">Modelo Rerank Gemini</div>
+            </td>
+            <td>
+              <div class="param-desc">Qual versão do examinador-juiz do Google analisar o Rerank (se ativado).</div>
+              <div class="param-impact impact-up">Modelos pesados (<code>pro</code>) elevam a nota de acurácia em casos
+                dificílimos, com gasto brutal de token.</div>
+            </td>
+          </tr>
+
+          <tr>
+            <td colspan="2" class="param-group">Pesos de Relevância</td>
+          </tr>
+          <tr>
+            <td>
+              <div class="param-name">Peso Semântico</div>
+              <div class="param-name">Peso Lexical</div>
+            </td>
+            <td>
+              <div class="param-desc">O Semântico foca na "ideia" (mesmo com palavras diferentes). O Lexical caça letras
+                rígidas (Ex: "Art. 157").</div>
+              <div class="param-impact impact-up">Aumentar Lexical foca em precisão alfanumérica; aumentar Semântico
+                alarga a compreensão.</div>
+            </td>
+          </tr>
+          <tr>
+            <td>
+              <div class="param-name">Peso de Recência</div>
+            </td>
+            <td>
+              <div class="param-desc">Controla o quão agressivo é o bônus para julgados mais recentes no tempo.</div>
+              <div class="param-impact impact-up">Favorece sistematicamente jurisprudência da última década.</div>
+              <div class="param-impact impact-down">Nivela acórdãos antigos de mesmo peso como iguais aos recentes.
+              </div>
+            </td>
+          </tr>
+          <tr>
+            <td>
+              <div class="param-name">Peso Hierarquia Fonte</div>
+            </td>
+            <td>
+              <div class="param-desc">Bônus que premia se o documento é uma Súmula ou Precedente Qualificado no placar
+                geral.</div>
+              <div class="param-impact impact-up">Esmaga decisões monocráticas soltas e privilegia Plenário.</div>
+            </td>
+          </tr>
+          <tr>
+            <td>
+              <div class="param-name">Bônus Tese Material</div>
+              <div class="param-name">Pena Processual</div>
+            </td>
+            <td>
+              <div class="param-desc">Tese: Recompensa acordãos que ditam a norma. Processual: Foge de acórdãos cujo
+                texto verse só sobre "súmula 279" (falta de conhecimento do recurso).</div>
+              <div class="param-impact impact-up">Garante que a resposta não se apoie em óbices defensivos
+                jurisdicionais.</div>
+            </td>
+          </tr>
+
+          <tr>
+            <td colspan="2" class="param-group">Fontes A-E (Sintonia Fina)</td>
+          </tr>
+          <tr>
+            <td>
+              <div class="param-name">Bônus Nível A a E</div>
+            </td>
+            <td>
+              <div class="param-desc">Deslizadores absolutos para micro-gerenciar se você quer amar ou odiar um Nível
+                (do Vinculante ao Editorial).</div>
+              <div class="param-impact impact-up">Colocando Nível E no limite, a IA vai preferir pautar suas respostas
+                usando resumos de Informativos em vez de peças rústicas.</div>
+            </td>
+          </tr>
+
+          <tr>
+            <td colspan="2" class="param-group">Contexto da Resposta</td>
+          </tr>
+          <tr>
+            <td>
+              <div class="param-name">Passagens / Chunk</div>
+            </td>
+            <td>
+              <div class="param-desc">Quantos fragmentos (fatias) o Reranker extrai de dentro do mesmíssimo PDF oficial
+                da corte.</div>
+              <div class="param-impact impact-up">Fornece a ementa, relatório e voto simultâneos. Resposta riquíssima.
+              </div>
+            </td>
+          </tr>
+          <tr>
+            <td>
+              <div class="param-name">Max Passagem Chars</div>
+              <div class="param-name">Max Doc Chars</div>
+            </td>
+            <td>
+              <div class="param-desc">Tamanho do texto bruto liberado para uso. Ex: Cortar em 2500 letras por documento.
+              </div>
+              <div class="param-impact impact-down">Mantém a interface leve e garante respostas extremamente diretas e
+                engessadas.</div>
+            </td>
+          </tr>
+
+          <tr>
+            <td colspan="2" class="param-group">Modelo de Resposta (IA)</td>
+          </tr>
+          <tr>
+            <td>
+              <div class="param-name">Tokens de Resposta</div>
+              <div class="param-name">Orçamento Raciocínio</div>
+            </td>
+            <td>
+              <div class="param-desc">Tokens Máximos dita até onde a redação vai; Thinking Budget dita o quão demorado é
+                o pensamento reflexivo da IA antes de escrever 1 linha.</div>
+              <div class="param-impact impact-up">Aumentar os Tokens pra 2.500+ previne respostas decepadas na metade
+                argumentativa.</div>
+            </td>
+          </tr>
+          <tr>
+            <td>
+              <div class="param-name">Temperatura</div>
+            </td>
+            <td>
+              <div class="param-desc">Criatividade legal.</div>
+              <div class="param-impact impact-up">Texto mais fluido e diverso. (Mantenha próximo do Zero em teses
+                rígidas para máxima conformidade).</div>
+            </td>
+          </tr>
+          <tr>
+            <td>
+              <div class="param-name">Fallback Model</div>
+            </td>
+            <td>
+              <div class="param-desc">Plano "B". O modelo que assume automaticamente quando o modelo Primário sofre
+                apagão ou cai por limite da cota do Google.</div>
+            </td>
+          </tr>
+
+          <tr>
+            <td colspan="2" class="param-group">Validação</td>
+          </tr>
+          <tr>
+            <td>
+              <div class="param-name">Limiar de Citação</div>
+            </td>
+            <td>
+              <div class="param-desc">Quantas letras de texto um parágrafo da IA pode ter antes do Verificador
+                Processual (Validator) ser ativado para caçar "falta de citação".</div>
+              <div class="param-impact impact-down">Torna a IA paranóica, colocando (RE 123 - STF) atrás de cada frase
+                mínima digitada.</div>
+            </td>
+          </tr>
+          <tr>
+            <td>
+              <div class="param-name">Deduplicar Processos</div>
+            </td>
+            <td>
+              <div class="param-desc">Toggle para impedir que 4 fragmentos do mesmíssimo RE dominem os Top 4.</div>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+
+      <h3>Dois Motores e os Custos de API</h3>
+      <p>O motor RAG usa a API Gemini. Existem dois modelos de Rerunker (organizador final de prioridade de documento)
+        configuráveis abaixo do funil:</p>
+
+      <ul>
+        <li><strong>Reranker Local (Recomendado):</strong>
+          Puxa os documentos localmente na CPU/GPU do seu PC.
+          Rápido e 100% gratuito – poupa a cota da nuvem, sendo imune a restrições diárias "Quota Exhausted".
+        </li>
+        <li><strong>Reranker Gemini (Alto Custo):</strong>
+          Usa as redes neurais da nuvem (LLM-as-a-Judge). O modelo decide e reordena as peças. Primoroso, porém gasta
+          velozmente os tokens gratuitos diários do AI Studio.
+        </li>
+      </ul>
+
+      <div class="warn">
+        <strong>Gestão de Custos:</strong> Modelos base de texto <code>gemini-2.5-flash</code> embutem cota enorme; use
+        para tarefas amplas e corriqueiras. Já a variante densa <code>gemini-pro</code> tem limite estrito diário e
+        serve só para teorias muito abstratas ou singulares que exigem inteligência máxima.
+      </div>
+
+      <h2 id="sec7">7. Iniciar, Usar e Desligar</h2>
+      <p>Para interagir com o Ratio, utilizamos o painel de controle principal. Não feche a janela do console interativo
+        preta.</p>
+      <ul>
+        <li>Para <strong>Abrir</strong> a plataforma, clique em <code>controle_jurisai_web.bat</code> (e selecione a
+          opção Iniciar).</li>
+        <li>A plataforma subirá através do endereço local como <code>http://127.0.0.1:5500</code>.</li>
+        <li>Para <strong>Desligar</strong>, volte ao painel <code>.bat</code> e ordene ou selecione a opção Desligar os
+          terminais.</li>
+      </ul>
+
+      <h2 id="sec8">8. Dúvidas Comuns (Solução de Problemas)</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>Situação</th>
+            <th>Causa Provável</th>
+            <th>Como Resolver</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Acesso Negado (Chave API)</td>
+            <td>Seu token Gemini venceu ou possui um erro.</td>
+            <td>Abra as configurações da plataforma e cole uma nova chave da API válida (Google AI Studio).</td>
+          </tr>
+          <tr>
+            <td>Resposta Curta ou "Superficial"</td>
+            <td>A IA leu poucos trechos.</td>
+            <td>Aumente a densidade do contexto aumentando "Tokens Máximos" e "Passagens por Fonte".</td>
+          </tr>
+          <tr>
+            <td>Tela "Carregando..." Infinita</td>
+            <td>O cérebro do python travou ou sua rede parou.</td>
+            <td>Desligue através do arquivo de lote <code>.bat</code> e retome os serviços.</td>
+          </tr>
+        </tbody>
+      </table>
+
+    </main>
+  </div>
+
+  <script>
+    // ═══════════════════════════════════════════════
+    //  DATA FOR RAG VISUALIZATION
+    // ═══════════════════════════════════════════════
+    const QUERY_TOKENS = [
+      { text: 'O', key: false }, { text: 'que', key: false }, { text: 'diz', key: false },
+      { text: 'a', key: false }, { text: 'jurisprudência', key: true }, { text: 'dominante', key: false },
+      { text: 'sobre', key: false }, { text: 'competência', key: true }, { text: 'da', key: false },
+      { text: 'administração', key: true }, { text: 'pública', key: true },
+    ];
+    const KEY_WORDS = ['jurisprudência', 'competência', 'administração', 'pública'];
+    const CHUNKS_DATA = [
+      { src: 'RE 573202 — STF', text: 'contratos temporários com a Administração regidos pelo regime jurídico-administrativo…', score: 0.94, color: '#16a34a' },
+      { src: 'Súmula 137 — STJ', text: 'compete à Justiça Comum Estadual processar e julgar ação de servidor público…', score: 0.87, color: '#16a34a' },
+      { src: 'RR-1000234 — TST', text: 'vínculo de emprego público afasta competência da Justiça do Trabalho nos casos…', score: 0.71, color: '#d97706' },
+      { src: 'AgRg RE 589998 — STF', text: 'natureza jurídico-administrativa do vínculo determinante para fixar o foro…', score: 0.58, color: '#d97706' },
+      { src: 'REsp 1.203.802 — STJ', text: 'Administração Pública direta, indireta — competência da Justiça Comum prevalece…', score: 0.41, color: '#dc2626' },
+    ];
+    const GEN_TEXT = 'A jurisprudência dominante do STF (RE 573202) firmou que contratos temporários com a Administração Pública são regidos pelo regime jurídico-administrativo, sendo competente a Justiça Comum Estadual — e não a Justiça do Trabalho — para dirimir os litígios decorrentes dessas relações.';
+
+    const STEPS = [
+      { id: 'tok', label: 'Tokens' },
+      { id: 'embed', label: 'Embed' },
+      { id: 'search', label: 'Busca' },
+      { id: 'chunks', label: 'Relevância' },
+      { id: 'rerank', label: 'Rerank' },
+      { id: 'gen', label: 'Geração' },
+    ];
+
+    const TIMELINE = [
+      { id: 'tok', si: 0, t0: 0, t1: 4000 },
+      { id: 'embed', si: 1, t0: 4000, t1: 8500 },
+      { id: 'search', si: 2, t0: 8500, t1: 13500 },
+      { id: 'chunks', si: 3, t0: 13500, t1: 16500 },
+      { id: 'rerank', si: 4, t0: 16500, t1: 19000 },
+      { id: 'gen', si: 5, t0: 19000, t1: 23500 },
+      { id: 'ans', si: -1, t0: 23500, t1: 28000 },
+    ];
+    const TOTAL_MS = 28000;
+
+    // ═══════════════════════════════════════════════
+    //  STATE
+    // ═══════════════════════════════════════════════
+    let rafId, startTs, lastScene, lastCycle = -1;
+    let inited = {};
+    let searchCtx, searchPts, searchQP;
+    let bgCtx, bgPts;
+    let genTypTimeout;
+
+    // ═══════════════════════════════════════════════
+    //  DOM BUILD
+    // ═══════════════════════════════════════════════
+    const qTextEl = document.getElementById('qText');
+    QUERY_TOKENS.forEach(t => {
+      const s = document.createElement('span'); s.className = 'tok';
+      s.textContent = t.text + ' '; s.dataset.word = t.text; s.dataset.key = t.key ? '1' : '0';
+      qTextEl.appendChild(s);
+    });
+
+    const tokGridEl = document.getElementById('tokGrid');
+    QUERY_TOKENS.forEach((t, i) => {
+      const d = document.createElement('div');
+      d.className = 'tok-chip' + (t.key ? ' key-tok' : ''); d.id = `chip-${i}`;
+      d.innerHTML = `<span class="tok-idx">[${i}]</span>${t.text}`; tokGridEl.appendChild(d);
+    });
+
+    const embedItemsEl = document.getElementById('embedItems');
+    KEY_WORDS.forEach((w, wi) => {
+      const div = document.createElement('div'); div.className = 'embed-item'; div.id = `ei-${wi}`;
+      const label = document.createElement('div'); label.className = 'embed-word'; label.textContent = w;
+      const bars = document.createElement('div'); bars.className = 'embed-bars';
+      for (let i = 0; i < 12; i++) {
+        const b = document.createElement('div'); b.className = 'embed-bar';
+        b.style.height = '0px'; b.style.background = heatColorLight(Math.random());
+        b.dataset.h = Math.random() * 50 + 10; bars.appendChild(b);
+      }
+      div.appendChild(label); div.appendChild(bars);
+      embedItemsEl.appendChild(div);
+      if (wi !== KEY_WORDS.length - 1) {
+        const arr = document.createElement('div'); arr.className = 'embed-arrow'; arr.textContent = '+';
+        embedItemsEl.appendChild(arr);
+      }
+    });
+
+    const hmEl = document.getElementById('embedHm');
+    for (let i = 0; i < 48; i++) {
+      const c = document.createElement('div'); c.className = 'hm-cell'; c.style.background = heatColorLight(Math.random()); hmEl.appendChild(c);
+    }
+
+    CHUNKS_DATA.forEach((c, i) => {
+      const el = document.getElementById(`c${i}`);
+      if (!el) return;
+      el.innerHTML = `
+        <div class="chunk-rank">#${i + 1}</div>
+        <div class="chunk-body"><div class="chunk-src">${c.src}</div><div class="chunk-text">${c.text}</div></div>
+        <div class="chunk-right">
+          <div class="chunk-score" style="color:${c.color}">${c.score.toFixed(2)}</div>
+          <div class="score-track"><div class="score-fill" style="background:${c.color}"></div></div>
+        </div>
+      `;
+    });
+
+    const genSrcsEl = document.getElementById('genSrcs');
+    ['Chunk #1 — RE 573202', 'Chunk #2 — Súmula 137', 'Chunk #3 — RR-1000234'].forEach(s => {
+      const d = document.createElement('div'); d.className = 'gen-pill'; d.textContent = s; genSrcsEl.appendChild(d);
+    });
+
+    const tStepsEl = document.getElementById('tSteps');
+    STEPS.forEach((s, i) => {
+      const d = document.createElement('div'); d.className = 't-step'; d.id = `ts-${s.id}`;
+      d.innerHTML = `<div class="t-dot">${i + 1}</div><div class="t-label">${s.label}</div>`; tStepsEl.appendChild(d);
+    });
+
+    // ═══════════════════════════════════════════════
+    //  HELPERS
+    // ═══════════════════════════════════════════════
+    function heatColorLight(v) {
+      // Light-mode safe heat colors
+      const r = Math.round(15 + v * 200);
+      const g = Math.round(90 + (1 - v) * 60);
+      const b = Math.round(200 - v * 100);
+      return `rgb(${r},${g},${b})`;
+    }
+
+    function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
+    function easeOut(t) { return 1 - (1 - t) ** 3; }
+    function sp(t0, t1, elapsed) { return clamp((elapsed - t0) / (t1 - t0), 0, 1); }
+
+    function showScene(id) {
+      document.querySelectorAll('.scene').forEach(el => {
+        el.classList.remove('on');
+        if (el.tagName === 'CANVAS') el.style.display = 'none';
+      });
+      if (!id) return;
+      const el = document.getElementById(`scene-${id}`);
+      if (!el) return;
+      el.classList.add('on');
+      if (el.tagName === 'CANVAS') el.style.display = 'block';
+    }
+
+    function setStep(idx) {
+      STEPS.forEach((s, i) => {
+        const el = document.getElementById(`ts-${s.id}`);
+        if (el) el.className = 't-step' + (i < idx ? ' done' : i === idx ? ' active' : '');
+      });
+    }
+
+    function allDone() { STEPS.forEach(s => { const el = document.getElementById(`ts-${s.id}`); if (el) el.className = 't-step done'; }); }
+
+    // ═══════════════════════════════════════════════
+    //  BG PARTICLES
+    // ═══════════════════════════════════════════════
+    function initBg() {
+      const cv = document.getElementById('bgCanvas');
+      bgCtx = cv.getContext('2d');
+      cv.width = cv.offsetWidth * devicePixelRatio; cv.height = cv.offsetHeight * devicePixelRatio;
+      bgCtx.scale(devicePixelRatio, devicePixelRatio);
+      const W = cv.offsetWidth, H = cv.offsetHeight;
+      bgPts = Array.from({ length: 25 }, () => ({
+        x: Math.random() * W, y: Math.random() * H,
+        vx: (Math.random() - .5) * .25, vy: (Math.random() - .5) * .25,
+        r: Math.random() * 1.5 + .5, a: Math.random() * .12 + .04,
+      }));
+    }
+    function renderBg() {
+      const cv = document.getElementById('bgCanvas');
+      const W = cv.offsetWidth, H = cv.offsetHeight;
+      bgCtx.clearRect(0, 0, W, H);
+      bgPts.forEach(p => {
+        p.x += p.vx; p.y += p.vy;
+        if (p.x < 0) p.x = W; if (p.x > W) p.x = 0;
+        if (p.y < 0) p.y = H; if (p.y > H) p.y = 0;
+        bgCtx.save(); bgCtx.globalAlpha = p.a; bgCtx.fillStyle = '#94a3b8';
+        bgCtx.beginPath(); bgCtx.arc(p.x, p.y, p.r, 0, Math.PI * 2); bgCtx.fill(); bgCtx.restore();
+      });
+    }
+
+    // ═══════════════════════════════════════════════
+    //  SEARCH CANVAS
+    // ═══════════════════════════════════════════════
+    function initSearch() {
+      const cv = document.getElementById('scene-search');
+      searchCtx = cv.getContext('2d');
+      cv.width = cv.offsetWidth * devicePixelRatio; cv.height = cv.offsetHeight * devicePixelRatio;
+      searchCtx.scale(devicePixelRatio, devicePixelRatio);
+      const W = cv.offsetWidth, H = cv.offsetHeight;
+      const clusters = [
+        { cx: W * .18, cy: H * .25, col: '#94a3b8', n: 22 }, { cx: W * .5, cy: H * .18, col: '#cbd5e1', n: 20 },
+        { cx: W * .68, cy: H * .62, col: '#64748b', n: 30 }, { cx: W * .28, cy: H * .75, col: '#94a3b8', n: 18 },
+        { cx: W * .82, cy: H * .32, col: '#cbd5e1', n: 16 },
+      ];
+      searchPts = [];
+      clusters.forEach((cl, ci) => {
+        for (let i = 0; i < cl.n; i++) {
+          const a = Math.random() * Math.PI * 2; const r = Math.random() * 55 + 8;
+          searchPts.push({ x: cl.cx + Math.cos(a) * r, y: cl.cy + Math.sin(a) * r, col: cl.col, a: .4 + Math.random() * .4, r: 2 + Math.random() * 1.5, ci, near: false });
+        }
+      });
+      searchQP = { x: W * .62, y: H * .55 };
+      searchPts.map((p, i) => ({ i, d: Math.hypot(p.x - searchQP.x, p.y - searchQP.y) })).sort((a, b) => a.d - b.d).slice(0, 6).forEach(({ i }) => searchPts[i].near = true);
+    }
+    function renderSearch(prog) {
+      const cv = document.getElementById('scene-search');
+      const W = cv.offsetWidth, H = cv.offsetHeight;
+      const ctx = searchCtx;
+      ctx.clearRect(0, 0, W, H);
+      ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, W, H);
+      ctx.strokeStyle = 'rgba(203,213,225,.6)'; ctx.lineWidth = .5;
+      for (let x = 0; x < W; x += 36) { ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, H); ctx.stroke(); }
+      for (let y = 0; y < H; y += 36) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke(); }
+      const p1 = easeOut(clamp(prog / .2, 0, 1)); const p2 = easeOut(clamp((prog - .2) / .12, 0, 1));
+      const p3 = clamp((prog - .3) / .35, 0, 1); const p4 = easeOut(clamp((prog - .62) / .38, 0, 1));
+      const maxR = Math.hypot(W, H) * .9; const ripR = p3 * maxR;
+      searchPts.forEach((p, i) => {
+        const delay = (i / searchPts.length) * .8;
+        const a = easeOut(clamp((p1 - delay / .8), 0, 1)) * p.a;
+        if (a <= 0) return;
+        const hit = p.near && p4 > 0;
+        const glow = hit ? easeOut(clamp((p4 - .1) / .5, 0, 1)) : 0;
+        const withinRipple = ripR > Math.hypot(p.x - searchQP.x, p.y - searchQP.y);
+        ctx.save();
+        if (glow > 0) {
+          ctx.globalAlpha = glow * .3; const g = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, 16);
+          g.addColorStop(0, '#0f172a'); g.addColorStop(1, 'transparent');
+          ctx.fillStyle = g; ctx.beginPath(); ctx.arc(p.x, p.y, 16, 0, Math.PI * 2); ctx.fill();
+        }
+        ctx.globalAlpha = a + glow * .4;
+        ctx.fillStyle = hit && glow > 0 ? '#0f172a' : withinRipple ? '#0f172a' : p.col;
+        ctx.beginPath(); ctx.arc(p.x, p.y, p.r * (hit ? 1.5 : 1), 0, Math.PI * 2); ctx.fill();
+        ctx.restore();
+      });
+      if (p3 > 0 && p3 < 1) {
+        for (let ring = 0; ring < 4; ring++) {
+          const rp = clamp(p3 - ring * .08, 0, 1);
+          if (rp <= 0) continue;
+          const r = rp * maxR; const alpha = (1 - rp) * .4;
+          ctx.save(); ctx.globalAlpha = alpha; ctx.strokeStyle = '#0f172a'; ctx.lineWidth = 1.5;
+          ctx.beginPath(); ctx.arc(searchQP.x, searchQP.y, r, 0, Math.PI * 2); ctx.stroke(); ctx.restore();
+        }
+      }
+      if (p4 > .3) {
+        const la = easeOut(clamp((p4 - .3) / .5, 0, 1));
+        searchPts.forEach(p => {
+          if (!p.near) return;
+          ctx.save(); ctx.globalAlpha = la * .6; ctx.strokeStyle = '#0f172a'; ctx.lineWidth = 1.2; ctx.setLineDash([3, 5]);
+          ctx.beginPath(); ctx.moveTo(searchQP.x, searchQP.y); ctx.lineTo(p.x, p.y); ctx.stroke(); ctx.restore();
+        });
+      }
+      if (p2 > 0) {
+        ctx.save(); const grd = ctx.createRadialGradient(searchQP.x, searchQP.y, 0, searchQP.x, searchQP.y, 28);
+        grd.addColorStop(0, `rgba(15, 23, 42,${p2 * .2})`); grd.addColorStop(1, 'transparent');
+        ctx.fillStyle = grd; ctx.beginPath(); ctx.arc(searchQP.x, searchQP.y, 28, 0, Math.PI * 2); ctx.fill();
+        ctx.globalAlpha = p2; ctx.fillStyle = '#0f172a'; ctx.beginPath(); ctx.arc(searchQP.x, searchQP.y, 6, 0, Math.PI * 2); ctx.fill();
+        ctx.fillStyle = '#1e293b'; ctx.font = '10px DM Mono'; ctx.textAlign = 'center'; ctx.fillText('query vector', searchQP.x, searchQP.y + 18); ctx.restore();
+      }
+    }
+
+    // ═══════════════════════════════════════════════
+    //  SCENE ENTERS
+    // ═══════════════════════════════════════════════
+    function enterTok() {
+      showScene('tok'); setStep(0); document.getElementById('tStatus').textContent = 'Tokenizando pergunta…';
+      const chips = document.querySelectorAll('.tok-chip'); chips.forEach((c, i) => setTimeout(() => c.classList.add('show'), 120 + i * 180));
+      const qToks = document.querySelectorAll('.tok'); let ti = 0;
+      function lit() {
+        if (ti > 0) qToks[ti - 1]?.classList.remove('lit');
+        if (ti < qToks.length) { qToks[ti].classList.add('lit'); ti++; setTimeout(lit, 220); }
+        else { qToks.forEach(t => { t.classList.remove('lit'); if (t.dataset.key === '1') t.classList.add('key'); }); document.getElementById('tokInfo').textContent = `${QUERY_TOKENS.length} tokens · ${KEY_WORDS.length} conceitos vitais`; }
+      }
+      setTimeout(lit, 300);
+    }
+    function enterEmbed() {
+      showScene('embed'); setStep(1); document.getElementById('tStatus').textContent = 'Interpretando significado lógico…';
+      const items = document.querySelectorAll('.embed-item');
+      items.forEach((item, ii) => {
+        setTimeout(() => {
+          item.classList.add('show');
+          const bars = item.querySelectorAll('.embed-bar');
+          bars.forEach((b, bi) => { setTimeout(() => { b.style.height = b.dataset.h + 'px'; }, bi * 60); });
+        }, 400 + ii * 500);
+      });
+      setTimeout(() => { document.getElementById('embedResult').classList.add('show'); }, 400 + items.length * 500 + 400);
+    }
+    function enterSearch() {
+      showScene('search'); setStep(2); document.getElementById('tStatus').textContent = 'Varrendo nossa base restrita…';
+      if (!searchCtx) initSearch();
+    }
+    function enterChunks() {
+      showScene('chunks'); setStep(3); document.getElementById('tStatus').textContent = 'Isolando trechos precisos no acervo…';
+      CHUNKS_DATA.forEach((c, i) => {
+        const card = document.getElementById(`c${i}`); if (!card) return;
+        setTimeout(() => { card.classList.add('show'); setTimeout(() => { const fill = card.querySelector('.score-fill'); if (fill) fill.style.width = (c.score * 100) + '%'; }, 250); }, i * 300 + 200);
+      });
+    }
+    function enterRerank() {
+      setStep(4); document.getElementById('tStatus').textContent = 'Filtrando ruído e alucinações…';
+      setTimeout(() => { document.getElementById('c0').classList.add('top'); document.getElementById('c1').classList.add('top'); }, 600);
+    }
+    function enterGen() {
+      showScene('gen'); setStep(5); document.getElementById('tStatus').textContent = 'Redigindo tese final segura…';
+      const pills = document.querySelectorAll('.gen-pill'); pills.forEach((p, i) => setTimeout(() => p.classList.add('show'), i * 300 + 200));
+      const box = document.getElementById('genBox'); box.innerHTML = '<span class="cursor-blink"></span>';
+      let ci = 0; clearTimeout(genTypTimeout);
+      function type() {
+        if (ci < GEN_TEXT.length) {
+          const cur = box.querySelector('.cursor-blink'); if (cur) cur.insertAdjacentText('beforebegin', GEN_TEXT[ci]);
+          ci++; genTypTimeout = setTimeout(type, 22 + Math.random() * 18);
+        } else { const cur = box.querySelector('.cursor-blink'); if (cur) cur.remove(); }
+      }
+      setTimeout(type, 800);
+    }
+    function enterAns() { showScene('ans'); document.getElementById('tStatus').textContent = 'Análise Finalizada ✓'; allDone(); }
+
+    // ═══════════════════════════════════════════════
+    //  RESET & LOOP
+    // ═══════════════════════════════════════════════
+    function resetAll() {
+      inited = {}; lastScene = null;
+      document.querySelectorAll('.tok').forEach(t => t.className = 'tok'); document.querySelectorAll('.tok-chip').forEach(c => c.classList.remove('show'));
+      document.getElementById('tokInfo').textContent = '';
+      document.querySelectorAll('.embed-item').forEach(item => { item.classList.remove('show'); item.querySelectorAll('.embed-bar').forEach(b => b.style.height = '0px'); });
+      document.getElementById('embedResult').classList.remove('show');
+      CHUNKS_DATA.forEach((_, i) => {
+        const card = document.getElementById(`c${i}`); if (!card) return;
+        card.className = 'chunk-card'; const fill = card.querySelector('.score-fill'); if (fill) fill.style.width = '0%';
+      });
+      document.querySelectorAll('.gen-pill').forEach(p => p.classList.remove('show'));
+      document.getElementById('genBox').innerHTML = '';
+      clearTimeout(genTypTimeout); setStep(-1); showScene(null);
+    }
+    function tick(ts) {
+      if (!startTs) startTs = ts;
+      const elapsed = ts - startTs; const cycle = Math.floor(elapsed / TOTAL_MS);
+      if (cycle !== lastCycle) { lastCycle = cycle; resetAll(); }
+      const t = elapsed % TOTAL_MS; document.getElementById('tTime').textContent = (t / 1000).toFixed(1) + 's';
+      let cur = null; for (const s of TIMELINE) { if (t >= s.t0 && t < s.t1) { cur = s; break; } }
+      if (cur && cur.id !== lastScene) {
+        lastScene = cur.id;
+        if (!inited[cur.id]) {
+          inited[cur.id] = true;
+          switch (cur.id) { case 'tok': enterTok(); break; case 'embed': enterEmbed(); break; case 'search': enterSearch(); break; case 'chunks': enterChunks(); break; case 'rerank': enterRerank(); break; case 'gen': enterGen(); break; case 'ans': enterAns(); break; }
+        }
+      }
+      renderBg();
+      if (cur && cur.id === 'search' && searchCtx) { const prog = sp(cur.t0, cur.t1, t); renderSearch(prog); }
+      rafId = requestAnimationFrame(tick);
+    }
+    window.addEventListener('load', () => { initBg(); showScene(null); rafId = requestAnimationFrame(tick); });
+    window.addEventListener('resize', () => {
+      const bgCv = document.getElementById('bgCanvas'); bgCtx = bgCv.getContext('2d');
+      bgCv.width = bgCv.offsetWidth * devicePixelRatio; bgCv.height = bgCv.offsetHeight * devicePixelRatio;
+      bgCtx.scale(devicePixelRatio, devicePixelRatio); searchCtx = null;
+    });
+  </script>
+</body>
+
+</html>

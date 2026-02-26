@@ -1,0 +1,71 @@
+# Python caches and virtual envs
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.hypothesis/
+.nox/
+.tox/
+.venv/
+venv/
+env/
+
+# Environment and secrets
+.env
+.env.*
+!.env.example
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# Build and package artifacts
+build/
+dist/
+*.egg-info/
+*.whl
+*.spec
+
+# Runtime logs and temp files
+*.log
+logs/runtime/
+logs/*.pid
+logs/*checkpoint*.json
+logs/*runtime*.json
+trace_output.txt
+
+# Large local datasets and indexes (do not version)
+data/
+lancedb_store/
+output_notebooklm/
+outputs/
+_OLD_OUTPUTS/
+stj_informativos_pdf/
+
+# Local temporary folders
+tmp_superpowers_clone/
+.playwright-cli/
+teste/
+teste/
+
+# Local preview/debug artifacts
+frontend/_preview*.png
+frontend/_live_preview*.png
+
+# Local release bundles (GitHub should keep only source)
+release/
+packages/
+*.zip
+*.7z
+*.rar
+*.tar
+*.gz

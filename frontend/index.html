@@ -1,0 +1,589 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Ratio</title>
+  <link rel="icon" type="image/png" sizes="32x32" href="./favicon-32x32.png" />
+  <link rel="icon" type="image/png" sizes="48x48" href="./favicon-48x48.png" />
+  <link rel="icon" href="./favicon.ico" />
+  <link rel="apple-touch-icon" sizes="180x180" href="./apple-touch-icon.png" />
+  <meta name="msapplication-TileImage" content="./icon-192.png" />
+  <meta property="og:title" content="Ratio - Pesquisa Jurisprudencial" />
+  <meta property="og:description" content="Pesquisa jurisprudencial local para STF/STJ com RAG e citacoes rastreaveis." />
+  <meta property="og:image" content="./og-image.png" />
+  <meta property="og:image:alt" content="Icone de balanca da justica em preto - Ratio" />
+  <meta property="og:type" content="website" />
+  <meta name="twitter:card" content="summary_large_image" />
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.6/dist/purify.min.js"></script>
+  <script src="https://unpkg.com/lucide@latest"></script>
+  <link rel="stylesheet" href="./styles.css" />
+</head>
+<body data-settings-open="false" data-acervo-open="false" data-evidence-open="true" data-library-open="false" data-onboarding-open="false" data-about-open="false">
+  <div id="overlay" class="overlay"></div>
+
+  <section id="onboardingModal" class="onboarding-modal panel-shell" role="dialog" aria-modal="true" aria-labelledby="onboardingTitle">
+    <div class="panel-head">
+      <h2 id="onboardingTitle">Primeiros passos com API Gemini</h2>
+      <button id="closeOnboardingBtn" class="icon-btn" type="button" aria-label="Fechar guia inicial">
+        <i data-lucide="x"></i>
+      </button>
+    </div>
+    <div class="onboarding-body">
+      <p class="onboarding-lead">
+        Para usar o Ratio com busca e sintese completas, configure sua chave Gemini e confira custos/cotas antes da primeira consulta.
+      </p>
+      <div class="onboarding-key-setup">
+        <label class="field">
+          <span>Chave Gemini (obrigatoria)</span>
+          <input id="onboardingApiKeyInput" type="password" autocomplete="off" placeholder="Cole aqui sua API key" />
+        </label>
+        <div class="onboarding-key-actions">
+          <label class="onboarding-persist-row">
+            <input id="onboardingPersistEnv" type="checkbox" checked />
+            <span>Salvar em <code>.env</code> automaticamente</span>
+          </label>
+          <button id="onboardingSaveKeyBtn" class="chip-btn" type="button">Validar e salvar chave</button>
+        </div>
+        <p id="onboardingKeyStatus" class="onboarding-key-status">Sem chave Gemini ativa detectada ainda.</p>
+      </div>
+      <ol class="onboarding-steps">
+        <li>
+          Abra o <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener noreferrer">Google AI Studio</a> e gere a chave em <strong>Create API key</strong>.
+        </li>
+        <li>
+          Se preferir manual, copie <code>.env.example</code> para <code>.env</code> e preencha:
+          <pre>GEMINI_API_KEY=sua_chave_aqui</pre>
+        </li>
+        <li>
+          Inicie o backend/frontend e rode uma consulta curta para validar.
+        </li>
+      </ol>
+
+      <div class="onboarding-subhead">Custos e cota gratuita (snapshot 24/02/2026)</div>
+      <div class="cost-grid">
+        <article class="cost-card">
+          <h3>gemini-3-pro-preview</h3>
+          <p>Sem cota gratuita.</p>
+          <p>Entrada: US$ 2.00 (ate 200k) / US$ 4.00 (&gt; 200k) por 1M tokens.</p>
+          <p>Saida: US$ 12.00 (ate 200k) / US$ 18.00 (&gt; 200k) por 1M tokens.</p>
+        </article>
+        <article class="cost-card">
+          <h3>gemini-2.5-flash</h3>
+          <p>Com cota gratuita (limites variam por conta/tier).</p>
+          <p>Entrada: US$ 0.30 (ate 200k) / US$ 0.60 (&gt; 200k) por 1M tokens.</p>
+          <p>Saida: US$ 2.50 (ate 200k) / US$ 3.50 (&gt; 200k) por 1M tokens.</p>
+        </article>
+        <article class="cost-card">
+          <h3>gemini-2.5-pro</h3>
+          <p>Com cota gratuita (limites variam por conta/tier).</p>
+          <p>Entrada e saida: consulte a tabela oficial para seu tier atual.</p>
+          <p>No seu painel, limite exibido: ~1.000 req/dia (RPD).</p>
+        </article>
+      </div>
+      <div class="onboarding-subhead">Tradução de custo por fluxo de requisicoes por consulta</div>
+      <div class="cost-grid request-impact-grid">
+        <article class="cost-card">
+          <h3>Reranker local</h3>
+          <p>1 requisicao de embedding da pergunta.</p>
+          <p>1 requisicao de geracao da resposta (modelo principal + fallback se falhar).</p>
+          <p>Explicar/Ler em voz alta adiciona novas requisicoes sob demanda.</p>
+        </article>
+        <article class="cost-card">
+          <h3>Reranker Gemini</h3>
+          <p>1 requisicao de embedding da pergunta.</p>
+          <p>Multiplas requisicoes Gemini para rerank por lote (custo maior).</p>
+          <p>1 requisicao de geracao final + fallback eventual.</p>
+        </article>
+        <article class="cost-card">
+          <h3>Leitura pratica</h3>
+          <p>Quanto maior top-k, contexto e modelo, maior consumo por consulta.</p>
+          <p>Com reranker local, o custo Gemini tende a cair por consulta.</p>
+          <p>Use o painel de rate limits para confirmar sua cota gratuita ativa.</p>
+        </article>
+      </div>
+      <div class="onboarding-subhead">Estimativa por pergunta no Ratio (pratico)</div>
+      <div class="cost-grid request-impact-grid">
+        <article class="cost-card">
+          <h3>Tokens tipicos por pergunta</h3>
+          <p>Consulta curta: ~3k a 7k tokens de entrada (contexto + pergunta).</p>
+          <p>Resposta media: ~600 a 1.600 tokens de saida.</p>
+          <p>Faixa total comum: ~3.6k a 8.6k tokens por resposta.</p>
+        </article>
+        <article class="cost-card">
+          <h3>Se usar modelo pago (ex.: 3-pro)</h3>
+          <p>Custo aproximado por pergunta: ~US$ 0.02 a US$ 0.05.</p>
+          <p>Depende de: tamanho do contexto, top-k, tokens de saida e fallback.</p>
+          <p>Reranker Gemini aumenta custo por adicionar chamadas extras.</p>
+        </article>
+        <article class="cost-card">
+          <h3>Se usar 2.5-pro free tier</h3>
+          <p>No seu painel (snapshot): 3.1-pro ~250 RPD, 2.5-pro ~1.000 RPD, 2.5-flash ~10.000 RPD.</p>
+          <p>Com reranker local: em geral ~1 pergunta ~= 1 requisicao de geracao.</p>
+          <p>Com reranker Gemini: 1 pergunta pode consumir varias requisicoes de texto.</p>
+        </article>
+      </div>
+      <p class="onboarding-footnote">
+        Limites de RPM/TPM/RPD variam por modelo e tier (e podem mudar sem aviso). Confira seus limites ativos no painel oficial de
+        <a href="https://ai.google.dev/gemini-api/docs/rate-limits" target="_blank" rel="noopener noreferrer">Rate limits</a>.
+      </p>
+      <div class="onboarding-links">
+        <a class="meta-btn" href="https://ai.google.dev/gemini-api/docs/api-key" target="_blank" rel="noopener noreferrer">
+          <i data-lucide="key-round"></i>
+          Guia de API key
+        </a>
+        <a class="meta-btn" href="https://ai.google.dev/gemini-api/docs/pricing" target="_blank" rel="noopener noreferrer">
+          <i data-lucide="badge-dollar-sign"></i>
+          Tabela oficial de preco
+        </a>
+        <a class="meta-btn" href="https://ai.google.dev/gemini-api/docs/billing" target="_blank" rel="noopener noreferrer">
+          <i data-lucide="receipt-text"></i>
+          Billing e upgrade
+        </a>
+      </div>
+      <div class="onboarding-actions">
+        <button id="onboardingPrimaryBtn" class="chip-btn" type="button">Entendi e continuar</button>
+      </div>
+    </div>
+  </section>
+
+  <section id="aboutModal" class="about-modal panel-shell" role="dialog" aria-modal="true" aria-labelledby="aboutTitle">
+    <div class="panel-head">
+      <h2 id="aboutTitle">Sobre o Ratio</h2>
+      <button id="closeAboutBtn" class="icon-btn" type="button" aria-label="Fechar sobre">
+        <i data-lucide="x"></i>
+      </button>
+    </div>
+    <div class="about-body">
+      <nav id="aboutTabs" class="about-tabs" role="tablist" aria-label="Secoes sobre o projeto">
+        <button class="about-tab active" type="button" role="tab" aria-selected="true" data-about-tab-target="acervo">Sobre o acervo</button>
+        <button class="about-tab" type="button" role="tab" aria-selected="false" data-about-tab-target="estrutura">Estrutura documental</button>
+        <button class="about-tab" type="button" role="tab" aria-selected="false" data-about-tab-target="autor">Sobre o autor e apoio</button>
+      </nav>
+
+      <section class="about-pane active" data-about-pane="acervo">
+        <p class="about-pane-lead">
+          O Ratio indexa jurisprudencia em escala ampla para busca semantica local, com trilha de citacao verificavel.
+        </p>
+        <div class="about-stats-grid">
+          <article class="about-stat-card">
+            <span>Documentos indexados</span>
+            <strong>528.351</strong>
+          </article>
+          <article class="about-stat-card">
+            <span>Texto integral</span>
+            <strong>2,5 bilhoes de caracteres</strong>
+          </article>
+          <article class="about-stat-card">
+            <span>Paginas equivalentes</span>
+            <strong>~1.002.899 paginas A4</strong>
+          </article>
+          <article class="about-stat-card">
+            <span>Biblioteca equivalente</span>
+            <strong>~3.343 livros (300 pags)</strong>
+          </article>
+          <article class="about-stat-card">
+            <span>Footprint local</span>
+            <strong>~23,46 GB (data + lancedb)</strong>
+          </article>
+        </div>
+        <div class="acervo-scale-visual">
+          <div class="scale-head">
+            <h3>Perspectiva de escala</h3>
+            <p>Comparativo aproximado de altura da pilha impressa frente a marcos de referencia.</p>
+          </div>
+          <div class="scale-columns">
+            <article class="scale-column" style="--scale-h: 1.7;">
+              <div class="scale-bar scale-person"></div>
+              <p>Pessoa 1,70m</p>
+            </article>
+            <article class="scale-column" style="--scale-h: 28;">
+              <div class="scale-bar scale-brasilia"></div>
+              <p>Predio de Brasilia 28m</p>
+            </article>
+            <article class="scale-column" style="--scale-h: 93;">
+              <div class="scale-bar scale-liberty"></div>
+              <p>Estatua da Liberdade 93m</p>
+            </article>
+            <article class="scale-column scale-column-highlight" style="--scale-h: 100;">
+              <div class="scale-bar scale-paper"></div>
+              <p>Pilha estimada do acervo ~100m</p>
+            </article>
+          </div>
+        </div>
+      </section>
+
+      <section class="about-pane" data-about-pane="estrutura">
+        <p class="about-pane-lead">
+          O acervo combina fontes com diferentes niveis de autoridade juridica. Abaixo, um guia rapido para leitura dos resultados.
+        </p>
+        <div class="doc-structure-grid">
+          <article class="doc-type-card">
+            <h3>Sumula vinculante</h3>
+            <p class="doc-type-count">Quantidade no acervo: 63 documentos.</p>
+            <p>Enunciado com efeito vinculante no ambito do Poder Judiciario e Administracao Publica.</p>
+          </article>
+          <article class="doc-type-card">
+            <h3>Tema de repercussao geral</h3>
+            <p class="doc-type-count">Quantidade no acervo: 220 registros tematicos qualificados (snapshot local).</p>
+            <p>Tese firmada pelo STF em recurso extraordinario com eficacia para casos repetitivos equivalentes.</p>
+          </article>
+          <article class="doc-type-card">
+            <h3>Tema repetitivo STJ</h3>
+            <p class="doc-type-count">Quantidade no acervo: 689 documentos.</p>
+            <p>Tese firmada sob rito repetitivo no STJ, com diretriz obrigatoria para aplicacao uniforme.</p>
+          </article>
+          <article class="doc-type-card">
+            <h3>Sumula</h3>
+            <p class="doc-type-count">Quantidade no acervo: 1.377 documentos.</p>
+            <p>Sintese de entendimento consolidado por tribunal, sem necessariamente possuir efeito vinculante formal.</p>
+          </article>
+          <article class="doc-type-card">
+            <h3>Acordao</h3>
+            <p class="doc-type-count">Quantidade no acervo: 223.122 documentos.</p>
+            <p>Decisao colegiada (turma/plenario), geralmente mais robusta em fundamentacao e estabilidade de precedente.</p>
+          </article>
+          <article class="doc-type-card">
+            <h3>Decisao monocratica</h3>
+            <p class="doc-type-count">Quantidade no acervo: 286.800 documentos.</p>
+            <p>Decisao individual do relator. Relevante para contexto recente, mas com menor peso vinculante.</p>
+          </article>
+          <article class="doc-type-card">
+            <h3>Informativo</h3>
+            <p class="doc-type-count">Quantidade no acervo: 16.300 documentos.</p>
+            <p>Resumo editorial de julgados relevantes, util para leitura rapida e triagem inicial.</p>
+          </article>
+        </div>
+      </section>
+
+      <section class="about-pane" data-about-pane="autor">
+        <p class="about-pane-lead">
+          Ratio e um projeto open-source, gratuito e independente, criado para apoiar estudantes e profissionais do Direito que hoje nao podem assumir assinaturas pagas. Se fizer sentido para voce, seu apoio ajuda a manter e evoluir a plataforma.
+        </p>
+        <div class="author-grid">
+          <article class="author-card">
+            <h3>Contato</h3>
+            <p><strong>Instagram:</strong> @carlosvictorodrigues</p>
+            <p><strong>E-mail:</strong> carlosvictorodrigues@gmail.com</p>
+          </article>
+          <article class="author-card author-card-support">
+            <h3>Apoio via PIX</h3>
+            <div class="pix-support-layout">
+              <img class="pix-qr" src="./apoio-pix.jpeg" alt="QR code de apoio via PIX ao projeto Ratio" loading="lazy" />
+              <div class="pix-key-block">
+                <p id="pixKeyText" class="pix-key-text">00020126920014BR.GOV.BCB.PIX013607cdc77f-cd4b-44b8-a910-a254f58642f40230Apoie o Ratio - Jurisprudencia5204000053039865802BR5925Carlos Victor de Oliveira6009SAO PAULO621405102qCvdJp89F6304E670</p>
+                <button id="copyPixKeyBtn" class="chip-btn" type="button">Copiar chave PIX</button>
+              </div>
+            </div>
+          </article>
+        </div>
+      </section>
+    </div>
+  </section>
+
+  <aside class="left-rail" aria-label="Navegacao lateral">
+    <div class="rail-brand">
+      <i data-lucide="scale"></i>
+    </div>
+    <nav class="rail-nav">
+      <button class="rail-btn active" type="button" data-library-mode="history" aria-label="Historico de consultas">
+        <i data-lucide="search"></i>
+      </button>
+      <button class="rail-btn" type="button" data-library-mode="saved" aria-label="Consultas salvas">
+        <i data-lucide="bookmark"></i>
+      </button>
+      <button class="rail-btn" type="button" data-open-about aria-label="Sobre o Ratio">
+        <i data-lucide="info"></i>
+      </button>
+    </nav>
+    <button class="rail-btn" type="button" data-open-acervo aria-label="Abrir Meu Acervo">
+      <i data-lucide="folder-plus"></i>
+    </button>
+    <button class="rail-btn rail-settings" type="button" data-open-settings aria-label="Abrir configuracoes">
+      <i data-lucide="settings"></i>
+    </button>
+  </aside>
+
+  <aside id="libraryPanel" class="library-panel panel-shell" aria-label="Historico e colecoes">
+    <div class="panel-head">
+      <h2 id="libraryTitle">Historico</h2>
+      <button id="closeLibraryBtn" class="icon-btn" type="button" aria-label="Fechar historico">
+        <i data-lucide="x"></i>
+      </button>
+    </div>
+    <div class="library-meta">
+      <span id="libraryCountTag" class="tag">0</span>
+      <p id="libraryHint">Consultas recentes da sessao atual.</p>
+    </div>
+    <div id="libraryList" class="library-list"></div>
+  </aside>
+
+  <section class="app-shell">
+    <header class="top-header">
+      <div class="top-brand">
+        <p class="eyebrow">RATIO</p>
+        <h1>Pesquisa Jurisprudencial</h1>
+      </div>
+      <div class="top-actions">
+        <button id="toggleSettingsBtn" class="chip-btn" type="button" title="Abrir configuracoes do RAG">
+          Reranker:
+          <span id="rerankerChipValue">Local</span>
+        </button>
+        <button id="toggleEvidenceBtn" class="chip-btn" type="button" title="Mostrar/ocultar dossie">
+          Fontes:
+          <span id="topSourceCount">0</span>
+        </button>
+        <button id="clearChatBtn" class="chip-btn chip-btn-danger" type="button" title="Limpar historico">
+          Limpar chat
+        </button>
+      </div>
+    </header>
+
+    <div class="workspace-grid">
+      <main class="chat-main">
+        <section id="thread" class="thread"></section>
+
+        <footer class="composer panel-shell">
+          <label for="queryInput" class="composer-label">Pergunta juridica</label>
+          <div class="composer-row">
+            <textarea id="queryInput" rows="3" placeholder=""></textarea>
+            <button id="askBtn" type="button">
+              <i data-lucide="send"></i>
+              Enviar
+            </button>
+          </div>
+          <div class="composer-meta">
+            <button class="meta-btn" type="button" data-open-settings>
+              <i data-lucide="sliders-horizontal"></i>
+              Parametros
+            </button>
+            <button class="meta-btn" type="button" data-open-acervo>
+              <i data-lucide="folder-plus"></i>
+              Meu Acervo
+            </button>
+            <span>STF, STJ selecionados</span>
+          </div>
+          <p id="requestState" class="request-state"></p>
+        </footer>
+      </main>
+
+      <aside id="evidencePanel" class="evidence-panel panel-shell">
+        <h2><i data-lucide="database"></i> Dossie Documental</h2>
+        <ul id="metricsBox" class="metrics-list"></ul>
+        <div class="evidence-head">
+          <h3>Anexos</h3>
+          <span id="docCountTag" class="tag">0</span>
+        </div>
+        <div id="sourcesBox" class="sources-box"></div>
+      </aside>
+    </div>
+  </section>
+
+  <aside id="settingsPanel" class="settings-panel panel-shell">
+    <div class="panel-head">
+      <h2>Configuracoes do RAG</h2>
+      <button id="closeSettingsBtn" class="icon-btn" type="button" aria-label="Fechar configuracoes">
+        <i data-lucide="x"></i>
+      </button>
+    </div>
+
+    <details class="disclosure" open>
+      <summary>Conexao API</summary>
+      <div class="disclosure-body">
+        <label class="field">
+          <span>URL da API</span>
+          <input id="apiBase" type="text" autocomplete="off" />
+        </label>
+      </div>
+    </details>
+
+    <details class="disclosure" open>
+      <summary>Primeiros passos com API Gemini</summary>
+      <div class="disclosure-body">
+        <p class="rag-panel-note">
+          A plataforma depende de <code>GEMINI_API_KEY</code> ativa para gerar respostas, embeddings e explicacoes.
+        </p>
+        <div class="about-inline-actions">
+          <button id="openOnboardingGuideBtn" class="meta-btn" type="button">
+            <i data-lucide="book-open-check"></i>
+            Reabrir guia inicial
+          </button>
+        </div>
+      </div>
+    </details>
+
+    <details class="disclosure" open>
+      <summary>Busca e ranking</summary>
+      <div class="disclosure-body">
+        <label class="field">
+          <span>Reranker</span>
+          <select id="rerankerBackend">
+            <option value="local">Local (BAAI/bge-reranker-v2-m3)</option>
+            <option value="gemini">Gemini (maior custo)</option>
+          </select>
+        </label>
+        <label class="field">
+          <span>Modelo do reranker Gemini</span>
+          <select id="geminiRerankModelInput">
+            <option value="gemini-2.5-pro">gemini-2.5-pro</option>
+            <option value="gemini-2.5-flash">gemini-2.5-flash</option>
+            <option value="gemini-3-pro-preview">gemini-3-pro-preview</option>
+            <option value="gemini-3.1-pro">gemini-3.1-pro</option>
+            <option value="gemini-3-pro">gemini-3-pro</option>
+            <option value="gemini-3-flash-preview">gemini-3-flash-preview</option>
+            <option value="gemini-3-flash">gemini-3-flash</option>
+            <option value="gemini-2.0-flash">gemini-2.0-flash</option>
+          </select>
+        </label>
+        <label class="toggle-row">
+          <span>Priorizar recentes</span>
+          <input id="preferRecent" type="checkbox" checked />
+        </label>
+        <p class="rag-panel-note">
+          Recomendacao: manter reranker <strong>local</strong> como padrao para melhor custo/estabilidade.
+          Ative reranker Gemini apenas quando quiser maior refinamento semantico.
+        </p>
+      </div>
+    </details>
+
+    <details class="disclosure" open>
+      <summary>Modelo Gemini</summary>
+      <div class="disclosure-body">
+        <label class="field">
+          <span>Modelo principal de resposta</span>
+          <input id="generationModelInput" list="geminiModelsList" type="text" autocomplete="off" />
+        </label>
+        <label class="field">
+          <span>Modelo fallback de resposta</span>
+          <input id="generationFallbackModelInput" list="geminiModelsList" type="text" autocomplete="off" />
+        </label>
+        <datalist id="geminiModelsList">
+          <option value="gemini-3-pro-preview"></option>
+          <option value="gemini-3.1-pro"></option>
+          <option value="gemini-3-pro"></option>
+          <option value="gemini-3-flash-preview"></option>
+          <option value="gemini-2.5-pro"></option>
+          <option value="gemini-2.5-flash"></option>
+          <option value="gemini-3-flash"></option>
+          <option value="gemini-2.0-flash"></option>
+        </datalist>
+        <p class="rag-panel-note">
+          Esses modelos sao enviados ao backend em cada consulta para refletir imediatamente sua configuracao.
+        </p>
+      </div>
+    </details>
+
+    <details class="disclosure" open>
+      <summary>Ajuste avancado do RAG</summary>
+      <div class="disclosure-body">
+        <p class="rag-panel-note">
+          Ajuste os pesos e limites do pipeline. Os valores atuais refletem os padroes do motor.
+        </p>
+        <div class="rag-panel-actions">
+          <button id="saveRagConfigBtn" class="meta-btn" type="button">
+            <i data-lucide="save"></i>
+            Salvar ajustes
+          </button>
+          <button id="resetRagConfigBtn" class="meta-btn" type="button">
+            <i data-lucide="rotate-ccw"></i>
+            Restaurar padrao
+          </button>
+          <span id="ragConfigStatus" class="rag-config-status">Carregando parametros...</span>
+        </div>
+        <div id="ragAdvancedGroups" class="rag-advanced-groups"></div>
+      </div>
+    </details>
+
+    <details class="disclosure" open>
+      <summary>Fontes da pesquisa</summary>
+      <div class="disclosure-body">
+        <p class="rag-panel-note">
+          Selecione quais bases entram na resposta. A gestao e indexacao do acervo ficam no menu dedicado "Meu Acervo".
+        </p>
+        <label class="toggle-row">
+          <span>Priorizar docs do usuario no ranking</span>
+          <input id="userSourcePriorityToggle" type="checkbox" checked />
+        </label>
+        <div id="sourceFiltersList" class="checklist user-source-list"></div>
+      </div>
+    </details>
+
+    <details class="disclosure" open>
+      <summary>Tribunal</summary>
+      <div class="disclosure-body checklist">
+        <label><input class="tribunal-checkbox" type="checkbox" value="STF" checked /> STF</label>
+        <label><input class="tribunal-checkbox" type="checkbox" value="STJ" checked /> STJ</label>
+      </div>
+    </details>
+
+    <details class="disclosure" open>
+      <summary>Tipo de documento</summary>
+      <div class="disclosure-body checklist">
+        <label><input class="tipo-checkbox" type="checkbox" value="acordao" checked /> Acordao</label>
+        <label><input class="tipo-checkbox" type="checkbox" value="sumula" checked /> Sumula</label>
+        <label><input class="tipo-checkbox" type="checkbox" value="sumula_vinculante" checked /> Sumula Vinculante</label>
+        <label><input class="tipo-checkbox" type="checkbox" value="informativo" checked /> Informativo</label>
+        <label><input class="tipo-checkbox" type="checkbox" value="monocratica" checked /> Decisao Monocratica</label>
+        <label><input class="tipo-checkbox" type="checkbox" value="tema_repetitivo_stj" checked /> Tema Repetitivo STJ</label>
+      </div>
+    </details>
+
+  </aside>
+
+  <aside id="acervoPanel" class="acervo-panel panel-shell">
+    <div class="panel-head">
+      <h2>Meu Acervo</h2>
+      <button id="closeAcervoBtn" class="icon-btn" type="button" aria-label="Fechar Meu Acervo">
+        <i data-lucide="x"></i>
+      </button>
+    </div>
+
+    <details class="disclosure" open>
+      <summary>Indexacao de documentos</summary>
+      <div class="disclosure-body">
+        <p class="rag-panel-note">
+          Upload em lote de PDFs para indexacao no acervo pessoal. Suporta multiplos arquivos por envio.
+        </p>
+        <label class="field">
+          <span>Nome da base do usuario</span>
+          <input id="userCorpusNameInput" type="text" placeholder="Banco 1" />
+        </label>
+        <label class="field">
+          <span>Arquivos PDF</span>
+          <input id="userCorpusFilesInput" type="file" accept="application/pdf" multiple />
+        </label>
+        <label class="toggle-row">
+          <span>OCR so em paginas sem texto detectado (recomendado)</span>
+          <input id="userCorpusOcrMissingOnly" type="checkbox" checked />
+        </label>
+        <div class="rag-panel-actions">
+          <button id="indexUserCorpusBtn" class="meta-btn index-acervo-btn" type="button">
+            <i data-lucide="database"></i>
+            Indexar ao acervo
+          </button>
+          <span id="userCorpusStatus" class="rag-config-status">Carregando status do Meu Acervo...</span>
+        </div>
+        <ol id="userCorpusStages" class="index-stage-list">
+          <li data-index-stage="ready" class="active">Aguardando envio</li>
+          <li data-index-stage="upload">Upload e validacao do lote</li>
+          <li data-index-stage="extract">Extracao de texto e OCR</li>
+          <li data-index-stage="clean">Limpeza de ruido juridico</li>
+          <li data-index-stage="embed">Embeddings e gravacao no acervo</li>
+          <li data-index-stage="done">Concluido</li>
+        </ol>
+      </div>
+    </details>
+
+    <details class="disclosure" open>
+      <summary>Bases do usuario</summary>
+      <div class="disclosure-body">
+        <div id="userCorpusSources" class="checklist user-source-list"></div>
+      </div>
+    </details>
+  </aside>
+
+  <script type="module" src="./app.js"></script>
+</body>
+</html>

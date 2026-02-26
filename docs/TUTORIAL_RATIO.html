@@ -1,0 +1,282 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Tutorial Ratio - Manual Completo</title>
+  <style>
+    :root {
+      --bg: #f7f5f1;
+      --card: #ffffff;
+      --ink: #1e1a16;
+      --muted: #6c6359;
+      --line: #ddd5ca;
+      --accent: #0f172a;
+      --ok: #166534;
+      --warn: #92400e;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: Georgia, "Times New Roman", serif;
+      color: var(--ink);
+      background: linear-gradient(180deg, #f7f5f1 0%, #f1ece4 100%);
+      line-height: 1.55;
+    }
+    .wrap {
+      width: min(1120px, 96vw);
+      margin: 32px auto 64px;
+      display: grid;
+      grid-template-columns: 280px 1fr;
+      gap: 20px;
+    }
+    .toc, .content {
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      box-shadow: 0 1px 6px rgba(0, 0, 0, 0.06);
+    }
+    .toc {
+      position: sticky;
+      top: 16px;
+      align-self: start;
+      padding: 18px;
+    }
+    .toc h1 {
+      margin: 0 0 6px;
+      font-size: 18px;
+      letter-spacing: 0.03em;
+      text-transform: uppercase;
+    }
+    .toc p {
+      margin: 0 0 14px;
+      color: var(--muted);
+      font-size: 14px;
+    }
+    .toc a {
+      display: block;
+      margin: 7px 0;
+      color: var(--accent);
+      text-decoration: none;
+      font-size: 14px;
+    }
+    .toc a:hover { text-decoration: underline; }
+    .content { padding: 26px 28px; }
+    h2 {
+      margin: 26px 0 10px;
+      font-size: 24px;
+      border-bottom: 1px solid var(--line);
+      padding-bottom: 6px;
+    }
+    h3 {
+      margin: 18px 0 8px;
+      font-size: 19px;
+    }
+    p { margin: 8px 0; }
+    ul, ol { margin: 8px 0 8px 22px; }
+    .note, .ok, .warn {
+      border-left: 4px solid;
+      padding: 10px 12px;
+      border-radius: 8px;
+      margin: 10px 0;
+      background: #fbfaf8;
+    }
+    .note { border-color: #334155; }
+    .ok { border-color: var(--ok); }
+    .warn { border-color: var(--warn); }
+    code, pre {
+      font-family: Consolas, "Courier New", monospace;
+      background: #f3efe8;
+      border: 1px solid #e1d8cc;
+      border-radius: 6px;
+    }
+    code { padding: 1px 6px; font-size: 90%; }
+    pre {
+      padding: 10px 12px;
+      overflow-x: auto;
+      white-space: pre;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 10px 0;
+      font-size: 15px;
+    }
+    th, td {
+      border: 1px solid var(--line);
+      padding: 8px 10px;
+      text-align: left;
+      vertical-align: top;
+    }
+    th { background: #f4f0e9; }
+    @media (max-width: 980px) {
+      .wrap { grid-template-columns: 1fr; }
+      .toc { position: static; }
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <aside class="toc">
+      <h1>Tutorial Ratio</h1>
+      <p>Manual completo para uso local e distribuicao via ZIP.</p>
+      <a href="#sec1">1. Visao geral</a>
+      <a href="#sec2">2. Requisitos</a>
+      <a href="#sec3">3. Estrutura do projeto</a>
+      <a href="#sec4">4. Instalacao</a>
+      <a href="#sec5">5. Primeiro uso (Gemini)</a>
+      <a href="#sec6">6. Fluxo de consulta</a>
+      <a href="#sec7">7. Configuracoes do RAG</a>
+      <a href="#sec8">8. Iniciar / parar / status</a>
+      <a href="#sec9">9. Empacotar para usuarios</a>
+      <a href="#sec10">10. Seguranca e privacidade</a>
+      <a href="#sec11">11. Solucao de problemas</a>
+      <a href="#sec12">12. Checklist final</a>
+    </aside>
+
+    <main class="content">
+      <h2 id="sec1">1. Visao geral</h2>
+      <p>O Ratio e uma plataforma local de pesquisa jurisprudencial com pipeline RAG para STF/STJ. O frontend roda no navegador e o backend roda via FastAPI.</p>
+      <div class="note">
+        <strong>Arquitetura curta:</strong> navegador (porta 5500) -> API local (porta 8000) -> banco local LanceDB.
+      </div>
+
+      <h2 id="sec2">2. Requisitos</h2>
+      <ul>
+        <li>Windows 10/11</li>
+        <li>Python 3.10+ com launcher <code>py</code> no PATH</li>
+        <li>Dependencias do <code>requirements.txt</code></li>
+        <li>Internet apenas para chamadas Gemini (geracao/rerank Gemini/TTS)</li>
+      </ul>
+
+      <h2 id="sec3">3. Estrutura do projeto</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>Pasta/arquivo</th>
+            <th>Funcao</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td><code>frontend/</code></td><td>Interface web (chat, configuracoes, sobre)</td></tr>
+          <tr><td><code>backend/main.py</code></td><td>API local (query, stream, status, TTS)</td></tr>
+          <tr><td><code>rag/query.py</code></td><td>Pipeline RAG e regras de resposta</td></tr>
+          <tr><td><code>lancedb_store/</code></td><td>Base local vetorial e metadados</td></tr>
+          <tr><td><code>iniciar_jurisai_web.bat</code></td><td>Sobe backend + frontend</td></tr>
+          <tr><td><code>desligar_jurisai_web.bat</code></td><td>Encerra backend + frontend</td></tr>
+          <tr><td><code>status_jurisai_web.bat</code></td><td>Mostra status e health</td></tr>
+          <tr><td><code>controle_jurisai_web.bat</code></td><td>Menu amigavel (ligar/desligar/status)</td></tr>
+        </tbody>
+      </table>
+
+      <h2 id="sec4">4. Instalacao</h2>
+      <h3>4.1 Instalar dependencias</h3>
+      <pre>py -m pip install -r requirements.txt</pre>
+      <h3>4.2 Executar a aplicacao</h3>
+      <pre>controle_jurisai_web.bat</pre>
+      <p>No menu, use a opcao <strong>1</strong> para iniciar.</p>
+
+      <h2 id="sec5">5. Primeiro uso (Gemini)</h2>
+      <ol>
+        <li>Abra o app em <code>http://127.0.0.1:5500</code>.</li>
+        <li>No modal inicial, cole sua chave Gemini.</li>
+        <li>Valide/salve a chave.</li>
+      </ol>
+      <div class="warn">
+        Nunca publique sua chave real em reposito rio, screenshot, log ou arquivo ZIP.
+      </div>
+
+      <h2 id="sec6">6. Fluxo de consulta</h2>
+      <ol>
+        <li>Digite a pergunta juridica.</li>
+        <li>Acompanhe a barra de pipeline (Embeddings -> Busca -> Rerank -> Geracao -> Validacao).</li>
+        <li>Leia a resposta e confira as citacoes <code>[DOC. n]</code>.</li>
+        <li>Use o painel lateral para inspecionar cada documento.</li>
+      </ol>
+
+      <h2 id="sec7">7. Configuracoes do RAG</h2>
+      <h3>7.1 Respostas mais ricas</h3>
+      <ul>
+        <li>Aumente <code>Passagens por Documento</code> e <code>Chars Max por Documento</code>.</li>
+        <li>Mantenha <code>Tokens Max da Resposta</code> alto (ex.: 1800+).</li>
+        <li>Use reranker local para custo menor e mais estabilidade.</li>
+      </ul>
+      <h3>7.2 Qualidade vs latencia</h3>
+      <ul>
+        <li>Mais contexto = resposta mais densa, porem mais lenta.</li>
+        <li>Menos contexto = resposta mais rapida, porem mais curta.</li>
+      </ul>
+
+      <h2 id="sec8">8. Iniciar / parar / status</h2>
+      <pre>iniciar_jurisai_web.bat
+desligar_jurisai_web.bat
+status_jurisai_web.bat</pre>
+      <p>Recomendado para usuario final: usar apenas <code>controle_jurisai_web.bat</code>.</p>
+      <div class="ok">
+        Scripts atuais ja fazem validacao de PID/porta e health check do backend.
+      </div>
+
+      <h2 id="sec9">9. Empacotar para usuarios (ZIP)</h2>
+      <h3>9.1 Itens que DEVEM ir no ZIP</h3>
+      <ul>
+        <li>Codigo-fonte</li>
+        <li><code>requirements.txt</code></li>
+        <li><code>lancedb_store/</code> (se voce quer distribuir o acervo pronto)</li>
+        <li>Scripts <code>.bat</code> de controle</li>
+        <li>Documentacao (README + este tutorial)</li>
+      </ul>
+      <h3>9.2 Itens que NAO DEVEM ir no ZIP</h3>
+      <ul>
+        <li><code>.env</code> com chave real</li>
+        <li><code>logs/runtime/*</code> temporarios</li>
+        <li>cache local de ferramentas/editor</li>
+      </ul>
+
+      <h2 id="sec10">10. Seguranca e privacidade</h2>
+      <ul>
+        <li>Backend escuta em <code>127.0.0.1</code> (nao publico).</li>
+        <li>CORS padrao restrito a origens locais da UI.</li>
+        <li>Nao hardcode API key em codigo.</li>
+        <li>Manter dados pessoais somente na secao "Sobre o autor e apoio".</li>
+      </ul>
+
+      <h2 id="sec11">11. Solucao de problemas</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>Sintoma</th>
+            <th>Causa comum</th>
+            <th>Acao</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Erro de chave Gemini</td>
+            <td>Chave invalida/sem permissao</td>
+            <td>Gerar nova chave e validar no onboarding</td>
+          </tr>
+          <tr>
+            <td>Resposta curta</td>
+            <td>Contexto/tokens baixos</td>
+            <td>Aumentar contexto e tokens max da resposta</td>
+          </tr>
+          <tr>
+            <td>App nao abre</td>
+            <td>Porta ocupada</td>
+            <td>Executar <code>status_jurisai_web.bat</code> e depois <code>desligar_jurisai_web.bat</code></td>
+          </tr>
+        </tbody>
+      </table>
+
+      <h2 id="sec12">12. Checklist final antes de publicar</h2>
+      <ol>
+        <li>Rodar testes: <code>py -m pytest -q</code></li>
+        <li>Smoke test: iniciar -> health -> consulta -> desligar</li>
+        <li>Confirmar ausencia de API key real no repositorio</li>
+        <li>Confirmar ausencia de dados pessoais fora da secao Sobre</li>
+        <li>Compactar em ZIP e validar em uma maquina limpa</li>
+      </ol>
+    </main>
+  </div>
+</body>
+</html>
