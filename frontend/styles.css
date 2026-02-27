@@ -1557,6 +1557,36 @@ select {
   color: #9a948f;
 }
 
+.composer-contact {
+  border-top: 1px solid #f3f0ed;
+  padding: 8px 12px 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.composer-contact-label {
+  font-family: var(--mono);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  color: #a29b95;
+}
+
+.composer-contact-link {
+  text-decoration: none;
+  font-size: 12px;
+  color: #5e5751;
+  border-bottom: 1px solid rgba(94, 87, 81, 0.22);
+  transition: color 140ms ease, border-color 140ms ease;
+}
+
+.composer-contact-link:hover {
+  color: #1f1b18;
+  border-bottom-color: rgba(31, 27, 24, 0.45);
+}
+
 .meta-btn {
   border: 0;
   background: transparent;

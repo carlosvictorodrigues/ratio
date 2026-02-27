@@ -338,3 +338,12 @@ def test_frontend_query_stream_has_timeout_and_uses_real_pipeline_runtime():
     assert "QUERY_STREAM_TIMEOUT_MS" in js
     assert "A consulta juridica" in js
     assert 'makePipelineRuntime("real")' in js
+
+
+def test_composer_has_visible_contact_strip():
+    html = _read("frontend/index.html")
+    composer_slice = html.split('<footer class="composer panel-shell">', 1)[1].split("</footer>", 1)[0]
+
+    assert 'class="composer-contact"' in composer_slice
+    assert "Contato" in composer_slice
+    assert 'href="mailto:contato@ratiojuris.me"' in composer_slice
