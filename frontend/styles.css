@@ -1742,6 +1742,15 @@ body[data-evidence-open="false"] .workspace-grid {
   box-shadow: 0 6px 12px rgba(0, 0, 0, 0.08);
 }
 
+.source-card.source-card-actionable {
+  cursor: pointer;
+}
+
+.source-card.source-card-actionable:focus-visible {
+  outline: 2px solid #8f877f;
+  outline-offset: 2px;
+}
+
 .source-card.source-card-flash {
   border-color: #8f877f;
   box-shadow: 0 0 0 1px rgba(143, 135, 127, 0.35), 0 8px 16px rgba(36, 33, 30, 0.14);
@@ -1790,6 +1799,11 @@ body[data-evidence-open="false"] .workspace-grid {
   margin: 6px 0 0;
   font-size: 13px;
   color: #44403c;
+}
+
+.source-detail-badge {
+  font-weight: 600;
+  color: #3f3a35;
 }
 
 .source-thesis {
@@ -1860,6 +1874,18 @@ body[data-evidence-open="false"] .workspace-grid {
   letter-spacing: 0.08em;
   font-weight: 600;
   color: var(--stone-400);
+}
+
+.source-link-btn {
+  border: 0;
+  background: transparent;
+  padding: 0;
+  cursor: pointer;
+}
+
+.source-link-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
 }
 
 .source-link::after {

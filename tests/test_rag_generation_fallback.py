@@ -163,6 +163,27 @@ def test_validate_answer_omits_document_list_and_normalizes_doc_label():
     assert "[DOCUMENTO 1]" not in out
 
 
+def test_validate_answer_does_not_append_literal_support_sections():
+    answer = "No tema de repercussao geral 280, aplica-se a tese fixada [DOC. 1]."
+    docs = [
+        {
+            "tipo": "acordao",
+            "tribunal": "STF",
+            "processo": "RE 603616",
+            "data_julgamento": "2015-11-05",
+            "texto_integral": (
+                "DECISAO\n\nTrata-se de recurso extraordinario.\n\n"
+                "EMENTA: A entrada forcada em domicilio sem mandado judicial so e licita quando houver "
+                "fundadas razoes devidamente justificadas a posteriori.\n\nAcordam os ministros."
+            ),
+            "texto_busca": "Agravo regimental no recurso ordinario em habeas corpus.",
+        }
+    ]
+    out = query_mod._validate_answer(answer, docs, paragraph_citation_min_chars=999)
+    assert "Trechos literais de apoio:" not in out
+    assert "Ementas literais para temas/sumulas citados:" not in out
+
+
 def test_generate_answer_prompt_blocks_internal_labels(monkeypatch):
     fake_client = _FakeClient([_FakeResponse("resposta", "STOP")])
     monkeypatch.setattr(query_mod, "get_gemini_client", lambda: fake_client)

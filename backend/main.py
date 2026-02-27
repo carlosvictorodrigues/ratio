@@ -477,6 +477,34 @@ def _short(text: str, max_chars: int = 1200) -> str:
     return value[: max_chars - 3].rstrip() + "..."
 
 
+def _parse_metadata_extra(raw: Any) -> dict[str, Any]:
+    if isinstance(raw, dict):
+        return raw
+    if raw is None:
+        return {}
+    text = str(raw).strip()
+    if not text:
+        return {}
+    try:
+        parsed = json.loads(text)
+    except Exception:
+        return {}
+    return parsed if isinstance(parsed, dict) else {}
+
+
+def _infer_informativo_numero(*, explicit_value: Any, source_pdf: str) -> str:
+    raw = str(explicit_value or "").strip()
+    if raw:
+        digits = re.sub(r"\D", "", raw)
+        if digits:
+            return str(int(digits))
+    if source_pdf:
+        match = re.search(r"(?i)(?:informativo[_\s-]*|inf)(\d{1,5})", source_pdf)
+        if match:
+            return str(int(match.group(1)))
+    return ""
+
+
 def _extract_normative_statement_from_row(row: dict[str, Any], max_chars: int = 260) -> str:
     tipo = (row.get("tipo") or "").strip().lower()
     merged = "\n".join([
@@ -486,6 +514,22 @@ def _extract_normative_statement_from_row(row: dict[str, Any], max_chars: int = 
     text = _normalize_for_tts(merged)
     if not text:
         return ""
+
+    if tipo == "tema_repetitivo_stj":
+        raw_full = str(row.get("texto_integral") or merged or "")
+        clean_full = re.sub(r"\r\n?", "\n", raw_full)
+        repetitive_patterns = (
+            r"(?is)teses?\s+jur[ií]dicas?\s*:\s*\"([^\"]{40,2200})\"",
+            r"(?is)tese\s+firmada[^:\n]{0,120}:\s*\"([^\"]{40,2200})\"",
+            r"(?is)fixam-se\s+as\s+seguintes\s+teses?\s+jur[ií]dicas?\s*:\s*\"([^\"]{40,2200})\"",
+        )
+        for pattern in repetitive_patterns:
+            match = re.search(pattern, clean_full)
+            if not match:
+                continue
+            candidate = re.sub(r"\s+", " ", match.group(1)).strip(" -:\"")
+            if len(candidate) >= 40:
+                return _short(candidate, max_chars=max(320, max_chars))
 
     norm = re.sub(r"\s+", " ", text).strip().lower()
     structural_types = {"sumula", "sumula_stj", "sumula_vinculante", "tema_repetitivo_stj"}
@@ -1457,6 +1501,14 @@ def _serialize_doc(idx: int, row: dict[str, Any]) -> dict[str, Any]:
     if not source_label:
         source_label = "Base Ratio (STF/STJ)" if source_id == "ratio" else source_id
     source_kind = str(row.get("source_kind") or "").strip() or ("ratio" if source_id == "ratio" else "user")
+    metadata_extra = _parse_metadata_extra(row.get("metadata_extra"))
+    source_pdf = str(metadata_extra.get("source_pdf") or "").strip()
+    informativo_numero = _infer_informativo_numero(
+        explicit_value=metadata_extra.get("informativo_numero"),
+        source_pdf=source_pdf,
+    )
+    informativo_titulo = str(metadata_extra.get("informativo_titulo") or "").strip()
+    texto_integral_full = (row.get("texto_integral") or "").strip()
 
     return {
         "index": idx,
@@ -1475,10 +1527,14 @@ def _serialize_doc(idx: int, row: dict[str, Any]) -> dict[str, Any]:
         "inteiro_teor_url": (row.get("inteiro_teor_url") or row.get("url") or "").strip(),
         "texto_busca": _short(row.get("texto_busca") or "", max_chars=1500),
         "texto_integral_excerpt": _short(row.get("texto_integral") or "", max_chars=1800),
-        "normative_statement": _short(normative_statement, max_chars=260),
+        "normative_statement": _short(normative_statement, max_chars=520),
         "source_id": source_id,
         "source_label": source_label,
         "source_kind": source_kind,
+        "source_pdf": source_pdf,
+        "informativo_numero": informativo_numero,
+        "informativo_titulo": informativo_titulo,
+        "texto_integral_full": texto_integral_full,
     }
 
 

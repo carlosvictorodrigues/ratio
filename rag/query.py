@@ -2734,27 +2734,13 @@ def _validate_answer(
 ) -> str:
     normalized = normalize_text(answer)
     has_refusal = "nao encontrei" in normalized
-    has_citation = bool(CITATION_PATTERN.search(answer))
-    literal_quotes = _count_literal_quotes(answer, docs)
 
     if has_refusal:
         return "Não encontrei documentos relevantes no acervo para estruturar uma resposta."
 
-    if not has_citation or literal_quotes < 2:
-        fallback = _build_citation_fallback(docs)
-        if fallback:
-            answer = answer.rstrip() + fallback
-
     answer = _format_direct_quotes_markdown(answer, docs)
     answer = _cleanup_quote_markdown_noise(answer)
     answer = _normalize_doc_citation_labels(answer)
-
-    cited_numbers = [n for n in _extract_cited_doc_numbers(answer) if 1 <= n <= len(docs)]
-
-    ementa_enrichment = _build_theme_sumula_ementa_enrichment(answer, docs)
-    if ementa_enrichment:
-        answer = answer.rstrip() + ementa_enrichment
-        answer = _normalize_doc_citation_labels(answer)
 
     return answer
 

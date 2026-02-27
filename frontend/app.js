@@ -227,6 +227,80 @@ function dateHuman(raw) {
   return m ? `${m[3]}/${m[2]}/${m[1]}` : safeText(raw, "-");
 }
 
+function isInformativoDoc(doc) {
+  return String(doc?.tipo || "").trim().toLowerCase() === "informativo";
+}
+
+function buildInformativoBadge(doc) {
+  if (!isInformativoDoc(doc)) return "";
+  const numero = String(doc?.informativo_numero || "").trim();
+  const tribunal = safeText(doc?.tribunal || "-", "-");
+  if (numero) return `Informativo n. ${numero} (${tribunal})`;
+  const sourcePdf = String(doc?.source_pdf || "").trim();
+  if (sourcePdf) return `Informativo (${tribunal}) - ${sourcePdf}`;
+  return `Informativo (${tribunal})`;
+}
+
+function findDocByIndex(turn, docIndex) {
+  const docs = Array.isArray(turn?.docs) ? turn.docs : [];
+  const wanted = String(docIndex || "").trim();
+  if (!wanted) return null;
+  return docs.find((doc) => String(doc?.index ?? "").trim() === wanted) || null;
+}
+
+function buildSourceDocumentText(doc) {
+  const parts = [
+    `${safeText(doc?.tipo_label || doc?.tipo, "Documento")}: ${safeText(doc?.processo, "-")}`,
+    `Tribunal prolator: ${safeText(doc?.tribunal, "-")}`,
+    `Orgao julgador: ${safeText(doc?.orgao_julgador, "-")}`,
+    `Relator(a): ${safeText(doc?.relator, "-")}`,
+    `Data: ${safeText(doc?.data_julgamento, "-")}`
+  ];
+  const infoLabel = buildInformativoBadge(doc);
+  if (infoLabel) parts.push(infoLabel);
+  parts.push("");
+  const fullText = String(doc?.texto_integral_full || "").trim();
+  const excerptText = String(doc?.texto_integral_excerpt || "").trim();
+  const fallbackText = String(doc?.texto_busca || "").trim();
+  const body = fullText || excerptText || fallbackText;
+  if (!body) return "";
+  parts.push(body);
+  return parts.join("\n");
+}
+
+function openSourceDocumentByIndex(docIndex) {
+  const turn = getTurn(state.activeTurnId);
+  const doc = findDocByIndex(turn, docIndex);
+  if (!doc) {
+    setRequestState(`DOC. ${String(docIndex || "").trim()} nao encontrado para abrir inteiro teor.`, true);
+    return;
+  }
+
+  const externalUrl = String(doc.inteiro_teor_url || "").trim();
+  if (externalUrl) {
+    const opened = window.open(externalUrl, "_blank", "noopener,noreferrer");
+    if (!opened) {
+      setRequestState("O navegador bloqueou a abertura do inteiro teor em nova aba.", true);
+    }
+    return;
+  }
+
+  const text = buildSourceDocumentText(doc);
+  if (!text) {
+    setRequestState("Este anexo nao possui inteiro teor disponivel para leitura.", true);
+    return;
+  }
+  const blob = new Blob([text], { type: "text/plain;charset=utf-8" });
+  const blobUrl = URL.createObjectURL(blob);
+  const opened = window.open(blobUrl, "_blank", "noopener,noreferrer");
+  if (!opened) {
+    URL.revokeObjectURL(blobUrl);
+    setRequestState("O navegador bloqueou a abertura do documento em nova aba.", true);
+    return;
+  }
+  window.setTimeout(() => URL.revokeObjectURL(blobUrl), 60_000);
+}
+
 function formatSeconds(value) {
   if (typeof value !== "number" || !Number.isFinite(value)) return "-";
   return `${value.toFixed(2)}s`;
@@ -2611,11 +2685,12 @@ function renderSources(turn) {
     const docIndex = safeText(d.index, "-");
     const title = `${safeText(d.tipo_label)}: ${safeText(d.processo)}`;
     const relatoria = `Rel: ${safeText(d.relator)}`;
-    const authority = `Nivel ${safeText(d.authority_level)} (${safeText(d.authority_label)})`;
     const orgao = safeText(d.orgao_julgador || d.turma || "-", "-");
-    const source = `Origem: ${safeText(d.source_label || d.source_id || "Base Ratio")}`;
+    const tribunalLabel = `Tribunal prolator: ${safeText(d.tribunal, "-")}`;
+    const informativoBadge = buildInformativoBadge(d);
     const date = dateHuman(d.data_julgamento);
     const normativeStatement = safeText(d.normative_statement, "");
+    const inlineReadable = !!String(d.texto_integral_full || d.texto_integral_excerpt || d.texto_busca || "").trim();
     const thesisBlock = normativeStatement
       ? `
         <details class="source-thesis">
@@ -2625,18 +2700,18 @@ function renderSources(turn) {
       `
       : "";
     const link = d.inteiro_teor_url
-      ? `<a class="source-link" href="${escapeHtml(d.inteiro_teor_url)}" target="_blank" rel="noopener noreferrer">Ler inteiro teor</a>`
-      : "";
+      ? `<a class="source-link" href="${escapeHtml(d.inteiro_teor_url)}" target="_blank" rel="noopener noreferrer" data-source-action="open-external" data-doc-index="${escapeHtml(docIndex)}">Ler inteiro teor</a>`
+      : `<button class="source-link source-link-btn" type="button" data-source-action="open-inline" data-doc-index="${escapeHtml(docIndex)}" ${inlineReadable ? "" : "disabled"}>Ler inteiro teor</button>`;
     return `
-      <article class="source-card" data-doc-index="${escapeHtml(docIndex)}">
+      <article class="source-card source-card-actionable" data-doc-index="${escapeHtml(docIndex)}" data-open-doc="1" tabindex="0" role="button" aria-label="Abrir DOC ${escapeHtml(docIndex)}">
         <div class="source-top">
           <span class="source-doc-tag">DOC ${escapeHtml(docIndex)}</span>
           <span class="source-date">${escapeHtml(date)}</span>
         </div>
         <p class="source-title">${escapeHtml(title)}</p>
         <p class="source-orgao">${escapeHtml(orgao)}</p>
-        <p class="source-detail">${escapeHtml(source)}</p>
-        <p class="source-detail">${escapeHtml(authority)}</p>
+        <p class="source-detail">${escapeHtml(tribunalLabel)}</p>
+        ${informativoBadge ? `<p class="source-detail source-detail-badge">${escapeHtml(informativoBadge)}</p>` : ""}
         <p class="source-detail">${escapeHtml(relatoria)}</p>
         ${thesisBlock}
         <div class="source-footer">
@@ -3471,6 +3546,37 @@ function bindEvents() {
     const turnId = button.dataset.turn;
     const audioMode = button.dataset.mode || "";
     await handleTurnAction(action, turnId, audioMode);
+  });
+
+  sourcesBox?.addEventListener("click", (event) => {
+    const target = event.target instanceof Element ? event.target : null;
+    if (!target) return;
+    if (target.closest(".source-thesis")) return;
+
+    const sourceAction = target.closest("[data-source-action]");
+    if (sourceAction) {
+      const action = sourceAction.getAttribute("data-source-action") || "";
+      const docIndex = sourceAction.getAttribute("data-doc-index") || "";
+      if (action === "open-inline") {
+        event.preventDefault();
+        openSourceDocumentByIndex(docIndex);
+      }
+      return;
+    }
+
+    const card = target.closest(".source-card[data-open-doc='1']");
+    if (!card) return;
+    openSourceDocumentByIndex(card.getAttribute("data-doc-index") || "");
+  });
+
+  sourcesBox?.addEventListener("keydown", (event) => {
+    const target = event.target instanceof Element ? event.target : null;
+    if (!target) return;
+    const card = target.closest(".source-card[data-open-doc='1']");
+    if (!card) return;
+    if (event.key !== "Enter" && event.key !== " ") return;
+    event.preventDefault();
+    openSourceDocumentByIndex(card.getAttribute("data-doc-index") || "");
   });
 
   libraryList?.addEventListener("click", (event) => {

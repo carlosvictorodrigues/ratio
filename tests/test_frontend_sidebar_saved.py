@@ -255,6 +255,22 @@ def test_frontend_reuses_cached_stream_audio_without_new_tts_generation():
     assert "replaceTurnAudioSession" in js
 
 
+def test_dossie_cards_remove_source_and_level_lines_and_show_tribunal():
+    js = _read("frontend/app.js")
+    assert "Origem: ${safeText(d.source_label" not in js
+    assert "Nivel ${safeText(d.authority_level)" not in js
+    assert "Tribunal prolator:" in js
+
+
+def test_dossie_cards_support_full_document_open_on_card_click():
+    js = _read("frontend/app.js")
+    css = _read("frontend/styles.css")
+    assert "openSourceDocumentByIndex" in js
+    assert "data-open-doc=\"1\"" in js
+    assert "data-source-action=\"open-inline\"" in js
+    assert "source-card-actionable" in css
+
+
 def test_onboarding_timeout_falls_back_to_save_key_without_validation():
     js = _read("frontend/app.js")
     assert "fallbackSaveResult" in js
