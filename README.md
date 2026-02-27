@@ -41,6 +41,11 @@ flowchart LR
 1. Usuario final (recomendado): executa `Ratio.exe` a partir da pasta `dist\Ratio\`.
 2. Desenvolvimento: roda backend/frontend manualmente com Python.
 
+Download do pacote Windows:
+<https://drive.google.com/file/d/1fHNvcpugTT9b2y2C1F193HefmxhO9hmM/view?usp=sharing>
+
+Versao da landing page: 27/02/2026
+
 ---
 
 ## O que este pacote contem
