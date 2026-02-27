@@ -398,7 +398,7 @@ Se o Ratio for util no seu fluxo de pesquisa, seu apoio ajuda a manter e evoluir
 
 - GitHub Sponsors: <https://github.com/sponsors/carlosvictorodrigues>
 - Instagram: `@carlosvictorodrigues`
-- E-mail: `carlosvictorodrigues@gmail.com`
+- E-mail: `contato@ratiojuris.me`
 - PIX (copia e cola):
 
 ```text
