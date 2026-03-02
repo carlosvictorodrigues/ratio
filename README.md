@@ -146,33 +146,33 @@ GEMINI_API_KEY=...
 
 O endpoint `/api/tts` suporta dois provedores:
 
-- `legacy_google` (padrao): Google Cloud Text-to-Speech (`texttospeech.googleapis.com`) com voz Neural2.
-- `gemini_native`: caminho Gemini nativo (mantido como alternativa).
+- `gemini_native` (padrao): caminho Gemini nativo.
+- `legacy_google`: Google Cloud Text-to-Speech (`texttospeech.googleapis.com`) como rollback.
 
-Perfil padrao estavel:
-
-```text
-TTS_PROVIDER=legacy_google
-GOOGLE_TTS_VOICE_NAME=pt-BR-Neural2-B
-TTS_LANGUAGE_CODE=pt-BR
-GOOGLE_TTS_MAX_CHARS=5000
-GOOGLE_TTS_REQUEST_TIMEOUT_MS=45000
-```
-
-Observacoes:
-- perfil legado usa `speakingRate=1.2` e `pitch=-4.5`.
-- chave usada: `GOOGLE_TTS_API_KEY` ou `GEMINI_API_KEY` (fallback).
-
-Opcional (caminho Gemini):
+Perfil padrao atual:
 
 ```text
 TTS_PROVIDER=gemini_native
 GEMINI_TTS_MODEL=gemini-2.5-flash-preview-tts
 GEMINI_TTS_VOICE=charon
-GEMINI_TTS_MAX_CHARS=400
+GEMINI_TTS_MAX_CHARS=5000
 GEMINI_TTS_REQUEST_TIMEOUT_MS=120000
 GEMINI_TTS_REQUEST_RETRY_ATTEMPTS=1
 GEMINI_TTS_MODEL_MAX_ATTEMPTS=2
+TTS_LANGUAGE_CODE=pt-BR
+```
+
+Observacoes:
+- perfil Gemini segue voz `charon` e segmentacao por SSML ate `5000` chars por bloco.
+- chave usada: `GEMINI_API_KEY`.
+
+Opcional (rollback legado):
+
+```text
+TTS_PROVIDER=legacy_google
+GOOGLE_TTS_VOICE_NAME=pt-BR-Neural2-B
+GOOGLE_TTS_MAX_CHARS=5000
+GOOGLE_TTS_REQUEST_TIMEOUT_MS=45000
 ```
 
 ---

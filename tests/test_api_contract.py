@@ -383,9 +383,11 @@ def test_tts_extract_converts_pcm_l16_into_wav():
     assert audio.startswith(b"RIFF")
 
 
-def test_tts_defaults_to_legacy_provider():
+def test_tts_defaults_to_gemini_native_provider():
     backend_main = _load_backend_with_stub()
-    assert backend_main.TTS_PROVIDER == "legacy_google"
+    assert backend_main.TTS_PROVIDER == "gemini_native"
+    assert backend_main.TTS_MODEL == "gemini-2.5-flash-preview-tts"
+    assert backend_main.TTS_MAX_CHARS == 5000
 
 
 def test_legacy_tts_module_targets_google_cloud_tts_endpoint():
@@ -393,33 +395,31 @@ def test_legacy_tts_module_targets_google_cloud_tts_endpoint():
     assert "texttospeech.googleapis.com/v1/text:synthesize" in legacy_source
 
 
-def test_tts_dispatch_routes_to_legacy_provider_by_default():
+def test_tts_dispatch_routes_to_gemini_provider_by_default():
     backend_main = _load_backend_with_stub()
-    backend_main.TTS_PROVIDER = "legacy_google"
-    backend_main._synthesize_legacy_google_tts = lambda *_args, **_kwargs: (b"legacy-audio", "audio/mpeg")
-    backend_main._synthesize_google_tts = lambda *_args, **_kwargs: (_ for _ in ()).throw(
-        RuntimeError("should not call gemini path")
+    backend_main._synthesize_google_tts = lambda *_args, **_kwargs: (b"gemini-audio", "audio/wav")
+    backend_main._synthesize_legacy_google_tts = lambda *_args, **_kwargs: (_ for _ in ()).throw(
+        RuntimeError("should not call legacy path")
     )
 
     audio, mime = backend_main._synthesize_tts("teste", trace_id="trace001")
-    assert audio == b"legacy-audio"
-    assert mime == "audio/mpeg"
+    assert audio == b"gemini-audio"
+    assert mime == "audio/wav"
 
 
-def test_tts_stream_dispatch_routes_to_legacy_provider_by_default():
+def test_tts_stream_dispatch_routes_to_gemini_provider_by_default():
     backend_main = _load_backend_with_stub()
-    backend_main.TTS_PROVIDER = "legacy_google"
-    backend_main._stream_legacy_tts_chunks = lambda *_args, **_kwargs: iter(
-        [(b"legacy-chunk", "audio/mpeg", 1, 1)]
+    backend_main._stream_google_tts_chunks = lambda *_args, **_kwargs: iter(
+        [(b"gemini-chunk", "audio/wav", 1, 1)]
     )
-    backend_main._stream_google_tts_chunks = lambda *_args, **_kwargs: (_ for _ in ()).throw(
-        RuntimeError("should not call gemini stream path")
+    backend_main._stream_legacy_tts_chunks = lambda *_args, **_kwargs: (_ for _ in ()).throw(
+        RuntimeError("should not call legacy stream path")
     )
 
     chunks = list(backend_main._stream_tts_chunks("teste", trace_id="trace002"))
     assert len(chunks) == 1
-    assert chunks[0][0] == b"legacy-chunk"
-    assert chunks[0][1] == "audio/mpeg"
+    assert chunks[0][0] == b"gemini-chunk"
+    assert chunks[0][1] == "audio/wav"
 
 
 def test_tts_normalize_removes_doc_citation_markers():

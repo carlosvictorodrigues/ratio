@@ -318,18 +318,18 @@ def _normalize_tts_provider(raw: str) -> str:
         return "legacy_google"
     if value in {"gemini", "gemini_native", "gemini-native", "gemini_preview", "gemini-native-preview"}:
         return "gemini_native"
-    return "legacy_google"
+    return "gemini_native"
 
 
-TTS_PROVIDER = _normalize_tts_provider(os.getenv("TTS_PROVIDER", "legacy_google"))
+TTS_PROVIDER = _normalize_tts_provider(os.getenv("TTS_PROVIDER", "gemini_native"))
 TTS_RATE = 1.2
 TTS_PITCH_SEMITONES = -4.5
 TTS_BREAK_ALT_MS = 450
 TTS_BREAK_ART_MS = 900
 try:
-    TTS_MAX_CHARS = int(os.getenv("GEMINI_TTS_MAX_CHARS", "400"))
+    TTS_MAX_CHARS = int(os.getenv("GEMINI_TTS_MAX_CHARS", "5000"))
 except (TypeError, ValueError):
-    TTS_MAX_CHARS = 400
+    TTS_MAX_CHARS = 5000
 TTS_MAX_CHARS = max(250, min(TTS_MAX_CHARS, 5000))
 TTS_ALTERNATIVE_LABEL = os.getenv("TTS_ALTERNATIVE_LABEL", "Alternativa")
 TTS_MARK_ALT = "[[BRK_ALT]]"
