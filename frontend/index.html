@@ -1,4 +1,4 @@
-<!doctype html>
+﻿<!doctype html>
 <html lang="pt-BR">
 <head>
   <meta charset="UTF-8" />
@@ -15,10 +15,9 @@
   <meta property="og:image:alt" content="Icone de balanca da justica em preto - Ratio" />
   <meta property="og:type" content="website" />
   <meta name="twitter:card" content="summary_large_image" />
-  <script src="https://cdn.tailwindcss.com"></script>
-  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.6/dist/purify.min.js"></script>
-  <script src="https://unpkg.com/lucide@latest"></script>
+  <script src="https://cdn.jsdelivr.net/npm/marked@13.0.2/marked.min.js" integrity="sha384-jJWlCM+rFWSQruX9AsLlEfjF73FlUiTSl2t1tnq+EZPHdFHIoUBmX0mlKgDocb9G" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.6/dist/purify.min.js" integrity="sha384-+VfUPEb0PdtChMwmBcBmykRMDd+v6D/oFmB3rZM/puCMDYcIvF968OimRh4KQY9a" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/lucide@0.460.0/dist/umd/lucide.min.js" integrity="sha384-ieG+IKD0d/ZPXyCBTMVAbqsQdns8QGJR/e26WMw7M4fkaI/rHcS/YIoi+ah9WGge" crossorigin="anonymous"></script>
   <link rel="stylesheet" href="./styles.css" />
 </head>
 <body data-settings-open="false" data-acervo-open="false" data-evidence-open="true" data-library-open="false" data-onboarding-open="false" data-about-open="false">
@@ -65,7 +64,7 @@
       <div class="onboarding-subhead">Custos e cota gratuita (snapshot 24/02/2026)</div>
       <div class="cost-grid">
         <article class="cost-card">
-          <h3>gemini-3-pro-preview</h3>
+          <h3>gemini-3.1-pro-preview</h3>
           <p>Sem cota gratuita.</p>
           <p>Entrada: US$ 2.00 (ate 200k) / US$ 4.00 (&gt; 200k) por 1M tokens.</p>
           <p>Saida: US$ 12.00 (ate 200k) / US$ 18.00 (&gt; 200k) por 1M tokens.</p>
@@ -113,7 +112,7 @@
           <p>Faixa total comum: ~3.6k a 8.6k tokens por resposta.</p>
         </article>
         <article class="cost-card">
-          <h3>Se usar modelo pago (ex.: 3-pro)</h3>
+          <h3>Se usar modelo pago (ex.: gemini-3.1-pro-preview)</h3>
           <p>Custo aproximado por pergunta: ~US$ 0.02 a US$ 0.05.</p>
           <p>Depende de: tamanho do contexto, top-k, tokens de saida e fallback.</p>
           <p>Reranker Gemini aumenta custo por adicionar chamadas extras.</p>
@@ -327,6 +326,10 @@
         <h1>Pesquisa Jurisprudencial</h1>
       </div>
       <div class="top-actions">
+        <button id="personaChipBtn" class="chip-btn" type="button" title="Modo de resposta ativo">
+          Modo:
+          <span id="personaChipValue">Visao Geral</span>
+        </button>
         <button id="toggleSettingsBtn" class="chip-btn" type="button" title="Abrir configuracoes do RAG">
           Reranker:
           <span id="rerankerChipValue">Local</span>
@@ -353,6 +356,34 @@
               <i data-lucide="send"></i>
               Enviar
             </button>
+          </div>
+          <div class="persona-row">
+            <button class="persona-chip persona-chip--active" type="button" data-persona="visao_geral">Visao Geral</button>
+            <button class="persona-chip" type="button" data-persona="parecer">Parecer Juridico</button>
+            <button class="persona-chip" type="button" data-persona="estudos">Estudos</button>
+            <button class="persona-chip" type="button" data-persona="peticao">Peticao</button>
+            <button id="tipsBtn" class="persona-tips-btn" type="button" title="Dicas de prompt">
+              <i data-lucide="lightbulb" style="width:14px;height:14px"></i>
+            </button>
+          </div>
+          <div id="tipsPopover" class="tips-popover" hidden>
+            <div class="tips-popover-header">
+              <span class="tips-popover-title">Dicas de prompt</span>
+              <button id="closeTipsBtn" class="tips-popover-close" type="button" title="Fechar">
+                <i data-lucide="x" style="width:14px;height:14px"></i>
+              </button>
+            </div>
+            <div class="tips-popover-body">
+              <p class="tips-example"><span class="tips-bad">aposentadoria e contrato</span></p>
+              <p class="tips-example"><span class="tips-good">A aposentadoria espontanea extingue o contrato de trabalho?</span></p>
+              <p class="tips-section">Adicione contexto:</p>
+              <p class="tips-example"><span class="tips-good">No caso de empregado publico celetista aposentado antes da EC 103/2019...</span></p>
+              <p class="tips-section">Peca o que precisa:</p>
+              <p class="tips-example"><span class="tips-good">Preciso de precedentes do STF que sustentem que...</span></p>
+              <p class="tips-example"><span class="tips-good">Compare a posicao do STF com a do STJ sobre...</span></p>
+              <p class="tips-section">Delimite no tempo:</p>
+              <p class="tips-example"><span class="tips-good">Qual a jurisprudencia mais recente (2023-2025) sobre...</span></p>
+            </div>
           </div>
           <div class="composer-meta">
             <button class="meta-btn" type="button" data-open-settings>
@@ -433,9 +464,7 @@
           <select id="geminiRerankModelInput">
             <option value="gemini-2.5-pro">gemini-2.5-pro</option>
             <option value="gemini-2.5-flash">gemini-2.5-flash</option>
-            <option value="gemini-3-pro-preview">gemini-3-pro-preview</option>
-            <option value="gemini-3.1-pro">gemini-3.1-pro</option>
-            <option value="gemini-3-pro">gemini-3-pro</option>
+            <option value="gemini-3.1-pro-preview">gemini-3.1-pro-preview</option>
             <option value="gemini-3-flash-preview">gemini-3-flash-preview</option>
             <option value="gemini-3-flash">gemini-3-flash</option>
             <option value="gemini-2.0-flash">gemini-2.0-flash</option>
@@ -464,9 +493,7 @@
           <input id="generationFallbackModelInput" list="geminiModelsList" type="text" autocomplete="off" />
         </label>
         <datalist id="geminiModelsList">
-          <option value="gemini-3-pro-preview"></option>
-          <option value="gemini-3.1-pro"></option>
-          <option value="gemini-3-pro"></option>
+          <option value="gemini-3.1-pro-preview"></option>
           <option value="gemini-3-flash-preview"></option>
           <option value="gemini-2.5-pro"></option>
           <option value="gemini-2.5-flash"></option>
@@ -476,6 +503,62 @@
         <p class="rag-panel-note">
           Esses modelos sao enviados ao backend em cada consulta para refletir imediatamente sua configuracao.
         </p>
+      </div>
+    </details>
+
+    <details class="disclosure" open>
+      <summary>Personas de resposta</summary>
+      <div class="disclosure-body">
+        <p class="rag-panel-note">
+          Ajuste prompt e modelo por persona. Essas configuracoes ficam salvas localmente e valem na proxima consulta.
+        </p>
+        <div class="persona-config-grid">
+          <label class="field">
+            <span>Persona</span>
+            <select id="personaConfigSelect">
+              <option value="visao_geral">Visao Geral</option>
+              <option value="parecer">Parecer Juridico</option>
+              <option value="estudos">Estudos</option>
+              <option value="peticao">Peticao</option>
+            </select>
+          </label>
+          <label class="field">
+            <span>Modelo da persona (opcional)</span>
+            <input id="personaModelInput" list="geminiModelsList" type="text" autocomplete="off" placeholder="Vazio = usa modelo global" />
+          </label>
+        </div>
+        <label class="field">
+          <span>Prompt da persona (opcional)</span>
+          <textarea id="personaPromptInput" class="persona-prompt-input" rows="7" maxlength="6000" placeholder="Vazio = usa prompt padrao da persona."></textarea>
+        </label>
+        <div class="rag-panel-actions">
+          <button id="savePersonaConfigBtn" class="meta-btn" type="button">
+            <i data-lucide="save"></i>
+            Salvar persona
+          </button>
+          <button id="resetPersonaConfigBtn" class="meta-btn" type="button">
+            <i data-lucide="rotate-ccw"></i>
+            Restaurar padrao
+          </button>
+          <span id="personaConfigStatus" class="rag-config-status">Carregando configuracoes de persona...</span>
+        </div>
+      </div>
+    </details>
+
+    <details class="disclosure" open>
+      <summary>Leitura em voz alta (TTS)</summary>
+      <div class="disclosure-body">
+        <label class="field">
+          <span>Motor de voz</span>
+          <select id="ttsProviderSelect">
+            <option value="legacy_google">Classico (Google TTS Legacy)</option>
+            <option value="gemini_native">Moderno (Gemini Native TTS)</option>
+          </select>
+        </label>
+        <p class="rag-panel-note">
+          A escolha e aplicada no backend e passa a valer na proxima leitura em voz alta.
+        </p>
+        <span id="ttsProviderStatus" class="rag-config-status">Carregando configuracao de TTS...</span>
       </div>
     </details>
 
@@ -577,6 +660,32 @@
           <li data-index-stage="embed">Embeddings e gravacao no acervo</li>
           <li data-index-stage="done">Concluido</li>
         </ol>
+      </div>
+    </details>
+
+    <details class="disclosure" open>
+      <summary>Atualizacao da base oficial (STF/STJ)</summary>
+      <div class="disclosure-body">
+        <p class="rag-panel-note">
+          Atualiza a base oficial com jurisprudencias novas de 2026 em diante.
+          Na etapa STF, o processo pode abrir uma nova janela do Chrome para validacao do portal.
+        </p>
+        <div class="rag-panel-actions">
+          <button id="runJurisUpdateBtn" class="meta-btn index-acervo-btn" type="button">
+            <i data-lucide="refresh-cw"></i>
+            Pesquisar e atualizar jurisprudencia
+          </button>
+          <span id="jurisUpdateStatus" class="rag-config-status">Carregando ultimo status da base oficial...</span>
+        </div>
+        <ol id="jurisUpdateStages" class="index-stage-list">
+          <li data-juris-stage="idle" class="active">Aguardando acao</li>
+          <li data-juris-stage="stf_start">Coleta STF (Chromium)</li>
+          <li data-juris-stage="stj_start">Coleta STJ</li>
+          <li data-juris-stage="embed_start">Embeddings</li>
+          <li data-juris-stage="upsert_start">Gravacao no banco</li>
+          <li data-juris-stage="done">Concluido</li>
+        </ol>
+        <p id="jurisUpdateSummary" class="rag-panel-note"></p>
       </div>
     </details>
 

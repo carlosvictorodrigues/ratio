@@ -44,7 +44,7 @@ flowchart LR
 Download do pacote Windows:
 <https://drive.google.com/file/d/1fHNvcpugTT9b2y2C1F193HefmxhO9hmM/view?usp=sharing>
 
-Versao da landing page: 27/02/2026
+Versao da landing page em producao (`ratiojuris.me`): v2026.03.02 (deploy em 02/03/2026). Atualizacoes locais mais recentes podem ainda nao estar publicadas.
 
 ---
 
@@ -153,12 +153,13 @@ Perfil padrao atual:
 
 ```text
 TTS_PROVIDER=gemini_native
-GEMINI_TTS_MODEL=gemini-2.5-flash-preview-tts
+GEMINI_TTS_MODEL=gemini-2.5-pro-preview-tts
 GEMINI_TTS_VOICE=charon
 GEMINI_TTS_MAX_CHARS=5000
-GEMINI_TTS_REQUEST_TIMEOUT_MS=120000
-GEMINI_TTS_REQUEST_RETRY_ATTEMPTS=1
-GEMINI_TTS_MODEL_MAX_ATTEMPTS=2
+GEMINI_TTS_STREAM_MAX_CHARS=1200
+GEMINI_TTS_REQUEST_TIMEOUT_MS=45000
+GEMINI_TTS_REQUEST_RETRY_ATTEMPTS=0
+GEMINI_TTS_MODEL_MAX_ATTEMPTS=1
 TTS_LANGUAGE_CODE=pt-BR
 ```
 
@@ -196,7 +197,7 @@ Valores podem mudar. Sempre confirme na tabela oficial.
 
 | Modelo | Cota gratuita | Preco de entrada (1M tokens) | Preco de saida (1M tokens) |
 |---|---|---|---|
-| `gemini-3-pro-preview` | Nao | US$ 2.00 (<=200k) / US$ 4.00 (>200k) | US$ 12.00 (<=200k) / US$ 18.00 (>200k) |
+| `gemini-3.1-pro-preview` | Nao | US$ 2.00 (<=200k) / US$ 4.00 (>200k) | US$ 12.00 (<=200k) / US$ 18.00 (>200k) |
 | `gemini-2.5-flash` | Sim | US$ 0.30 (<=200k) / US$ 0.60 (>200k) | US$ 2.50 (<=200k) / US$ 3.50 (>200k) |
 | `gemini-embedding-001` | Sim | US$ 0.15 | N/A |
 
@@ -341,9 +342,46 @@ curl http://127.0.0.1:8000/health
 6. Faça as consultas.
 7. Para encerrar, use `controle_jurisai_web.bat` (opcao 2) ou `desligar_jurisai_web.bat`.
 
+## Atualizacao automatica da base oficial (2026+)
+
+No painel **Meu Acervo**, existe o bloco **Atualizacao da base oficial (STF/STJ)** com o botao:
+
+- `Pesquisar e atualizar jurisprudencia`
+
+Esse processo:
+
+1. Busca apenas novos registros de **2026 em diante**.
+2. Roda em segundo plano (com acompanhamento por status).
+3. No STJ, aplica tratamento de qualidade antes da insercao:
+   - limpeza local de OCR/quebras;
+   - reparo condicional com Gemini (`gemini-3-flash-preview`) para campos suspeitos/quebrados.
+4. Atualiza LanceDB com deduplicacao por `doc_id`.
+5. Exibe no final o resumo de "atualizado ate" para STF e STJ.
+
+Observacao importante:
+- Na etapa STF, pode abrir uma janela Chromium para validacao do portal de jurisprudencia.
+- No build Windows, o Chromium do Playwright pode ser empacotado junto ao app para nao depender do Chrome instalado na maquina do usuario.
+
+Configuracoes opcionais do reparo STJ:
+
+```env
+JURIS_UPDATE_STJ_REPAIR_WITH_GEMINI=1
+JURIS_UPDATE_STJ_REPAIR_MODEL=gemini-3-flash-preview
+JURIS_UPDATE_STJ_REPAIR_MIN_CONFIDENCE=0.62
+JURIS_UPDATE_STJ_REPAIR_MAX_RECORDS_PER_PDF=24
+JURIS_UPDATE_STRICT_COMPLETENESS=1
+JURIS_UPDATE_EMBED_FALLBACK_ON_QUOTA=1
+```
+
+- `JURIS_UPDATE_STRICT_COMPLETENESS=1`: se detectar lacunas esperadas (ex.: edicoes STJ sem registro), o job falha em vez de marcar sucesso.
+- `JURIS_UPDATE_EMBED_FALLBACK_ON_QUOTA=1`: se a cota de embedding Gemini estourar, usa embedding hash local para nao deixar documentos de fora.
+
 ---
 
 ## Erros comuns e significado
+
+Manual detalhado para publicacao no site:
+- `docs/ERROS_COMUNS_SITE.md`
 
 | Codigo | Significado | Acao recomendada |
 |---|---|---|

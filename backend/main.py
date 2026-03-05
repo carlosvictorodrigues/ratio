@@ -1,6 +1,7 @@
 ﻿from __future__ import annotations
 
 import base64
+from collections import deque
 import copy
 import html
 import io
@@ -20,7 +21,7 @@ from concurrent.futures import ThreadPoolExecutor, Future, as_completed
 from pathlib import Path
 from typing import Any, Callable, Literal, Optional
 
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 import httpx
@@ -37,13 +38,14 @@ try:
 except Exception:  # pragma: no cover - optional runtime dependency in some test harnesses
     fitz = None
 from google.genai import types
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 from backend.tts_legacy_google import (
     DEFAULT_ENDPOINT as LEGACY_TTS_DEFAULT_ENDPOINT,
     LegacyGoogleTTSConfig,
     stream_legacy_google_tts_chunks as _run_legacy_tts_stream,
     synthesize_legacy_google_tts as _run_legacy_tts_sync,
 )
+from backend.juris_update import run_jurisprudencia_incremental_update
 
 def _resolve_project_root() -> Path:
     raw = (os.getenv("RATIO_PROJECT_ROOT") or "").strip()
@@ -118,6 +120,40 @@ if not _ACERVO_LOGGER.handlers:
     except Exception:
         pass
 
+_JURIS_LOGGER = logging.getLogger("ratio.juris_update")
+if not _JURIS_LOGGER.handlers:
+    _JURIS_LOGGER.setLevel(logging.INFO)
+    _JURIS_LOGGER.propagate = False
+    _formatter = logging.Formatter("%(asctime)s %(levelname)s %(message)s")
+
+    _stream_handler = logging.StreamHandler()
+    _stream_handler.setFormatter(_formatter)
+    _JURIS_LOGGER.addHandler(_stream_handler)
+
+    try:
+        _file_handler = logging.FileHandler(_runtime_logs_dir() / "juris_update_backend.log", encoding="utf-8")
+        _file_handler.setFormatter(_formatter)
+        _JURIS_LOGGER.addHandler(_file_handler)
+    except Exception:
+        pass
+
+_API_LOGGER = logging.getLogger("ratio.api")
+if not _API_LOGGER.handlers:
+    _API_LOGGER.setLevel(logging.INFO)
+    _API_LOGGER.propagate = False
+    _formatter = logging.Formatter("%(asctime)s %(levelname)s %(message)s")
+
+    _stream_handler = logging.StreamHandler()
+    _stream_handler.setFormatter(_formatter)
+    _API_LOGGER.addHandler(_stream_handler)
+
+    try:
+        _file_handler = logging.FileHandler(_runtime_logs_dir() / "api_backend.log", encoding="utf-8")
+        _file_handler.setFormatter(_formatter)
+        _API_LOGGER.addHandler(_file_handler)
+    except Exception:
+        pass
+
 
 def _new_trace_id() -> str:
     return uuid.uuid4().hex[:12]
@@ -141,6 +177,21 @@ class _TTSModelUnavailableError(RuntimeError):
 
 class _TTSTransientError(RuntimeError):
     pass
+
+
+class _TTSPartialStreamError(RuntimeError):
+    def __init__(
+        self,
+        message: str,
+        *,
+        remaining_text: str,
+        emitted_chunks: int,
+        total_chunks: int,
+    ) -> None:
+        super().__init__(message)
+        self.remaining_text = remaining_text
+        self.emitted_chunks = int(emitted_chunks)
+        self.total_chunks = int(total_chunks)
 
 
 def _tts_cache_dir() -> Path:
@@ -266,6 +317,44 @@ app.add_middleware(
 )
 
 
+RATE_LIMIT_QUERY_PER_MIN = max(0, int(os.getenv("RATE_LIMIT_QUERY_PER_MIN", "60")))
+RATE_LIMIT_TTS_PER_MIN = max(0, int(os.getenv("RATE_LIMIT_TTS_PER_MIN", "30")))
+RATE_LIMIT_ACERVO_INDEX_PER_HOUR = max(0, int(os.getenv("RATE_LIMIT_ACERVO_INDEX_PER_HOUR", "8")))
+RATE_LIMIT_JURIS_UPDATE_PER_HOUR = max(0, int(os.getenv("RATE_LIMIT_JURIS_UPDATE_PER_HOUR", "4")))
+
+_RATE_LIMIT_LOCK = threading.Lock()
+_RATE_LIMIT_STATE: dict[str, dict[str, deque[float]]] = {}
+
+
+def _rate_limit_client_key(request: Request) -> str:
+    client = getattr(request, "client", None)
+    host = str(getattr(client, "host", "") or "").strip()
+    return host or "unknown-client"
+
+
+def _enforce_rate_limit(request: Request, *, bucket: str, limit: int, window_seconds: int) -> None:
+    if limit <= 0:
+        return
+    key = _rate_limit_client_key(request)
+    now = time.time()
+    cutoff = now - max(1, int(window_seconds))
+    with _RATE_LIMIT_LOCK:
+        by_bucket = _RATE_LIMIT_STATE.setdefault(bucket, {})
+        bucket_hits = by_bucket.setdefault(key, deque())
+        while bucket_hits and bucket_hits[0] <= cutoff:
+            bucket_hits.popleft()
+        if len(bucket_hits) >= limit:
+            raise HTTPException(
+                status_code=429,
+                detail={
+                    "code": "local_rate_limited",
+                    "message": "Muitas requisicoes para este endpoint.",
+                    "hint": "Aguarde alguns segundos e tente novamente.",
+                },
+            )
+        bucket_hits.append(now)
+
+
 class QueryRequest(BaseModel):
     query: str = Field(min_length=3, max_length=4000)
     tribunais: Optional[list[str]] = None
@@ -279,8 +368,56 @@ class QueryRequest(BaseModel):
     prefer_recent: bool = True
     prefer_user_sources: bool = True
     reranker_backend: Literal["local", "gemini"] = "local"
+    persona: Literal["visao_geral", "parecer", "estudos", "peticao"] = "visao_geral"
+    persona_prompt: Optional[str] = None
     rag_config: Optional[dict[str, Any]] = None
     trace: bool = False
+
+    @field_validator("tribunais", "tipos", "ramos", "orgaos", mode="before")
+    @classmethod
+    def _validate_filter_list_items(cls, value: Any) -> Optional[list[str]]:
+        if value is None:
+            return None
+        if not isinstance(value, list):
+            raise ValueError("Filtro deve ser uma lista de textos.")
+        if len(value) > 50:
+            raise ValueError("Filtro excede o maximo de 50 itens.")
+        allowed = re.compile(r"^[a-zA-ZÀ-ÖØ-öø-ÿ0-9_\s\-\./()]+$")
+        cleaned: list[str] = []
+        for raw in value:
+            item = str(raw or "").replace("\x00", "").strip()
+            if not item:
+                continue
+            if len(item) > 50:
+                raise ValueError("Cada item de filtro deve ter no maximo 50 caracteres.")
+            if not allowed.fullmatch(item):
+                raise ValueError("Item de filtro contem caracteres nao permitidos.")
+            cleaned.append(item)
+        return cleaned or None
+
+    @field_validator("relator_contains", mode="before")
+    @classmethod
+    def _validate_relator_contains(cls, value: Any) -> Optional[str]:
+        if value is None:
+            return None
+        text = str(value).replace("\x00", "").strip()
+        if not text:
+            return None
+        if len(text) > 200:
+            raise ValueError("Filtro de relator excede 200 caracteres.")
+        return text
+
+    @field_validator("persona_prompt", mode="before")
+    @classmethod
+    def _validate_persona_prompt(cls, value: Any) -> Optional[str]:
+        if value is None:
+            return None
+        text = str(value).replace("\x00", "").strip()
+        if not text:
+            return None
+        if len(text) > 6000:
+            text = text[:6000]
+        return text
 
 
 class ExplainRequest(BaseModel):
@@ -307,8 +444,20 @@ class GeminiConfigRequest(BaseModel):
     )
 
 
+class TTSProviderConfigRequest(BaseModel):
+    provider: str = Field(min_length=3, max_length=40)
+    persist_env: bool = False
+
+
 class UserSourceActionRequest(BaseModel):
     source_id: str = Field(min_length=4, max_length=120)
+
+
+class JurisUpdateStartRequest(BaseModel):
+    include_stf: bool = True
+    include_stj: bool = True
+    target_year: int = Field(default=2026, ge=2026, le=2100)
+    visible_browser: bool = True
 
 
 # TTS profile aligned with the configured extension voice.
@@ -321,6 +470,23 @@ def _normalize_tts_provider(raw: str) -> str:
     return "gemini_native"
 
 
+def _is_supported_tts_provider(raw: str) -> bool:
+    value = (raw or "").strip().lower()
+    return value in {
+        "legacy",
+        "legacy_google",
+        "google",
+        "google_cloud",
+        "gcloud",
+        "google-legacy",
+        "gemini",
+        "gemini_native",
+        "gemini-native",
+        "gemini_preview",
+        "gemini-native-preview",
+    }
+
+
 TTS_PROVIDER = _normalize_tts_provider(os.getenv("TTS_PROVIDER", "gemini_native"))
 TTS_RATE = 1.2
 TTS_PITCH_SEMITONES = -4.5
@@ -331,25 +497,31 @@ try:
 except (TypeError, ValueError):
     TTS_MAX_CHARS = 5000
 TTS_MAX_CHARS = max(250, min(TTS_MAX_CHARS, 5000))
+try:
+    TTS_STREAM_MAX_CHARS = int(os.getenv("GEMINI_TTS_STREAM_MAX_CHARS", "1200"))
+except (TypeError, ValueError):
+    TTS_STREAM_MAX_CHARS = 1200
+TTS_STREAM_MAX_CHARS = max(250, min(TTS_STREAM_MAX_CHARS, 5000))
 TTS_ALTERNATIVE_LABEL = os.getenv("TTS_ALTERNATIVE_LABEL", "Alternativa")
 TTS_MARK_ALT = "[[BRK_ALT]]"
 TTS_MARK_ART = "[[BRK_ART]]"
 TTS_VOICE_NAME = (os.getenv("GEMINI_TTS_VOICE") or "charon").strip() or "charon"
 TTS_LANGUAGE_CODE = os.getenv("TTS_LANGUAGE_CODE", "pt-BR")
-TTS_MODEL = (os.getenv("GEMINI_TTS_MODEL") or "gemini-2.5-flash-preview-tts").strip()
+TTS_MODEL = (os.getenv("GEMINI_TTS_MODEL") or "gemini-2.5-pro-preview-tts").strip()
 TTS_FALLBACK_MODELS_RAW = (
     os.getenv("GEMINI_TTS_FALLBACK_MODELS")
     or ""
 )
 TTS_FALLBACK_MODELS = [m.strip() for m in TTS_FALLBACK_MODELS_RAW.split(",") if m.strip()]
-TTS_REQUEST_TIMEOUT_MS = int(os.getenv("GEMINI_TTS_REQUEST_TIMEOUT_MS", "120000"))
-TTS_REQUEST_RETRY_ATTEMPTS = int(os.getenv("GEMINI_TTS_REQUEST_RETRY_ATTEMPTS", "1"))
-TTS_MODEL_MAX_ATTEMPTS = int(os.getenv("GEMINI_TTS_MODEL_MAX_ATTEMPTS", "2"))
+TTS_REQUEST_TIMEOUT_MS = int(os.getenv("GEMINI_TTS_REQUEST_TIMEOUT_MS", "45000"))
+TTS_REQUEST_RETRY_ATTEMPTS = int(os.getenv("GEMINI_TTS_REQUEST_RETRY_ATTEMPTS", "0"))
+TTS_MODEL_MAX_ATTEMPTS = int(os.getenv("GEMINI_TTS_MODEL_MAX_ATTEMPTS", "1"))
 TTS_PREFETCH_CONCURRENCY = max(
     1,
     min(int(os.getenv("GEMINI_TTS_PREFETCH_CONCURRENCY", "1")), 6),
 )
 TTS_CACHE_ENABLED = os.getenv("GEMINI_TTS_CACHE_ENABLED", "1").strip() != "0"
+TTS_PROVIDER_FALLBACK = os.getenv("TTS_PROVIDER_FALLBACK", "1").strip() != "0"
 LEGACY_TTS_VOICE_NAME = (os.getenv("GOOGLE_TTS_VOICE_NAME") or "pt-BR-Neural2-B").strip() or "pt-BR-Neural2-B"
 LEGACY_TTS_ENDPOINT = (
     (os.getenv("GOOGLE_TTS_ENDPOINT") or LEGACY_TTS_DEFAULT_ENDPOINT).strip()
@@ -417,6 +589,30 @@ _USER_ACERVO_JOBS_LOCK = threading.Lock()
 _USER_ACERVO_WRITE_LOCK = threading.Lock()
 _USER_ACERVO_CLEAN_CIRCUIT_UNTIL = 0.0
 _USER_ACERVO_CLEAN_CIRCUIT_LOCK = threading.Lock()
+JURIS_UPDATE_TARGET_YEAR = max(2026, min(int(os.getenv("JURIS_UPDATE_TARGET_YEAR", "2026")), 2100))
+JURIS_UPDATE_INCLUDE_STF = os.getenv("JURIS_UPDATE_INCLUDE_STF", "1").strip() != "0"
+JURIS_UPDATE_INCLUDE_STJ = os.getenv("JURIS_UPDATE_INCLUDE_STJ", "1").strip() != "0"
+JURIS_UPDATE_VISIBLE_BROWSER = os.getenv("JURIS_UPDATE_VISIBLE_BROWSER", "1").strip() != "0"
+JURIS_UPDATE_EMBED_MODEL = (os.getenv("JURIS_UPDATE_EMBED_MODEL") or "gemini-embedding-001").strip() or "gemini-embedding-001"
+JURIS_UPDATE_EMBED_BATCH_SIZE = max(1, min(int(os.getenv("JURIS_UPDATE_EMBED_BATCH_SIZE", "16")), 64))
+JURIS_UPDATE_STJ_REPAIR_WITH_GEMINI = os.getenv("JURIS_UPDATE_STJ_REPAIR_WITH_GEMINI", "1").strip() != "0"
+JURIS_UPDATE_STJ_REPAIR_MODEL = (os.getenv("JURIS_UPDATE_STJ_REPAIR_MODEL") or "gemini-3-flash-preview").strip() or "gemini-3-flash-preview"
+JURIS_UPDATE_STJ_REPAIR_MIN_CONFIDENCE = max(
+    0.0,
+    min(float(os.getenv("JURIS_UPDATE_STJ_REPAIR_MIN_CONFIDENCE", "0.62")), 1.0),
+)
+JURIS_UPDATE_STJ_REPAIR_MAX_RECORDS_PER_PDF = max(
+    0,
+    min(int(os.getenv("JURIS_UPDATE_STJ_REPAIR_MAX_RECORDS_PER_PDF", "24")), 100),
+)
+JURIS_UPDATE_STRICT_COMPLETENESS = os.getenv("JURIS_UPDATE_STRICT_COMPLETENESS", "1").strip() != "0"
+JURIS_UPDATE_EMBED_FALLBACK_ON_QUOTA = os.getenv("JURIS_UPDATE_EMBED_FALLBACK_ON_QUOTA", "1").strip() != "0"
+JURIS_UPDATE_JOB_POLL_MS = max(500, min(int(os.getenv("JURIS_UPDATE_JOB_POLL_MS", "1500")), 10000))
+JURIS_UPDATE_JOB_TTL_SECONDS = max(600, min(int(os.getenv("JURIS_UPDATE_JOB_TTL_SECONDS", "86400")), 604800))
+JURIS_UPDATE_MANIFEST = _runtime_logs_dir() / "juris_update_manifest.json"
+JURIS_UPDATE_DOWNLOADS_DIR = PROJECT_ROOT / "data" / "stj_informativos" / "docs"
+_JURIS_UPDATE_JOBS: dict[str, dict[str, Any]] = {}
+_JURIS_UPDATE_JOBS_LOCK = threading.Lock()
 
 LEGAL_TTS_EXPANSIONS = [
     (r"\bHC\b", "habeas corpus"),
@@ -727,7 +923,7 @@ def _tts_candidate_models() -> list[str]:
             continue
         seen.add(model)
         candidates.append(model)
-    return candidates or ["gemini-2.5-flash-preview-tts"]
+    return candidates or ["gemini-2.5-pro-preview-tts"]
 
 
 def _legacy_tts_api_key() -> str:
@@ -971,7 +1167,7 @@ def _synthesize_google_tts(text: str, trace_id: str | None = None) -> tuple[byte
     model_candidates = _tts_candidate_models()
     last_error: Optional[Exception] = None
     timeout_ms = max(10000, min(int(TTS_REQUEST_TIMEOUT_MS or 120000), 600000))
-    retry_attempts = max(1, min(int(TTS_REQUEST_RETRY_ATTEMPTS or 1), 3))
+    retry_attempts = max(0, min(int(TTS_REQUEST_RETRY_ATTEMPTS or 0), 3))
     chunk_attempts = max(1, min(int(TTS_MODEL_MAX_ATTEMPTS or 2), 4))
     http_client = _get_tts_httpx_client(timeout_ms)
     total_started = time.perf_counter()
@@ -1267,7 +1463,7 @@ def _stream_google_tts_chunks(
 
     trace = (trace_id or "").strip() or _new_trace_id()
     prepared = _normalize_for_tts(text)
-    raw_chunks = _split_tts_chunks(prepared)
+    raw_chunks = _split_tts_chunks(prepared, max_ssml_bytes=TTS_STREAM_MAX_CHARS)
     chunks = [_prepare_chunk_for_gemini_tts(chunk) for chunk in raw_chunks]
     chunks = [chunk for chunk in chunks if chunk]
     total_chunks = len(chunks)
@@ -1277,7 +1473,7 @@ def _stream_google_tts_chunks(
     voice_name = _normalize_voice_name_for_gemini(TTS_VOICE_NAME)
     model_candidates = _tts_candidate_models()
     timeout_ms = max(10000, min(int(TTS_REQUEST_TIMEOUT_MS or 120000), 600000))
-    retry_attempts = max(1, min(int(TTS_REQUEST_RETRY_ATTEMPTS or 1), 3))
+    retry_attempts = max(0, min(int(TTS_REQUEST_RETRY_ATTEMPTS or 0), 3))
     chunk_attempts = max(1, min(int(TTS_MODEL_MAX_ATTEMPTS or 2), 4))
     prefetch_concurrency = max(1, min(int(TTS_PREFETCH_CONCURRENCY or 1), 6))
     http_client = _get_tts_httpx_client(timeout_ms)
@@ -1291,6 +1487,7 @@ def _stream_google_tts_chunks(
         timeout_ms=timeout_ms,
         retry_attempts=retry_attempts,
         chunk_attempts=chunk_attempts,
+        stream_max_chars=TTS_STREAM_MAX_CHARS,
         prefetch_concurrency=prefetch_concurrency,
         cache_enabled=bool(TTS_CACHE_ENABLED),
         voice=voice_name,
@@ -1407,9 +1604,15 @@ def _stream_google_tts_chunks(
             )
             return
 
-        # If this model already emitted some chunks, do not switch model to avoid duplicated/overlapping playback.
+        # If this model already emitted chunks, delegate remaining text to provider fallback.
         if emitted_chunks > 0:
-            break
+            remaining_text = " ".join(chunks[next_emit - 1 :]).strip()
+            raise _TTSPartialStreamError(
+                f"Falha no TTS Gemini apos chunks parciais. Ultimo erro: {last_error}",
+                remaining_text=remaining_text,
+                emitted_chunks=emitted_chunks,
+                total_chunks=total_chunks,
+            ) from last_error
         if model_unavailable:
             _log_tts_event("tts_stream_model_unavailable", trace, model=model_name)
             continue
@@ -1473,7 +1676,22 @@ def _stream_legacy_tts_chunks(
 def _synthesize_tts(text: str, trace_id: str | None = None) -> tuple[bytes, str]:
     if TTS_PROVIDER == "legacy_google":
         return _synthesize_legacy_google_tts(text, trace_id=trace_id)
-    return _synthesize_google_tts(text, trace_id=trace_id)
+    try:
+        return _synthesize_google_tts(text, trace_id=trace_id)
+    except RuntimeError as exc:
+        if not TTS_PROVIDER_FALLBACK:
+            raise
+        if not _legacy_tts_api_key():
+            raise
+        trace = (trace_id or "").strip() or _new_trace_id()
+        _log_tts_event(
+            "tts_provider_fallback",
+            trace,
+            primary_provider="gemini_native",
+            fallback_provider="legacy_google",
+            primary_error=_short(str(exc), max_chars=600),
+        )
+        return _synthesize_legacy_google_tts(text, trace_id=trace_id)
 
 
 def _stream_tts_chunks(
@@ -1483,7 +1701,46 @@ def _stream_tts_chunks(
     if TTS_PROVIDER == "legacy_google":
         yield from _stream_legacy_tts_chunks(text, trace_id=trace_id)
         return
-    yield from _stream_google_tts_chunks(text, trace_id=trace_id)
+
+    emitted_any = False
+    try:
+        for chunk_data in _stream_google_tts_chunks(text, trace_id=trace_id):
+            emitted_any = True
+            yield chunk_data
+    except _TTSPartialStreamError as exc:
+        if not TTS_PROVIDER_FALLBACK:
+            raise
+        if not _legacy_tts_api_key():
+            raise
+        remaining_text = (exc.remaining_text or "").strip()
+        if not remaining_text:
+            raise
+        trace = (trace_id or "").strip() or _new_trace_id()
+        _log_tts_event(
+            "tts_provider_fallback",
+            trace,
+            primary_provider="gemini_native",
+            fallback_provider="legacy_google",
+            partial_stream=True,
+            emitted_chunks=exc.emitted_chunks,
+            remaining_chars=len(remaining_text),
+            primary_error=_short(str(exc), max_chars=600),
+        )
+        for audio_bytes, mime_type, idx, total in _stream_legacy_tts_chunks(remaining_text, trace_id=trace_id):
+            yield audio_bytes, mime_type, exc.emitted_chunks + idx, exc.emitted_chunks + total
+        return
+    except RuntimeError as exc:
+        if emitted_any or not TTS_PROVIDER_FALLBACK or not _legacy_tts_api_key():
+            raise
+        trace = (trace_id or "").strip() or _new_trace_id()
+        _log_tts_event(
+            "tts_provider_fallback",
+            trace,
+            primary_provider="gemini_native",
+            fallback_provider="legacy_google",
+            primary_error=_short(str(exc), max_chars=600),
+        )
+        yield from _stream_legacy_tts_chunks(text, trace_id=trace_id)
 
 
 def _serialize_doc(idx: int, row: dict[str, Any]) -> dict[str, Any]:
@@ -1551,6 +1808,44 @@ def _upsert_env_gemini_key(api_key: str) -> Path:
         updated += key_line + "\n"
     env_path.write_text(updated, encoding="utf-8")
     return env_path
+
+
+def _upsert_env_tts_provider(provider: str) -> Path:
+    env_path = PROJECT_ROOT / ".env"
+    provider_line = f"TTS_PROVIDER={provider}"
+    current = env_path.read_text(encoding="utf-8") if env_path.exists() else ""
+    if re.search(r"(?im)^\s*TTS_PROVIDER\s*=", current):
+        updated = re.sub(r"(?im)^\s*TTS_PROVIDER\s*=.*$", provider_line, current, count=1)
+    else:
+        updated = current
+        if updated and not updated.endswith("\n"):
+            updated += "\n"
+        updated += provider_line + "\n"
+    env_path.write_text(updated, encoding="utf-8")
+    return env_path
+
+
+def _tts_provider_options_payload() -> list[dict[str, str]]:
+    return [
+        {
+            "id": "legacy_google",
+            "label": "Classico (Google TTS Legacy)",
+            "description": "Google Cloud Text-to-Speech Neural2 (mais estavel no momento).",
+        },
+        {
+            "id": "gemini_native",
+            "label": "Moderno (Gemini Native TTS)",
+            "description": "Voz nativa Gemini (mais novo, pode oscilar em estabilidade).",
+        },
+    ]
+
+
+def _tts_provider_label(provider: str) -> str:
+    current = _normalize_tts_provider(provider)
+    for item in _tts_provider_options_payload():
+        if str(item.get("id") or "").strip() == current:
+            return str(item.get("label") or current)
+    return current
 
 
 def _utc_now_iso() -> str:
@@ -1781,6 +2076,31 @@ def _store_upload_file(upload: UploadFile, filename: str) -> tuple[Path, str, in
         raise
 
 
+def _ensure_pdf_magic_bytes(temp_path: Path, filename: str) -> None:
+    try:
+        with temp_path.open("rb") as handle:
+            signature = handle.read(5)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "code": "invalid_pdf_signature",
+                "message": f"Nao foi possivel validar o arquivo '{filename}' como PDF.",
+                "hint": "Reenvie um PDF valido.",
+            },
+        ) from exc
+
+    if not signature.startswith(b"%PDF-"):
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "code": "invalid_pdf_signature",
+                "message": f"Arquivo '{filename}' nao possui assinatura PDF valida.",
+                "hint": "Envie um arquivo PDF real (cabecalho %PDF-).",
+            },
+        )
+
+
 def _user_lance_schema() -> Any:
     _require_user_acervo_runtime()
     return pa.schema(
@@ -1849,6 +2169,347 @@ def _acervo_log_event(event: str, **fields: Any) -> None:
         _ACERVO_LOGGER.info(json.dumps(payload, ensure_ascii=False))
     except Exception:
         _ACERVO_LOGGER.info("%s", event)
+
+
+def _juris_log_event(event: str, **fields: Any) -> None:
+    payload: dict[str, Any] = {"event": event}
+    for key, value in fields.items():
+        if value is None:
+            continue
+        payload[str(key)] = value
+    try:
+        _JURIS_LOGGER.info(json.dumps(payload, ensure_ascii=False))
+    except Exception:
+        _JURIS_LOGGER.info("%s", event)
+
+
+def _load_juris_update_manifest() -> dict[str, Any]:
+    if not JURIS_UPDATE_MANIFEST.exists():
+        return {"version": 2, "last_result": None, "cursor": {}}
+    try:
+        payload = json.loads(JURIS_UPDATE_MANIFEST.read_text(encoding="utf-8"))
+    except Exception:
+        return {"version": 2, "last_result": None, "cursor": {}}
+    if not isinstance(payload, dict):
+        return {"version": 2, "last_result": None, "cursor": {}}
+    payload.setdefault("version", 2)
+    payload.setdefault("last_result", None)
+    if not isinstance(payload.get("cursor"), dict):
+        payload["cursor"] = {}
+    return payload
+
+
+def _save_juris_update_manifest(payload: dict[str, Any]) -> None:
+    safe_payload = payload if isinstance(payload, dict) else {"version": 2, "last_result": None, "cursor": {}}
+    safe_payload.setdefault("version", 2)
+    safe_payload.setdefault("last_result", None)
+    if not isinstance(safe_payload.get("cursor"), dict):
+        safe_payload["cursor"] = {}
+    JURIS_UPDATE_MANIFEST.parent.mkdir(parents=True, exist_ok=True)
+    JURIS_UPDATE_MANIFEST.write_text(
+        json.dumps(safe_payload, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+
+
+def _clean_iso_date(raw: Any) -> str:
+    value = str(raw or "").strip()
+    if re.fullmatch(r"\d{4}-\d{2}-\d{2}", value):
+        return value
+    return ""
+
+
+def _cursor_stf_since_date(manifest: dict[str, Any], *, target_year: int) -> str:
+    cursor = manifest.get("cursor")
+    if not isinstance(cursor, dict):
+        return ""
+    try:
+        cursor_year = int(cursor.get("target_year") or 0)
+    except Exception:
+        cursor_year = 0
+    if cursor_year != int(target_year):
+        return ""
+    return _clean_iso_date(cursor.get("stf_since_date"))
+
+
+def _resolve_playwright_chromium_executable() -> str:
+    explicit = (os.getenv("PLAYWRIGHT_CHROMIUM_EXECUTABLE") or "").strip()
+    if explicit:
+        candidate = Path(explicit).expanduser()
+        if candidate.is_file():
+            return str(candidate)
+
+    candidate_roots = [
+        PROJECT_ROOT / "_playwright_browsers",
+        PROJECT_ROOT / "_internal" / "_playwright_browsers",
+    ]
+    for root in candidate_roots:
+        if not root.exists():
+            continue
+        matches = sorted(root.glob("chromium-*"), reverse=True)
+        for folder in matches:
+            chrome_candidates = [
+                folder / "chrome-win" / "chrome.exe",
+                folder / "chrome-win64" / "chrome.exe",
+            ]
+            for chrome_path in chrome_candidates:
+                if chrome_path.is_file():
+                    return str(chrome_path)
+    return ""
+
+
+def _new_juris_update_job(
+    *,
+    include_stf: bool,
+    include_stj: bool,
+    target_year: int,
+    visible_browser: bool,
+) -> str:
+    now_ts = time.time()
+    now_iso = _utc_now_iso()
+    job_id = uuid.uuid4().hex[:12]
+    job = {
+        "job_id": job_id,
+        "status": "queued",
+        "stage": "queued",
+        "message": "Atualizacao enfileirada.",
+        "submitted_at": now_iso,
+        "submitted_ts": now_ts,
+        "started_at": "",
+        "started_ts": None,
+        "finished_at": "",
+        "finished_ts": None,
+        "updated_at": now_iso,
+        "updated_ts": now_ts,
+        "request": {
+            "include_stf": bool(include_stf),
+            "include_stj": bool(include_stj),
+            "target_year": int(target_year),
+            "visible_browser": bool(visible_browser),
+        },
+        "progress": {
+            "stf_candidates": 0,
+            "stj_candidates": 0,
+            "embedded": 0,
+            "records": 0,
+            "stage_fields": {},
+        },
+        "result": {},
+        "error": None,
+    }
+    with _JURIS_UPDATE_JOBS_LOCK:
+        cutoff = now_ts - JURIS_UPDATE_JOB_TTL_SECONDS
+        stale_ids = [
+            key
+            for key, value in _JURIS_UPDATE_JOBS.items()
+            if str(value.get("status") or "") in {"done", "error"}
+            and float(value.get("finished_ts") or 0.0) > 0.0
+            and float(value.get("finished_ts") or 0.0) < cutoff
+        ]
+        for stale_id in stale_ids:
+            _JURIS_UPDATE_JOBS.pop(stale_id, None)
+        _JURIS_UPDATE_JOBS[job_id] = job
+    _juris_log_event("juris_job_created", job_id=job_id, include_stf=include_stf, include_stj=include_stj, year=target_year)
+    return job_id
+
+
+def _active_juris_update_job() -> dict[str, Any] | None:
+    with _JURIS_UPDATE_JOBS_LOCK:
+        for value in _JURIS_UPDATE_JOBS.values():
+            status = str(value.get("status") or "").strip().lower()
+            if status in {"queued", "running"}:
+                return copy.deepcopy(value)
+    return None
+
+
+def _update_juris_update_job(
+    job_id: str,
+    *,
+    status: str | None = None,
+    stage: str | None = None,
+    message: str | None = None,
+    progress_set: dict[str, Any] | None = None,
+    result: dict[str, Any] | None = None,
+    error: dict[str, Any] | None = None,
+) -> None:
+    now_ts = time.time()
+    now_iso = _utc_now_iso()
+    with _JURIS_UPDATE_JOBS_LOCK:
+        job = _JURIS_UPDATE_JOBS.get(job_id)
+        if not isinstance(job, dict):
+            return
+        if status is not None:
+            job["status"] = str(status or "").strip() or str(job.get("status") or "queued")
+            if status == "running" and not job.get("started_ts"):
+                job["started_ts"] = now_ts
+                job["started_at"] = now_iso
+            if status in {"done", "error"}:
+                job["finished_ts"] = now_ts
+                job["finished_at"] = now_iso
+        if stage is not None:
+            job["stage"] = str(stage or "").strip() or str(job.get("stage") or "queued")
+        if message is not None:
+            job["message"] = str(message or "").strip()
+        progress = job.get("progress")
+        if not isinstance(progress, dict):
+            progress = {}
+            job["progress"] = progress
+        if isinstance(progress_set, dict):
+            for key, value in progress_set.items():
+                progress[str(key)] = value
+        if isinstance(result, dict):
+            job["result"] = dict(result)
+        if isinstance(error, dict):
+            job["error"] = dict(error)
+        job["updated_ts"] = now_ts
+        job["updated_at"] = now_iso
+
+
+def _get_juris_update_job_payload(job_id: str) -> dict[str, Any] | None:
+    normalized = str(job_id or "").strip()
+    if not normalized:
+        return None
+    with _JURIS_UPDATE_JOBS_LOCK:
+        job = _JURIS_UPDATE_JOBS.get(normalized)
+        if not isinstance(job, dict):
+            return None
+        payload = copy.deepcopy(job)
+    for key in ("submitted_ts", "started_ts", "updated_ts", "finished_ts"):
+        payload.pop(key, None)
+    started_ts = float(job.get("started_ts") or 0.0)
+    payload["elapsed_seconds"] = round(max(0.0, time.time() - started_ts), 2) if started_ts > 0 else 0.0
+    return payload
+
+
+def _run_juris_update_job(
+    *,
+    job_id: str,
+    include_stf: bool,
+    include_stj: bool,
+    target_year: int,
+    visible_browser: bool,
+) -> None:
+    _update_juris_update_job(
+        job_id,
+        status="running",
+        stage="bootstrap",
+        message="Inicializando pipeline de atualizacao de jurisprudencia.",
+    )
+    _juris_log_event("juris_job_started", job_id=job_id, include_stf=include_stf, include_stj=include_stj, year=target_year)
+
+    def _progress_callback(stage: str, message: str, fields: dict[str, Any]) -> None:
+        safe_fields: dict[str, Any] = {}
+        for key, value in (fields or {}).items():
+            if isinstance(value, (str, int, float, bool)) or value is None:
+                safe_fields[str(key)] = value
+            else:
+                safe_fields[str(key)] = str(value)
+        _update_juris_update_job(
+            job_id,
+            stage=str(stage or "running"),
+            message=str(message or "").strip() or "Atualizando jurisprudencia.",
+            progress_set={"stage_fields": safe_fields},
+        )
+
+    try:
+        manifest_before = _load_juris_update_manifest()
+        stf_since_date = _cursor_stf_since_date(manifest_before, target_year=int(target_year))
+        chromium_path = _resolve_playwright_chromium_executable()
+        summary = run_jurisprudencia_incremental_update(
+            project_root=PROJECT_ROOT,
+            gemini_client=get_gemini_client(),
+            year=int(target_year),
+            include_stf=bool(include_stf),
+            include_stj=bool(include_stj),
+            stf_visible_browser=bool(visible_browser),
+            chromium_executable_path=chromium_path or None,
+            stf_since_date=stf_since_date,
+            embed_model=JURIS_UPDATE_EMBED_MODEL,
+            embed_batch_size=JURIS_UPDATE_EMBED_BATCH_SIZE,
+            stj_repair_with_gemini=JURIS_UPDATE_STJ_REPAIR_WITH_GEMINI,
+            stj_repair_model=JURIS_UPDATE_STJ_REPAIR_MODEL,
+            stj_repair_min_confidence=JURIS_UPDATE_STJ_REPAIR_MIN_CONFIDENCE,
+            stj_repair_max_records_per_pdf=JURIS_UPDATE_STJ_REPAIR_MAX_RECORDS_PER_PDF,
+            strict_completeness=JURIS_UPDATE_STRICT_COMPLETENESS,
+            embed_fallback_on_quota=JURIS_UPDATE_EMBED_FALLBACK_ON_QUOTA,
+            progress_cb=_progress_callback,
+            log_cb=lambda event, fields: _juris_log_event(event, job_id=job_id, **(fields or {})),
+        )
+        result_payload = dict(summary)
+        result_payload["chromium_executable"] = chromium_path
+        latest_dates = summary.get("latest_dates")
+        latest_stf = _clean_iso_date((latest_dates or {}).get("stf")) if isinstance(latest_dates, dict) else ""
+        if not latest_stf:
+            latest_stf = stf_since_date
+        _save_juris_update_manifest(
+            {
+                "version": 2,
+                "last_result": result_payload,
+                "cursor": {
+                    "target_year": int(target_year),
+                    "stf_since_date": latest_stf,
+                    "last_checked_at": _utc_now_iso(),
+                    "finished_at": str(summary.get("finished_at") or ""),
+                },
+            }
+        )
+        done_message = str(summary.get("message") or "Atualizacao concluida.")
+        _update_juris_update_job(
+            job_id,
+            status="done",
+            stage="done",
+            message=done_message,
+            result=result_payload,
+            progress_set={
+                "stf_candidates": int(((summary.get("stf") or {}).get("candidate_docs") or 0)),
+                "stj_candidates": int(((summary.get("stj") or {}).get("candidate_docs") or 0)),
+                "embedded": int(((summary.get("upsert") or {}).get("embedded") or 0)),
+                "records": int(((summary.get("upsert") or {}).get("inserted") or 0)),
+            },
+        )
+        _juris_log_event("juris_job_done", job_id=job_id, inserted=(summary.get("upsert") or {}).get("inserted", 0))
+    except Exception as exc:
+        _update_juris_update_job(
+            job_id,
+            status="error",
+            stage="error",
+            message="Falha na atualizacao automatica de jurisprudencia.",
+            error={
+                "code": "juris_update_failed",
+                "message": _short(str(exc), max_chars=500),
+                "hint": "Consulte logs/runtime/juris_update_backend.log para detalhes.",
+            },
+        )
+        _juris_log_event("juris_job_error", job_id=job_id, error=_short(str(exc), max_chars=700))
+
+
+def _start_juris_update_job(
+    *,
+    include_stf: bool,
+    include_stj: bool,
+    target_year: int,
+    visible_browser: bool,
+) -> str:
+    job_id = _new_juris_update_job(
+        include_stf=bool(include_stf),
+        include_stj=bool(include_stj),
+        target_year=int(target_year),
+        visible_browser=bool(visible_browser),
+    )
+    thread = threading.Thread(
+        target=_run_juris_update_job,
+        daemon=True,
+        name=f"juris-update-{job_id}",
+        kwargs={
+            "job_id": job_id,
+            "include_stf": bool(include_stf),
+            "include_stj": bool(include_stj),
+            "target_year": int(target_year),
+            "visible_browser": bool(visible_browser),
+        },
+    )
+    thread.start()
+    return job_id
 
 
 def _run_with_hard_timeout(
@@ -2717,43 +3378,43 @@ def _classify_runtime_error(exc: Exception) -> tuple[int, dict[str, str]]:
     ):
         return 400, {
             "code": "missing_api_key",
-            "message": message,
+            "message": "Chave de API ausente.",
             "hint": "Configure a chave Gemini/Google TTS no guia inicial ou em .env antes de consultar.",
         }
     if "api key not valid" in norm or ("invalid" in norm and "api key" in norm):
         return 401, {
             "code": "invalid_api_key",
-            "message": message,
+            "message": "Chave de API invalida.",
             "hint": "Confira se a chave foi copiada corretamente no Google AI Studio.",
         }
     if "permission_denied" in norm or "api key" in norm and "permission" in norm:
         return 401, {
             "code": "api_key_not_active",
-            "message": message,
+            "message": "Chave de API sem permissao para uso.",
             "hint": "Ative a Gemini API no projeto Google Cloud associado a chave e tente novamente.",
         }
     if "resource_exhausted" in norm or "quota" in norm:
         return 429, {
             "code": "quota_exhausted",
-            "message": message,
+            "message": "Cota da API esgotada.",
             "hint": "Cota gratuita/escalonamento atingido. Aguarde reset ou ajuste billing/limites.",
         }
     if "rate limit" in norm or "too many requests" in norm:
         return 429, {
             "code": "rate_limited",
-            "message": message,
+            "message": "Limite de taxa da API atingido.",
             "hint": "Reduza paralelismo e frequencia das consultas por minuto.",
         }
     if "model" in norm and ("not found" in norm or "unsupported" in norm):
         return 400, {
             "code": "model_unavailable",
-            "message": message,
+            "message": "Modelo solicitado indisponivel.",
             "hint": "Escolha outro modelo Gemini nas configuracoes da plataforma.",
         }
     if "nenhum modelo de voz suporta audio" in norm or "nenhum modelo de voz disponivel" in norm:
         return 400, {
             "code": "model_unavailable",
-            "message": message,
+            "message": "Modelo de voz indisponivel.",
             "hint": "A chave/API atual nao possui modelo de voz compativel neste endpoint. Configure um modelo TTS suportado.",
         }
     if "falha no tts gemini" in norm and (
@@ -2764,24 +3425,24 @@ def _classify_runtime_error(exc: Exception) -> tuple[int, dict[str, str]]:
     ):
         return 503, {
             "code": "upstream_unavailable",
-            "message": message,
+            "message": "Servico de voz temporariamente indisponivel.",
             "hint": "Servico de voz Gemini indisponivel no momento (erro interno 500). Tente novamente em instantes.",
         }
     if "indisponibilidade upstream apos tentativas" in norm:
         return 503, {
             "code": "upstream_unavailable",
-            "message": message,
+            "message": "Servico de voz temporariamente indisponivel.",
             "hint": "Servico de voz Gemini instavel no momento. Tente novamente em instantes.",
         }
     if "timeout" in norm or "timed out" in norm or "deadline" in norm or "unavailable" in norm or "503" in norm:
         return 503, {
             "code": "upstream_unavailable",
-            "message": message,
+            "message": "Servico Gemini temporariamente indisponivel.",
             "hint": "Servico Gemini indisponivel no momento. Tente novamente em instantes.",
         }
     return 500, {
         "code": "internal_error",
-        "message": message,
+        "message": "Falha interna no backend.",
         "hint": "Verifique logs do backend para diagnostico detalhado.",
     }
 
@@ -2819,6 +3480,10 @@ def _is_soft_gemini_validation_error(exc: Exception) -> bool:
 
 
 def _raise_api_error(exc: Exception, trace_id: str | None = None) -> None:
+    if trace_id:
+        _API_LOGGER.exception("api_error trace_id=%s: %s", trace_id, str(exc))
+    else:
+        _API_LOGGER.exception("api_error: %s", str(exc))
     status_code, detail = _classify_runtime_error(exc)
     if trace_id:
         detail = dict(detail)
@@ -2864,6 +3529,51 @@ def gemini_status_api() -> dict[str, Any]:
     }
 
 
+@app.get("/api/tts/config")
+def tts_config_status_api() -> dict[str, Any]:
+    provider = _normalize_tts_provider(TTS_PROVIDER)
+    return {
+        "status": "ok",
+        "provider": provider,
+        "provider_label": _tts_provider_label(provider),
+        "options": _tts_provider_options_payload(),
+        "voice": _tts_response_voice(),
+        "model": _tts_response_model(),
+    }
+
+
+@app.post("/api/tts/config")
+def tts_config_update_api(payload: TTSProviderConfigRequest) -> dict[str, Any]:
+    raw_provider = str(payload.provider or "").strip()
+    if not _is_supported_tts_provider(raw_provider):
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "code": "invalid_tts_provider",
+                "message": "Provedor de TTS invalido.",
+                "hint": "Use 'gemini_native' (moderno) ou 'legacy_google' (classico).",
+            },
+        )
+
+    provider = _normalize_tts_provider(raw_provider)
+    global TTS_PROVIDER
+    TTS_PROVIDER = provider
+
+    if payload.persist_env:
+        _upsert_env_tts_provider(provider)
+
+    return {
+        "status": "ok",
+        "provider": provider,
+        "provider_label": _tts_provider_label(provider),
+        "saved": True,
+        "persisted_env": bool(payload.persist_env),
+        "voice": _tts_response_voice(),
+        "model": _tts_response_model(),
+        "options": _tts_provider_options_payload(),
+    }
+
+
 @app.post("/api/gemini/config")
 def gemini_config_api(payload: GeminiConfigRequest) -> dict[str, Any]:
     key = payload.api_key.strip()
@@ -2904,16 +3614,14 @@ def gemini_config_api(payload: GeminiConfigRequest) -> dict[str, Any]:
         else:
             _raise_api_error(exc)
 
-    env_path = ""
     if payload.persist_env:
-        env_path = str(_upsert_env_gemini_key(key))
+        _upsert_env_gemini_key(key)
     return {
         "status": "ok",
         "saved": True,
         "validated": bool(validated),
         "test_model": setup_result.get("model", payload.test_model),
         "persisted_env": bool(payload.persist_env),
-        "env_path": env_path,
         "has_api_key": has_gemini_api_key(),
         "validation_timeout_ms": int(payload.validation_timeout_ms),
         "validation_warning": validation_warning,
@@ -2956,11 +3664,18 @@ def meu_acervo_source_restore_api(payload: UserSourceActionRequest) -> dict[str,
 
 @app.post("/api/meu-acervo/index", status_code=202)
 def meu_acervo_index_api(
+    request: Request,
     files: list[UploadFile] = File(...),
     confirm_index: bool = Form(False),
     source_name: str = Form("Banco 1"),
     ocr_missing_only: bool = Form(True),
 ) -> dict[str, Any]:
+    _enforce_rate_limit(
+        request,
+        bucket="meu_acervo_index",
+        limit=RATE_LIMIT_ACERVO_INDEX_PER_HOUR,
+        window_seconds=3600,
+    )
     if USER_ACERVO_REQUIRE_CONFIRM and not bool(confirm_index):
         raise HTTPException(
             status_code=400,
@@ -3005,6 +3720,7 @@ def meu_acervo_index_api(
                 continue
 
             temp_path, digest, file_bytes = _store_upload_file(upload, filename)
+            _ensure_pdf_magic_bytes(temp_path, filename)
             request_total_bytes += int(file_bytes)
             if request_total_bytes > USER_ACERVO_MAX_REQUEST_SIZE_BYTES:
                 _raise_user_acervo_validation_error(
@@ -3107,8 +3823,121 @@ def meu_acervo_index_job_status_api(job_id: str) -> dict[str, Any]:
     return payload
 
 
+@app.get("/api/juris-update/last")
+def juris_update_last_api() -> dict[str, Any]:
+    manifest = _load_juris_update_manifest()
+    running = _active_juris_update_job()
+    cursor = manifest.get("cursor")
+    if not isinstance(cursor, dict):
+        cursor = {}
+    return {
+        "status": "ok",
+        "defaults": {
+            "include_stf": bool(JURIS_UPDATE_INCLUDE_STF),
+            "include_stj": bool(JURIS_UPDATE_INCLUDE_STJ),
+            "target_year": int(JURIS_UPDATE_TARGET_YEAR),
+            "visible_browser": bool(JURIS_UPDATE_VISIBLE_BROWSER),
+            "stj_repair_with_gemini": bool(JURIS_UPDATE_STJ_REPAIR_WITH_GEMINI),
+            "stj_repair_model": str(JURIS_UPDATE_STJ_REPAIR_MODEL),
+            "stj_repair_min_confidence": float(JURIS_UPDATE_STJ_REPAIR_MIN_CONFIDENCE),
+            "stj_repair_max_records_per_pdf": int(JURIS_UPDATE_STJ_REPAIR_MAX_RECORDS_PER_PDF),
+            "strict_completeness": bool(JURIS_UPDATE_STRICT_COMPLETENESS),
+            "embed_fallback_on_quota": bool(JURIS_UPDATE_EMBED_FALLBACK_ON_QUOTA),
+            "poll_after_ms": int(JURIS_UPDATE_JOB_POLL_MS),
+        },
+        "running_job_id": str((running or {}).get("job_id") or ""),
+        "last_result": manifest.get("last_result"),
+        "cursor": {
+            "target_year": int(cursor.get("target_year") or 0) if str(cursor.get("target_year") or "").strip() else 0,
+            "stf_since_date": _clean_iso_date(cursor.get("stf_since_date")),
+            "last_checked_at": str(cursor.get("last_checked_at") or "").strip(),
+            "finished_at": str(cursor.get("finished_at") or "").strip(),
+        },
+    }
+
+
+@app.post("/api/juris-update/start", status_code=202)
+def juris_update_start_api(
+    request: Request,
+    payload: JurisUpdateStartRequest | None = None,
+) -> dict[str, Any]:
+    _enforce_rate_limit(
+        request,
+        bucket="juris_update_start",
+        limit=RATE_LIMIT_JURIS_UPDATE_PER_HOUR,
+        window_seconds=3600,
+    )
+    include_stf = bool(payload.include_stf) if payload is not None else bool(JURIS_UPDATE_INCLUDE_STF)
+    include_stj = bool(payload.include_stj) if payload is not None else bool(JURIS_UPDATE_INCLUDE_STJ)
+    target_year = int(payload.target_year) if payload is not None else int(JURIS_UPDATE_TARGET_YEAR)
+    visible_browser = bool(payload.visible_browser) if payload is not None else bool(JURIS_UPDATE_VISIBLE_BROWSER)
+    if target_year < 2026:
+        target_year = 2026
+    if not include_stf and not include_stj:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "code": "missing_sources",
+                "message": "Selecione ao menos uma fonte (STF e/ou STJ).",
+                "hint": "Habilite include_stf ou include_stj antes de iniciar o job.",
+            },
+        )
+    active = _active_juris_update_job()
+    if isinstance(active, dict):
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "job_already_running",
+                "message": "Ja existe uma atualizacao em andamento.",
+                "hint": "Acompanhe o job atual antes de iniciar outro.",
+                "job_id": str(active.get("job_id") or ""),
+            },
+        )
+
+    job_id = _start_juris_update_job(
+        include_stf=include_stf,
+        include_stj=include_stj,
+        target_year=target_year,
+        visible_browser=visible_browser,
+    )
+    return {
+        "status": "accepted",
+        "job_id": job_id,
+        "include_stf": include_stf,
+        "include_stj": include_stj,
+        "target_year": target_year,
+        "visible_browser": visible_browser,
+        "poll_after_ms": JURIS_UPDATE_JOB_POLL_MS,
+        "message": (
+            "Atualizacao iniciada em segundo plano. "
+            "Durante a etapa STF, pode abrir uma nova janela do Chrome para validacao do portal."
+        ),
+    }
+
+
+@app.get("/api/juris-update/jobs/{job_id}")
+def juris_update_job_status_api(job_id: str) -> dict[str, Any]:
+    payload = _get_juris_update_job_payload(job_id)
+    if payload is None:
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "code": "job_not_found",
+                "message": "Job de atualizacao nao encontrado.",
+                "hint": "Inicie uma nova atualizacao para acompanhar o status.",
+            },
+        )
+    return payload
+
+
 @app.post("/api/query")
-def query_api(payload: QueryRequest) -> dict[str, Any]:
+def query_api(payload: QueryRequest, request: Request) -> dict[str, Any]:
+    _enforce_rate_limit(
+        request,
+        bucket="query",
+        limit=RATE_LIMIT_QUERY_PER_MIN,
+        window_seconds=60,
+    )
     try:
         answer, docs, meta = run_query(
             query=payload.query,
@@ -3124,6 +3953,8 @@ def query_api(payload: QueryRequest) -> dict[str, Any]:
             date_from=payload.date_from,
             date_to=payload.date_to,
             rag_config=payload.rag_config,
+            persona=payload.persona,
+            persona_prompt=payload.persona_prompt,
             trace=payload.trace,
             return_meta=True,
         )
@@ -3138,7 +3969,13 @@ def query_api(payload: QueryRequest) -> dict[str, Any]:
 
 
 @app.post("/api/query/stream")
-def query_stream_api(payload: QueryRequest) -> StreamingResponse:
+def query_stream_api(payload: QueryRequest, request: Request) -> StreamingResponse:
+    _enforce_rate_limit(
+        request,
+        bucket="query",
+        limit=RATE_LIMIT_QUERY_PER_MIN,
+        window_seconds=60,
+    )
     event_queue: queue.Queue[Optional[dict[str, Any]]] = queue.Queue()
 
     def stage_callback(stage: str, stage_payload: dict[str, Any]) -> None:
@@ -3166,6 +4003,8 @@ def query_stream_api(payload: QueryRequest) -> StreamingResponse:
                 date_from=payload.date_from,
                 date_to=payload.date_to,
                 rag_config=payload.rag_config,
+                persona=payload.persona,
+                persona_prompt=payload.persona_prompt,
                 trace=payload.trace,
                 stage_callback=stage_callback,
                 return_meta=True,
@@ -3230,7 +4069,13 @@ def explain_api(payload: ExplainRequest) -> dict[str, Any]:
 
 
 @app.post("/api/tts")
-def tts_api(payload: TTSRequest) -> dict[str, Any]:
+def tts_api(payload: TTSRequest, request: Request) -> dict[str, Any]:
+    _enforce_rate_limit(
+        request,
+        bucket="tts",
+        limit=RATE_LIMIT_TTS_PER_MIN,
+        window_seconds=60,
+    )
     trace_id = _new_trace_id()
     try:
         synthesized = _synthesize_tts(payload.text, trace_id=trace_id)
@@ -3256,7 +4101,13 @@ def tts_api(payload: TTSRequest) -> dict[str, Any]:
 
 
 @app.post("/api/tts/stream")
-def tts_stream_api(payload: TTSRequest) -> StreamingResponse:
+def tts_stream_api(payload: TTSRequest, request: Request) -> StreamingResponse:
+    _enforce_rate_limit(
+        request,
+        bucket="tts",
+        limit=RATE_LIMIT_TTS_PER_MIN,
+        window_seconds=60,
+    )
     event_queue: queue.Queue[Optional[dict[str, Any]]] = queue.Queue()
     trace_id = _new_trace_id()
 
@@ -3331,5 +4182,3 @@ def tts_stream_api(payload: TTSRequest) -> StreamingResponse:
             "X-Accel-Buffering": "no",
         },
     )
-
-

@@ -54,7 +54,7 @@ def test_build_generation_config_notice_reports_max_tokens_and_fallback():
         {
             "attempts": [
                 {
-                    "model": "gemini-3-pro-preview",
+                    "model": "gemini-3.1-pro-preview",
                     "finish_reason": "MAX_TOKENS",
                     "hit_max_tokens": True,
                     "text_chars": 280,
@@ -72,7 +72,7 @@ def test_build_generation_config_notice_reports_max_tokens_and_fallback():
     )
 
     assert warning["code"] == "gemini_max_tokens_fallback"
-    assert "gemini-3-pro-preview" in warning["message"]
+    assert "gemini-3.1-pro-preview" in warning["message"]
     assert "gemini-2.5-flash" in warning["message"]
     assert "Tokens Max da Resposta" in warning["message"]
     assert "Orcamento de Raciocinio (Thinking)" in warning["message"]
@@ -202,6 +202,25 @@ def test_generate_answer_prompt_blocks_internal_labels(monkeypatch):
     assert "nivel a-e" not in lowered
     assert "tese material" not in lowered
     assert "barreira processual" not in lowered
+
+
+def test_generate_answer_includes_custom_persona_prompt(monkeypatch):
+    fake_client = _FakeClient([_FakeResponse("resposta", "STOP")])
+    monkeypatch.setattr(query_mod, "get_gemini_client", lambda: fake_client)
+    monkeypatch.setattr(query_mod, "_resolve_best_gemini_model", lambda name: str(name or ""))
+
+    result = query_mod.generate_answer(
+        "pergunta",
+        "contexto",
+        generation_model="modelo-principal",
+        generation_fallback_model="modelo-fallback",
+        persona="parecer",
+        persona_prompt="Responda de forma objetiva em no maximo 3 frases.",
+    )
+    assert result == "resposta"
+    system_prompt = str(getattr(fake_client.models.configs[0], "system_instruction", "") or "")
+    assert "PROMPT CUSTOMIZADO DA PERSONA" in system_prompt
+    assert "Responda de forma objetiva em no maximo 3 frases." in system_prompt
 
 
 def test_format_context_omits_internal_ranking_labels():

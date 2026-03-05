@@ -53,12 +53,6 @@ def _extract_error_detail(resp: requests.Response) -> str:
         return (resp.text or "")[:300]
 
 
-def _build_endpoint_with_key(endpoint: str, api_key: str) -> str:
-    base = (endpoint or DEFAULT_ENDPOINT).strip() or DEFAULT_ENDPOINT
-    joiner = "&" if "?" in base else "?"
-    return f"{base}{joiner}key={api_key}"
-
-
 def _request_chunk_audio(
     *,
     ssml: str,
@@ -74,9 +68,11 @@ def _request_chunk_audio(
         },
     }
     timeout_seconds = max(5.0, min(float(config.timeout_ms) / 1000.0, 300.0))
+    endpoint = (config.endpoint or DEFAULT_ENDPOINT).strip() or DEFAULT_ENDPOINT
     response = requests.post(
-        _build_endpoint_with_key(config.endpoint, config.api_key),
+        endpoint,
         json=payload,
+        headers={"X-Goog-Api-Key": config.api_key},
         timeout=timeout_seconds,
     )
     if response.status_code >= 400:

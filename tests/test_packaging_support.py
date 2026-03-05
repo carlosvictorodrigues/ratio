@@ -20,10 +20,9 @@ def test_desktop_launcher_starts_backend_and_frontend_servers():
     assert "uvicorn" in launcher_py
     assert "webbrowser.open" in launcher_py
     assert "RATIO_PROJECT_ROOT" in launcher_py
-    # Avoid string-based uvicorn import target ("backend.main:app"), which
-    # PyInstaller may not collect in frozen mode.
     assert "from backend.main import app as backend_app" in launcher_py
     assert "app=backend_app" in launcher_py
+    assert "--probe-reranker" in launcher_py
     assert "lancedb_store" in launcher_py
 
 
@@ -51,3 +50,19 @@ def test_build_script_collects_pymupdf_for_meu_acervo_indexing():
     assert "--collect-all \"pymupdf\"" in build_bat
     assert "--hidden-import \"fitz\"" in build_bat
     assert "pip install --upgrade pyinstaller pymupdf" in build_bat
+
+
+def test_build_script_bundles_playwright_chromium_for_stf_update():
+    build_bat = _read("build_windows_exe.bat")
+
+    assert "playwright install chromium" in build_bat
+    assert "--collect-all \"playwright\"" in build_bat
+    assert "--add-data \"_playwright_browsers;_playwright_browsers\"" in build_bat
+
+
+def test_desktop_launcher_sets_playwright_env_for_packaged_browser():
+    launcher = _read("desktop_launcher.py")
+
+    assert "PLAYWRIGHT_BROWSERS_PATH" in launcher
+    assert "PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD" in launcher
+    assert "PLAYWRIGHT_CHROMIUM_EXECUTABLE" in launcher

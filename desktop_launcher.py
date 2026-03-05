@@ -29,11 +29,78 @@ def _runtime_root() -> Path:
 
 PROJECT_ROOT = _runtime_root()
 os.environ["RATIO_PROJECT_ROOT"] = str(PROJECT_ROOT)
+HF_CACHE_ROOT = Path(
+    (os.getenv("RATIO_HF_CACHE_DIR") or str(PROJECT_ROOT / "_cache" / "huggingface")).strip()
+).expanduser()
+os.environ["RATIO_HF_CACHE_DIR"] = str(HF_CACHE_ROOT)
+os.environ["HF_HOME"] = str(HF_CACHE_ROOT)
+os.environ["HF_HUB_CACHE"] = str(HF_CACHE_ROOT / "hub")
+os.environ["TRANSFORMERS_CACHE"] = str(HF_CACHE_ROOT / "transformers")
+try:
+    HF_CACHE_ROOT.mkdir(parents=True, exist_ok=True)
+    (HF_CACHE_ROOT / "hub").mkdir(parents=True, exist_ok=True)
+    (HF_CACHE_ROOT / "transformers").mkdir(parents=True, exist_ok=True)
+except Exception:
+    pass
+
+
+def _resolve_playwright_browsers_dir() -> Path | None:
+    candidates = [
+        PROJECT_ROOT / "_playwright_browsers",
+        PROJECT_ROOT / "_internal" / "_playwright_browsers",
+    ]
+    for path in candidates:
+        if path.is_dir():
+            return path
+    return None
+
+
+def _resolve_playwright_chromium_executable() -> Path | None:
+    root = _resolve_playwright_browsers_dir()
+    if root is None:
+        return None
+    for folder in sorted(root.glob("chromium-*"), reverse=True):
+        for exe in (folder / "chrome-win" / "chrome.exe", folder / "chrome-win64" / "chrome.exe"):
+            if exe.is_file():
+                return exe
+    return None
+
+
+_playwright_browsers_dir = _resolve_playwright_browsers_dir()
+if _playwright_browsers_dir is not None:
+    os.environ.setdefault("PLAYWRIGHT_BROWSERS_PATH", str(_playwright_browsers_dir))
+    os.environ.setdefault("PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD", "1")
+    _chromium_executable = _resolve_playwright_chromium_executable()
+    if _chromium_executable is not None:
+        os.environ.setdefault("PLAYWRIGHT_CHROMIUM_EXECUTABLE", str(_chromium_executable))
 
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from backend.main import app as backend_app
+
+def _load_backend_app():
+    from backend.main import app as backend_app
+    return backend_app
+
+
+def _handle_probe_cli(argv: list[str]) -> int | None:
+    if len(argv) < 3 or argv[1] != "--probe-reranker":
+        return None
+
+    model_name = (argv[2] or "").strip()
+    if not model_name:
+        print("probe error: modelo vazio", file=sys.stderr)
+        return 2
+
+    try:
+        from sentence_transformers import CrossEncoder
+
+        CrossEncoder(model_name, max_length=64)
+        print("ok")
+        return 0
+    except Exception as exc:
+        print(f"probe error: {exc}", file=sys.stderr)
+        return 1
 
 
 def _is_port_busy(host: str, port: int) -> bool:
@@ -60,6 +127,7 @@ def _start_frontend_server(frontend_dir: Path) -> ThreadingHTTPServer:
 
 
 def _start_backend_server() -> tuple[uvicorn.Server, threading.Thread]:
+    backend_app = _load_backend_app()
     config = uvicorn.Config(
         app=backend_app,
         host=BACKEND_HOST,
@@ -159,4 +227,7 @@ def main() -> int:
 
 
 if __name__ == "__main__":
+    probe_exit = _handle_probe_cli(sys.argv)
+    if probe_exit is not None:
+        raise SystemExit(probe_exit)
     raise SystemExit(main())

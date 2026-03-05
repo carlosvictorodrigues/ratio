@@ -14,6 +14,13 @@ set "BACKEND_OUT=%RUNTIME_DIR%\backend.out.log"
 set "BACKEND_ERR=%RUNTIME_DIR%\backend.err.log"
 set "FRONTEND_OUT=%RUNTIME_DIR%\frontend.out.log"
 set "FRONTEND_ERR=%RUNTIME_DIR%\frontend.err.log"
+set "RATIO_HF_CACHE_DIR=%CD%\_cache\huggingface"
+set "HF_HOME=%RATIO_HF_CACHE_DIR%"
+set "HF_HUB_CACHE=%RATIO_HF_CACHE_DIR%\hub"
+set "TRANSFORMERS_CACHE=%RATIO_HF_CACHE_DIR%\transformers"
+if not exist "%HF_HOME%" mkdir "%HF_HOME%"
+if not exist "%HF_HUB_CACHE%" mkdir "%HF_HUB_CACHE%"
+if not exist "%TRANSFORMERS_CACHE%" mkdir "%TRANSFORMERS_CACHE%"
 
 echo ============================================================
 echo Ratio - Pesquisa Jurisprudencial (Web Inicializador)

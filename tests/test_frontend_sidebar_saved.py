@@ -188,6 +188,24 @@ def test_settings_has_explicit_save_action_and_model_controls():
     assert "gemini_rerank_model" in js
 
 
+def test_settings_has_tts_provider_selector():
+    html = _read("frontend/index.html")
+    assert "Leitura em voz alta (TTS)" in html
+    assert 'id="ttsProviderSelect"' in html
+    assert "Classico (Google TTS Legacy)" in html
+    assert "Moderno (Gemini Native TTS)" in html
+    assert 'id="ttsProviderStatus"' in html
+
+
+def test_frontend_applies_tts_provider_config_via_api():
+    js = _read("frontend/app.js")
+    assert "/api/tts/config" in js
+    assert "ttsProviderPreference" in js
+    assert "loadTtsProviderConfig" in js
+    assert "applyTtsProviderSelection" in js
+    assert "ttsProviderSelect" in js
+
+
 def test_rag_config_version_migration_hooks_exist_in_frontend_state():
     js = _read("frontend/app.js")
     assert "ragConfigVersion" in js
@@ -235,6 +253,12 @@ def test_frontend_uses_tts_stream_endpoint_for_progressive_audio():
     assert "event === \"chunk\"" in js
     assert "event === \"done\"" in js
     assert "application/x-ndjson" in js
+
+
+def test_juris_update_note_mentions_chrome_window_and_incremental_scope():
+    html = _read("frontend/index.html")
+    assert "Atualiza a base oficial com jurisprudencias novas de 2026 em diante." in html
+    assert "pode abrir uma nova janela do Chrome" in html
 
 
 def test_frontend_audio_ui_has_replay_action_and_dual_progress_bars():

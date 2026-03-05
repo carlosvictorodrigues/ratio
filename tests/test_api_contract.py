@@ -10,6 +10,7 @@ import time
 import types
 from pathlib import Path
 
+import pytest
 from fastapi.testclient import TestClient
 
 
@@ -65,7 +66,7 @@ def _load_backend_with_stub():
         return {"validated": bool(validate), "model": stub._gemini_last_model}
 
     def get_supported_generation_models():
-        return ["gemini-3-pro-preview", "gemini-2.5-flash"]
+        return ["gemini-3.1-pro-preview", "gemini-2.5-flash"]
 
     class _StubModels:
         def generate_content(self, **_kwargs):
@@ -179,6 +180,85 @@ def test_query_contract_forwards_sources_and_user_priority():
     assert captured.get("prefer_user_sources") is True
 
 
+def test_query_contract_forwards_persona_prompt():
+    backend_main = _load_backend_with_stub()
+    captured: dict[str, object] = {}
+
+    def fake_run_query(**kwargs):
+        captured.update(kwargs)
+        return "answer ok", [], {"total_docs": 0}
+
+    backend_main.run_query = fake_run_query
+    client = TestClient(backend_main.app)
+
+    response = client.post(
+        "/api/query",
+        json={
+            "query": "Como fica o tema?",
+            "prefer_recent": True,
+            "reranker_backend": "local",
+            "persona": "parecer",
+            "persona_prompt": "Responder em 2 paragrafos.",
+        },
+    )
+    assert response.status_code == 200
+    assert captured.get("persona") == "parecer"
+    assert captured.get("persona_prompt") == "Responder em 2 paragrafos."
+
+
+def test_query_contract_accepts_tipos_with_underscore():
+    backend_main = _load_backend_with_stub()
+    captured: dict[str, object] = {}
+
+    def fake_run_query(**kwargs):
+        captured.update(kwargs)
+        return "answer ok", [], {"total_docs": 0}
+
+    backend_main.run_query = fake_run_query
+    client = TestClient(backend_main.app)
+
+    response = client.post(
+        "/api/query",
+        json={
+            "query": "Como fica o tema?",
+            "tribunais": ["STF", "STJ"],
+            "tipos": ["sumula_vinculante", "tema_repetitivo_stj", "acordao"],
+            "prefer_recent": True,
+            "reranker_backend": "local",
+            "persona": "visao_geral",
+        },
+    )
+    assert response.status_code == 200
+    assert captured.get("tipos") == ["sumula_vinculante", "tema_repetitivo_stj", "acordao"]
+
+
+def test_query_contract_accepts_all_personas():
+    backend_main = _load_backend_with_stub()
+    captured_personas: list[str] = []
+
+    def fake_run_query(**kwargs):
+        captured_personas.append(str(kwargs.get("persona") or ""))
+        return "answer ok", [], {"total_docs": 0}
+
+    backend_main.run_query = fake_run_query
+    client = TestClient(backend_main.app)
+
+    for persona in ("visao_geral", "parecer", "estudos", "peticao"):
+        response = client.post(
+            "/api/query",
+            json={
+                "query": "Teste de persona",
+                "tipos": ["sumula_vinculante"],
+                "prefer_recent": True,
+                "reranker_backend": "local",
+                "persona": persona,
+            },
+        )
+        assert response.status_code == 200
+
+    assert captured_personas == ["visao_geral", "parecer", "estudos", "peticao"]
+
+
 def test_explain_contract():
     backend_main = _load_backend_with_stub()
     backend_main.explain_answer = lambda **_kwargs: "explicacao curta"
@@ -287,6 +367,27 @@ def test_meu_acervo_index_rejects_request_over_total_size_limit():
     assert str(detail.get("code")) == "request_too_large"
 
 
+def test_meu_acervo_index_rejects_pdf_without_magic_bytes_signature():
+    backend_main = _load_backend_with_stub()
+    backend_main.USER_ACERVO_MAX_FILE_SIZE_BYTES = 1024
+    backend_main.USER_ACERVO_MAX_REQUEST_SIZE_BYTES = 1024
+    client = TestClient(backend_main.app)
+
+    fake_non_pdf = io.BytesIO(b"NOT-A-REAL-PDF")
+    response = client.post(
+        "/api/meu-acervo/index",
+        data={
+            "confirm_index": "true",
+            "source_name": "Banco 1",
+            "ocr_missing_only": "true",
+        },
+        files={"files": ("falso.pdf", fake_non_pdf, "application/pdf")},
+    )
+    assert response.status_code == 422
+    detail = response.json().get("detail", {})
+    assert str(detail.get("code")) == "invalid_pdf_signature"
+
+
 def test_meu_acervo_index_starts_async_job_and_exposes_job_status():
     backend_main = _load_backend_with_stub()
     client = TestClient(backend_main.app)
@@ -386,13 +487,19 @@ def test_tts_extract_converts_pcm_l16_into_wav():
 def test_tts_defaults_to_gemini_native_provider():
     backend_main = _load_backend_with_stub()
     assert backend_main.TTS_PROVIDER == "gemini_native"
-    assert backend_main.TTS_MODEL == "gemini-2.5-flash-preview-tts"
+    assert backend_main.TTS_MODEL == "gemini-2.5-pro-preview-tts"
     assert backend_main.TTS_MAX_CHARS == 5000
 
 
 def test_legacy_tts_module_targets_google_cloud_tts_endpoint():
     legacy_source = Path("backend/tts_legacy_google.py").read_text(encoding="utf-8")
     assert "texttospeech.googleapis.com/v1/text:synthesize" in legacy_source
+
+
+def test_legacy_tts_module_uses_api_key_header_instead_of_query_param():
+    legacy_source = Path("backend/tts_legacy_google.py").read_text(encoding="utf-8")
+    assert '"X-Goog-Api-Key": config.api_key' in legacy_source
+    assert "?key=" not in legacy_source
 
 
 def test_tts_dispatch_routes_to_gemini_provider_by_default():
@@ -420,6 +527,88 @@ def test_tts_stream_dispatch_routes_to_gemini_provider_by_default():
     assert len(chunks) == 1
     assert chunks[0][0] == b"gemini-chunk"
     assert chunks[0][1] == "audio/wav"
+
+
+def test_tts_sync_falls_back_to_legacy_when_gemini_fails():
+    backend_main = _load_backend_with_stub()
+    backend_main.TTS_PROVIDER = "gemini_native"
+    backend_main.TTS_PROVIDER_FALLBACK = True
+    backend_main._legacy_tts_api_key = lambda: "legacy-key"
+    events: list[tuple[str, str, dict]] = []
+    backend_main._log_tts_event = lambda event, trace_id, **kwargs: events.append((event, trace_id, kwargs))
+    backend_main._synthesize_google_tts = lambda *_args, **_kwargs: (_ for _ in ()).throw(
+        RuntimeError("Falha no TTS Gemini: indisponibilidade upstream apos tentativas.")
+    )
+    backend_main._synthesize_legacy_google_tts = lambda *_args, **_kwargs: (b"legacy-audio", "audio/wav")
+
+    audio, mime = backend_main._synthesize_tts("texto", trace_id="trace-fallback-sync")
+    assert audio == b"legacy-audio"
+    assert mime == "audio/wav"
+    assert any(item[0] == "tts_provider_fallback" for item in events)
+
+
+def test_tts_stream_falls_back_to_legacy_when_gemini_fails_before_first_chunk():
+    backend_main = _load_backend_with_stub()
+    backend_main.TTS_PROVIDER = "gemini_native"
+    backend_main.TTS_PROVIDER_FALLBACK = True
+    backend_main._legacy_tts_api_key = lambda: "legacy-key"
+    backend_main._stream_google_tts_chunks = lambda *_args, **_kwargs: (_ for _ in ()).throw(
+        RuntimeError("Falha no TTS Gemini: indisponibilidade upstream apos tentativas.")
+    )
+    backend_main._stream_legacy_tts_chunks = lambda *_args, **_kwargs: iter(
+        [(b"legacy-chunk", "audio/wav", 1, 1)]
+    )
+
+    chunks = list(backend_main._stream_tts_chunks("texto", trace_id="trace-fallback-stream"))
+    assert len(chunks) == 1
+    assert chunks[0][0] == b"legacy-chunk"
+
+
+def test_tts_stream_falls_back_to_legacy_after_partial_gemini_output():
+    backend_main = _load_backend_with_stub()
+    backend_main.TTS_PROVIDER = "gemini_native"
+    backend_main.TTS_PROVIDER_FALLBACK = True
+    backend_main._legacy_tts_api_key = lambda: "legacy-key"
+
+    def _partial_fail_stream(*_args, **_kwargs):
+        yield (b"gemini-first", "audio/wav", 1, 2)
+        raise backend_main._TTSPartialStreamError(
+            "Falha no TTS Gemini apos chunks parciais. Ultimo erro: timeout",
+            remaining_text="restante do texto",
+            emitted_chunks=1,
+            total_chunks=2,
+        )
+
+    backend_main._stream_google_tts_chunks = _partial_fail_stream
+    captured: dict[str, str] = {}
+
+    def _legacy_stream(text: str, *_args, **_kwargs):
+        captured["text"] = text
+        yield (b"legacy-chunk", "audio/wav", 1, 1)
+
+    backend_main._stream_legacy_tts_chunks = _legacy_stream
+
+    chunks = list(backend_main._stream_tts_chunks("texto", trace_id="trace-partial"))
+    assert len(chunks) == 2
+    assert chunks[0][0] == b"gemini-first"
+    assert chunks[1][0] == b"legacy-chunk"
+    assert chunks[1][2] == 2
+    assert chunks[1][3] == 2
+    assert captured.get("text") == "restante do texto"
+
+
+def test_tts_sync_does_not_fallback_when_disabled():
+    backend_main = _load_backend_with_stub()
+    backend_main.TTS_PROVIDER = "gemini_native"
+    backend_main.TTS_PROVIDER_FALLBACK = False
+    backend_main._legacy_tts_api_key = lambda: "legacy-key"
+    backend_main._synthesize_google_tts = lambda *_args, **_kwargs: (_ for _ in ()).throw(
+        RuntimeError("Falha no TTS Gemini: indisponibilidade upstream apos tentativas.")
+    )
+    backend_main._synthesize_legacy_google_tts = lambda *_args, **_kwargs: (b"legacy-audio", "audio/wav")
+
+    with pytest.raises(RuntimeError):
+        backend_main._synthesize_tts("texto", trace_id="trace-no-fallback")
 
 
 def test_tts_normalize_removes_doc_citation_markers():
@@ -483,6 +672,56 @@ def test_gemini_status_contract():
     assert "supported_models" in payload
 
 
+def test_tts_config_status_contract():
+    backend_main = _load_backend_with_stub()
+    client = TestClient(backend_main.app)
+
+    response = client.get("/api/tts/config")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "ok"
+    assert payload["provider"] in {"gemini_native", "legacy_google"}
+    assert "env_path" not in payload
+    options = payload.get("options", [])
+    option_ids = {str(item.get("id")) for item in options if isinstance(item, dict)}
+    assert "gemini_native" in option_ids
+    assert "legacy_google" in option_ids
+
+
+def test_tts_config_update_switches_provider_for_next_generation():
+    backend_main = _load_backend_with_stub()
+    client = TestClient(backend_main.app)
+
+    backend_main._synthesize_google_tts = lambda *_args, **_kwargs: (b"gemini-audio", "audio/wav")
+    backend_main._synthesize_legacy_google_tts = lambda *_args, **_kwargs: (b"legacy-audio", "audio/wav")
+
+    response = client.post(
+        "/api/tts/config",
+        json={"provider": "legacy_google", "persist_env": False},
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["provider"] == "legacy_google"
+    assert "env_path" not in payload
+    assert backend_main.TTS_PROVIDER == "legacy_google"
+
+    audio, mime = backend_main._synthesize_tts("texto", trace_id="trace-tts-config-switch")
+    assert audio == b"legacy-audio"
+    assert mime == "audio/wav"
+
+
+def test_tts_config_rejects_invalid_provider():
+    backend_main = _load_backend_with_stub()
+    client = TestClient(backend_main.app)
+
+    response = client.post(
+        "/api/tts/config",
+        json={"provider": "unsupported_engine", "persist_env": False},
+    )
+    assert response.status_code == 400
+    detail = response.json().get("detail", {})
+    assert str(detail.get("code")) == "invalid_tts_provider"
+
 def test_gemini_setup_contract():
     backend_main = _load_backend_with_stub()
     client = TestClient(backend_main.app)
@@ -502,6 +741,7 @@ def test_gemini_setup_contract():
     assert payload["saved"] is True
     assert payload["validated"] is True
     assert payload["has_api_key"] is True
+    assert "env_path" not in payload
 
 
 def test_gemini_setup_soft_validation_failure_still_saves_key():
@@ -577,7 +817,7 @@ def test_tts_500_internal_is_classified_as_upstream_unavailable():
     backend_main = _load_backend_with_stub()
 
     exc = RuntimeError(
-        "Falha no TTS Gemini (gemini-2.5-flash-preview-tts): 500 INTERNAL. "
+        "Falha no TTS Gemini (gemini-2.5-pro-preview-tts): 500 INTERNAL. "
         "{'error': {'code': 500, 'message': 'An internal error has occurred. Please retry', 'status': 'INTERNAL'}}"
     )
     status_code, detail = backend_main._classify_runtime_error(exc)
@@ -592,7 +832,7 @@ def test_tts_error_response_includes_trace_id_for_support():
 
     def fail_tts(*_args, **_kwargs):
         raise RuntimeError(
-            "Falha no TTS Gemini (gemini-2.5-flash-preview-tts): 500 INTERNAL. "
+            "Falha no TTS Gemini (gemini-2.5-pro-preview-tts): 500 INTERNAL. "
             "{'error': {'code': 500, 'message': 'An internal error has occurred. Please retry', 'status': 'INTERNAL'}}"
         )
 
@@ -612,7 +852,7 @@ def test_tts_no_supported_model_is_classified_as_model_unavailable():
 
     exc = RuntimeError(
         "Falha no TTS Gemini: nenhum modelo de voz suporta audio para esta chave/API. "
-        "Modelos testados: gemini-2.5-flash-preview-tts."
+        "Modelos testados: gemini-2.5-pro-preview-tts."
     )
     status_code, detail = backend_main._classify_runtime_error(exc)
 
@@ -645,7 +885,9 @@ def test_tts_stream_uses_controlled_prefetch_concurrency():
     backend_main.TTS_REQUEST_RETRY_ATTEMPTS = 1
     backend_main.TTS_PREFETCH_CONCURRENCY = 2
     backend_main.TTS_CACHE_ENABLED = False
-    backend_main._split_tts_chunks = lambda _text: ["bloco 1", "bloco 2", "bloco 3", "bloco 4"]
+    backend_main._split_tts_chunks = (
+        lambda _text, max_ssml_bytes=5000: ["bloco 1", "bloco 2", "bloco 3", "bloco 4"]
+    )
 
     active = {"current": 0, "max": 0}
     lock = threading.Lock()
@@ -673,6 +915,38 @@ def test_tts_stream_uses_controlled_prefetch_concurrency():
     assert active["max"] <= backend_main.TTS_PREFETCH_CONCURRENCY
 
 
+def test_tts_stream_respects_stream_max_chars_limit():
+    backend_main = _load_backend_with_stub()
+    backend_main.has_gemini_api_key = lambda: True
+    backend_main.TTS_MODEL_MAX_ATTEMPTS = 1
+    backend_main.TTS_REQUEST_RETRY_ATTEMPTS = 1
+    backend_main.TTS_PREFETCH_CONCURRENCY = 1
+    backend_main.TTS_CACHE_ENABLED = False
+    backend_main.TTS_STREAM_MAX_CHARS = 777
+
+    captured: dict[str, int] = {}
+
+    def fake_split(text: str, max_ssml_bytes: int = 5000):
+        captured["max_ssml_bytes"] = int(max_ssml_bytes)
+        return ["bloco unico"]
+
+    backend_main._split_tts_chunks = fake_split
+
+    def fake_generate_content(**kwargs):
+        payload = kwargs.get("contents", "").encode("utf-8")
+        inline = types.SimpleNamespace(data=payload, mime_type="audio/wav")
+        return types.SimpleNamespace(parts=[types.SimpleNamespace(inline_data=inline)])
+
+    fake_client = types.SimpleNamespace(
+        models=types.SimpleNamespace(generate_content=fake_generate_content)
+    )
+    backend_main.get_gemini_client = lambda: fake_client
+
+    chunks = list(backend_main._stream_google_tts_chunks("texto stream", trace_id="stream-max"))
+    assert len(chunks) == 1
+    assert captured.get("max_ssml_bytes") == 777
+
+
 def test_tts_chunk_cache_uses_hash_and_disk_storage(tmp_path):
     backend_main = _load_backend_with_stub()
     backend_main.has_gemini_api_key = lambda: True
@@ -680,7 +954,9 @@ def test_tts_chunk_cache_uses_hash_and_disk_storage(tmp_path):
     backend_main.TTS_REQUEST_RETRY_ATTEMPTS = 1
     backend_main.TTS_PREFETCH_CONCURRENCY = 1
     backend_main.TTS_CACHE_ENABLED = True
-    backend_main._split_tts_chunks = lambda _text: ["bloco repetido", "bloco repetido"]
+    backend_main._split_tts_chunks = (
+        lambda _text, max_ssml_bytes=5000: ["bloco repetido", "bloco repetido"]
+    )
 
     call_count = {"value": 0}
 
@@ -729,7 +1005,25 @@ def test_query_error_is_structured_for_missing_api_key():
     assert response.status_code == 400
     detail = response.json()["detail"]
     assert detail["code"] == "missing_api_key"
-    assert "GEMINI_API_KEY" in detail["message"]
+    assert detail["message"] == "Chave de API ausente."
+    assert "Configure a chave Gemini" in detail["hint"]
+
+
+def test_frontend_source_links_are_protocol_sanitized():
+    source = Path("frontend/app.js").read_text(encoding="utf-8")
+    assert "function sanitizeUrl(rawUrl)" in source
+    assert 'protocol === "http:" || protocol === "https:"' in source
+
+
+def test_frontend_removed_instruction_field_and_added_persona_settings():
+    html = Path("frontend/index.html").read_text(encoding="utf-8")
+    js = Path("frontend/app.js").read_text(encoding="utf-8")
+    assert 'id="userInstructionInput"' not in html
+    assert "userInstructionInput" not in js
+    assert 'id="personaConfigSelect"' in html
+    assert 'id="personaPromptInput"' in html
+    assert 'id="savePersonaConfigBtn"' in html
+    assert "PERSONA_CONFIG_STORAGE_KEY" in js
 
 
 def test_query_stream_contract_emits_stage_and_result():
@@ -823,3 +1117,62 @@ def test_tts_stream_contract_emits_started_chunk_done():
     assert len(chunk_packets) == 2
     assert chunk_packets[0]["audio_base64"]
     assert chunk_packets[0]["mime_type"] == "audio/wav"
+
+
+def test_juris_update_last_contract():
+    backend_main = _load_backend_with_stub()
+    client = TestClient(backend_main.app)
+
+    response = client.get("/api/juris-update/last")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "ok"
+    assert payload["defaults"]["target_year"] >= 2026
+    assert "include_stf" in payload["defaults"]
+    assert "include_stj" in payload["defaults"]
+
+
+def test_juris_update_last_exposes_cursor_state():
+    backend_main = _load_backend_with_stub()
+    backend_main._save_juris_update_manifest(
+        {
+            "version": 2,
+            "last_result": {"message": "ok"},
+            "cursor": {
+                "target_year": 2026,
+                "stf_since_date": "2026-03-04",
+                "last_checked_at": "2026-03-04T20:10:00",
+            },
+        }
+    )
+    client = TestClient(backend_main.app)
+
+    response = client.get("/api/juris-update/last")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["cursor"]["target_year"] == 2026
+    assert payload["cursor"]["stf_since_date"] == "2026-03-04"
+    assert payload["cursor"]["last_checked_at"] == "2026-03-04T20:10:00"
+
+
+def test_juris_update_start_contract():
+    backend_main = _load_backend_with_stub()
+    backend_main._start_juris_update_job = lambda **_kwargs: "jobtest123"
+    client = TestClient(backend_main.app)
+
+    response = client.post(
+        "/api/juris-update/start",
+        json={
+            "include_stf": True,
+            "include_stj": True,
+            "target_year": 2026,
+            "visible_browser": True,
+        },
+    )
+    assert response.status_code == 202
+    payload = response.json()
+    assert payload["status"] == "accepted"
+    assert payload["job_id"] == "jobtest123"
+    assert payload["target_year"] == 2026
+    assert payload["include_stf"] is True
+    assert payload["include_stj"] is True

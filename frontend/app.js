@@ -29,6 +29,8 @@ const ONBOARDING_KEY_LONG_WAIT_SECONDS = 8;
 const ONBOARDING_KEY_VERY_LONG_WAIT_SECONDS = 16;
 const USER_CORPUS_INDEX_TIMEOUT_MS = 900000;
 const USER_CORPUS_JOB_POLL_DEFAULT_MS = 1200;
+const JURIS_UPDATE_JOB_TIMEOUT_MS = 3600000;
+const JURIS_UPDATE_JOB_POLL_DEFAULT_MS = 1500;
 const QUERY_STREAM_TIMEOUT_MS = 0;
 const QUERY_STREAM_TIMEOUT_LABEL = "A consulta juridica";
 const AUDIO_TTS_TIMEOUT_BASE_MS = 240000;
@@ -45,6 +47,24 @@ const DOC_REF_GROUP_RE = /\[([^\]]*(?:DOCUMENTO|DOC(?:UMENTO)?\.?)[^\]]*)\]/gi;
 const DOC_REF_NUMBER_RE = /(?:DOCUMENTO|DOC(?:UMENTO)?\.?)\s*(\d+)/gi;
 const RAG_SCHEMA_FALLBACK = [];
 const LIBRARY_MODE_DEFAULT = "history";
+const PERSONA_CONFIG_STORAGE_KEY = "jurisai_persona_config_v1";
+const PERSONA_META = {
+  visao_geral: { label: "Visao Geral", short: "Visao Geral" },
+  parecer:     { label: "Parecer Juridico", short: "Parecer" },
+  estudos:     { label: "Estudos", short: "Estudos" },
+  peticao:     { label: "Peticao", short: "Peticao" }
+};
+const PERSONA_DEFAULT = "visao_geral";
+const PERSONA_PROMPT_MAX_CHARS = 6000;
+const PERSONA_MODEL_MAX_CHARS = 80;
+
+const PERSONA_CONFIG_DEFAULTS = {
+  visao_geral: { model: "", prompt: "" },
+  parecer: { model: "", prompt: "" },
+  estudos: { model: "", prompt: "" },
+  peticao: { model: "", prompt: "" }
+};
+
 const RAG_GROUP_HELP = {
   "Busca e Ranking": [
     "Aumente Candidatos Hibridos e Documentos Finais para ampliar cobertura e diversidade de precedentes.",
@@ -92,6 +112,7 @@ const state = {
   turns: [],
   activeTurnId: null,
   answerFontScale: 1,
+  ttsProviderPreference: "legacy_google",
   onboardingSeen: localStorage.getItem(ONBOARDING_STORAGE_KEY) === "1",
   about: {
     open: false,
@@ -106,6 +127,9 @@ const state = {
   ragConfigDefaults: {},
   ragConfigSchema: [],
   ragConfigValues: {},
+  selectedPersona: PERSONA_DEFAULT,
+  personaConfigs: JSON.parse(JSON.stringify(PERSONA_CONFIG_DEFAULTS)),
+  personaConfigEditor: PERSONA_DEFAULT,
   acervo: {
     sources: [],
     selectedSources: ["ratio"]
@@ -178,6 +202,19 @@ const railModeButtons = Array.from(document.querySelectorAll(".rail-btn[data-lib
 const railAcervoButtons = Array.from(document.querySelectorAll(".rail-btn[data-open-acervo]"));
 const railSettingsButtons = Array.from(document.querySelectorAll(".rail-btn[data-open-settings]"));
 
+const personaChipBtn = $("personaChipBtn");
+const personaChipValue = $("personaChipValue");
+const personaChips = Array.from(document.querySelectorAll(".persona-chip[data-persona]"));
+const tipsBtn = $("tipsBtn");
+const tipsPopover = $("tipsPopover");
+const closeTipsBtn = $("closeTipsBtn");
+const personaConfigSelect = $("personaConfigSelect");
+const personaModelInput = $("personaModelInput");
+const personaPromptInput = $("personaPromptInput");
+const savePersonaConfigBtn = $("savePersonaConfigBtn");
+const resetPersonaConfigBtn = $("resetPersonaConfigBtn");
+const personaConfigStatus = $("personaConfigStatus");
+
 const toggleSettingsBtn = $("toggleSettingsBtn");
 const closeSettingsBtn = $("closeSettingsBtn");
 const closeAcervoBtn = $("closeAcervoBtn");
@@ -189,6 +226,8 @@ const ragAdvancedGroups = $("ragAdvancedGroups");
 const generationModelInput = $("generationModelInput");
 const generationFallbackModelInput = $("generationFallbackModelInput");
 const geminiModelsList = $("geminiModelsList");
+const ttsProviderSelect = $("ttsProviderSelect");
+const ttsProviderStatus = $("ttsProviderStatus");
 const userCorpusNameInput = $("userCorpusNameInput");
 const userCorpusFilesInput = $("userCorpusFilesInput");
 const userCorpusOcrMissingOnly = $("userCorpusOcrMissingOnly");
@@ -198,10 +237,15 @@ const userCorpusStatus = $("userCorpusStatus");
 const userCorpusSources = $("userCorpusSources");
 const sourceFiltersList = $("sourceFiltersList");
 const userCorpusStages = $("userCorpusStages");
+const runJurisUpdateBtn = $("runJurisUpdateBtn");
+const jurisUpdateStatus = $("jurisUpdateStatus");
+const jurisUpdateStages = $("jurisUpdateStages");
+const jurisUpdateSummary = $("jurisUpdateSummary");
 
 marked.setOptions({ gfm: true, breaks: false });
 
 const USER_CORPUS_STAGE_FLOW = ["ready", "upload", "extract", "clean", "embed", "done"];
+const JURIS_UPDATE_STAGE_FLOW = ["idle", "stf_start", "stj_start", "embed_start", "upsert_start", "done"];
 let userCorpusStageTimer = null;
 
 function nowId() {
@@ -220,6 +264,21 @@ function escapeHtml(text) {
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&#39;");
+}
+
+function sanitizeUrl(rawUrl) {
+  const input = String(rawUrl || "").trim();
+  if (!input) return "";
+  try {
+    const parsed = new URL(input, window.location.origin);
+    const protocol = String(parsed.protocol || "").toLowerCase();
+    if (protocol === "http:" || protocol === "https:") {
+      return parsed.href;
+    }
+  } catch (_err) {
+    return "";
+  }
+  return "";
 }
 
 function dateHuman(raw) {
@@ -276,7 +335,7 @@ function openSourceDocumentByIndex(docIndex) {
     return;
   }
 
-  const externalUrl = String(doc.inteiro_teor_url || "").trim();
+  const externalUrl = sanitizeUrl(doc.inteiro_teor_url);
   if (externalUrl) {
     const opened = window.open(externalUrl, "_blank", "noopener,noreferrer");
     if (!opened) {
@@ -384,19 +443,74 @@ function normalizeStoredTurn(raw) {
   return turn;
 }
 
+function normalizeTtsProviderValue(raw) {
+  const value = String(raw || "").trim().toLowerCase();
+  return value === "gemini_native" ? "gemini_native" : "legacy_google";
+}
+
+function deepClonePersonaConfigs(source) {
+  return JSON.parse(JSON.stringify(source || PERSONA_CONFIG_DEFAULTS));
+}
+
+function normalizePersonaModel(raw) {
+  return String(raw || "").replace(/\x00/g, "").trim().slice(0, PERSONA_MODEL_MAX_CHARS);
+}
+
+function normalizePersonaPrompt(raw) {
+  return String(raw || "").replace(/\x00/g, "").trim().slice(0, PERSONA_PROMPT_MAX_CHARS);
+}
+
+function normalizePersonaConfigEntry(rawEntry) {
+  const entry = rawEntry && typeof rawEntry === "object" ? rawEntry : {};
+  return {
+    model: normalizePersonaModel(entry.model),
+    prompt: normalizePersonaPrompt(entry.prompt)
+  };
+}
+
+function normalizePersonaConfigs(raw) {
+  const next = deepClonePersonaConfigs(PERSONA_CONFIG_DEFAULTS);
+  const source = raw && typeof raw === "object" ? raw : {};
+  for (const key of Object.keys(PERSONA_CONFIG_DEFAULTS)) {
+    next[key] = normalizePersonaConfigEntry(source[key]);
+  }
+  return next;
+}
+
+function loadStoredPersonaConfigs() {
+  try {
+    const raw = localStorage.getItem(PERSONA_CONFIG_STORAGE_KEY);
+    if (!raw) return deepClonePersonaConfigs(PERSONA_CONFIG_DEFAULTS);
+    return normalizePersonaConfigs(JSON.parse(raw));
+  } catch (_) {
+    return deepClonePersonaConfigs(PERSONA_CONFIG_DEFAULTS);
+  }
+}
+
+function persistPersonaConfigs() {
+  try {
+    const payload = normalizePersonaConfigs(state.personaConfigs);
+    localStorage.setItem(PERSONA_CONFIG_STORAGE_KEY, JSON.stringify(payload));
+  } catch (_) {
+    // Ignore storage failures (private mode / quota / policies).
+  }
+}
+
 function loadStoredSession() {
   const fallback = {
     turns: [],
     activeTurnId: null,
     answerFontScale: 1,
     rerankerBackend: "local",
+    ttsProviderPreference: "legacy_google",
     preferRecent: true,
     preferUserSources: true,
     sourceSelection: ["ratio"],
     evidenceOpen: null,
     libraryMode: LIBRARY_MODE_DEFAULT,
     ragConfigVersion: "",
-    ragConfigValues: {}
+    ragConfigValues: {},
+    selectedPersona: PERSONA_DEFAULT
   };
   try {
     const raw = localStorage.getItem(SESSION_STORAGE_KEY);
@@ -412,6 +526,7 @@ function loadStoredSession() {
     if (!activeTurnId && turns.length) {
       activeTurnId = turns[turns.length - 1].id;
     }
+    const storedPersona = String(parsed?.selectedPersona || "").trim();
     return {
       turns,
       activeTurnId,
@@ -419,6 +534,7 @@ function loadStoredSession() {
         ? Math.max(ANSWER_FONT_SCALE_MIN, Math.min(ANSWER_FONT_SCALE_MAX, Number(parsed.answerFontScale)))
         : 1,
       rerankerBackend: parsed?.rerankerBackend === "gemini" ? "gemini" : "local",
+      ttsProviderPreference: normalizeTtsProviderValue(parsed?.ttsProviderPreference),
       preferRecent: typeof parsed?.preferRecent === "boolean" ? parsed.preferRecent : true,
       preferUserSources: typeof parsed?.preferUserSources === "boolean" ? parsed.preferUserSources : true,
       sourceSelection: Array.isArray(parsed?.sourceSelection)
@@ -427,7 +543,8 @@ function loadStoredSession() {
       evidenceOpen: typeof parsed?.evidenceOpen === "boolean" ? parsed.evidenceOpen : null,
       libraryMode: normalizeLibraryMode(parsed?.libraryMode),
       ragConfigVersion: String(parsed?.ragConfigVersion || "").trim(),
-      ragConfigValues: parsed?.ragConfigValues && typeof parsed.ragConfigValues === "object" ? parsed.ragConfigValues : {}
+      ragConfigValues: parsed?.ragConfigValues && typeof parsed.ragConfigValues === "object" ? parsed.ragConfigValues : {},
+      selectedPersona: PERSONA_META[storedPersona] ? storedPersona : PERSONA_DEFAULT
     };
   } catch (_) {
     return fallback;
@@ -453,6 +570,7 @@ function persistSession() {
       activeTurnId: state.activeTurnId || null,
       answerFontScale: state.answerFontScale,
       rerankerBackend: rerankerBackend?.value === "gemini" ? "gemini" : "local",
+      ttsProviderPreference: normalizeTtsProviderValue(state.ttsProviderPreference),
       preferRecent: !!preferRecent?.checked,
       preferUserSources: userSourcePriorityToggle?.checked !== false,
       sourceSelection: Array.isArray(state.acervo.selectedSources) ? state.acervo.selectedSources : ["ratio"],
@@ -460,6 +578,7 @@ function persistSession() {
       libraryMode: normalizeLibraryMode(state.library.mode),
       ragConfigVersion: String(state.ragConfigVersion || ""),
       ragConfigValues: state.ragConfigValues || {},
+      selectedPersona: state.selectedPersona || PERSONA_DEFAULT,
       savedAt: Date.now()
     };
     localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(payload));
@@ -480,6 +599,92 @@ function refreshHeaderBadges() {
     const turn = getTurn(state.activeTurnId);
     const count = turn?.status === "done" && Array.isArray(turn.docs) ? turn.docs.length : 0;
     topSourceCount.textContent = String(count);
+  }
+  if (personaChipValue) {
+    const meta = PERSONA_META[state.selectedPersona] || PERSONA_META[PERSONA_DEFAULT];
+    personaChipValue.textContent = meta.short;
+  }
+}
+
+function applyPersonaSelection(key) {
+  const validKey = PERSONA_META[key] ? key : PERSONA_DEFAULT;
+  state.selectedPersona = validKey;
+  personaChips.forEach((chip) => {
+    const isActive = chip.dataset.persona === validKey;
+    chip.classList.toggle("persona-chip--active", isActive);
+    chip.setAttribute("aria-pressed", String(isActive));
+  });
+  if (personaChipValue) {
+    personaChipValue.textContent = (PERSONA_META[validKey] || PERSONA_META[PERSONA_DEFAULT]).short;
+  }
+}
+
+function setPersonaConfigStatus(text, isError = false) {
+  if (!personaConfigStatus) return;
+  personaConfigStatus.textContent = text || "";
+  personaConfigStatus.className = isError ? "rag-config-status error" : "rag-config-status";
+}
+
+function getPersonaConfigFor(key) {
+  const validKey = PERSONA_META[key] ? key : PERSONA_DEFAULT;
+  const current = state.personaConfigs?.[validKey];
+  if (!current || typeof current !== "object") {
+    return normalizePersonaConfigEntry(PERSONA_CONFIG_DEFAULTS[validKey]);
+  }
+  return normalizePersonaConfigEntry(current);
+}
+
+function renderPersonaConfigEditor() {
+  const editorKey = PERSONA_META[state.personaConfigEditor] ? state.personaConfigEditor : PERSONA_DEFAULT;
+  state.personaConfigEditor = editorKey;
+  if (personaConfigSelect) {
+    personaConfigSelect.value = editorKey;
+  }
+  const cfg = getPersonaConfigFor(editorKey);
+  if (personaModelInput) {
+    personaModelInput.value = cfg.model;
+  }
+  if (personaPromptInput) {
+    personaPromptInput.value = cfg.prompt;
+  }
+}
+
+function savePersonaConfigEditor() {
+  const editorKey = PERSONA_META[state.personaConfigEditor] ? state.personaConfigEditor : PERSONA_DEFAULT;
+  const nextEntry = {
+    model: normalizePersonaModel(personaModelInput?.value),
+    prompt: normalizePersonaPrompt(personaPromptInput?.value)
+  };
+  state.personaConfigs[editorKey] = nextEntry;
+  if (personaModelInput) personaModelInput.value = nextEntry.model;
+  if (personaPromptInput) personaPromptInput.value = nextEntry.prompt;
+  persistPersonaConfigs();
+  persistSession();
+  setPersonaConfigStatus(`Configuracao da persona "${PERSONA_META[editorKey].label}" salva.`);
+}
+
+function resetPersonaConfigEditor() {
+  const editorKey = PERSONA_META[state.personaConfigEditor] ? state.personaConfigEditor : PERSONA_DEFAULT;
+  state.personaConfigs[editorKey] = normalizePersonaConfigEntry(PERSONA_CONFIG_DEFAULTS[editorKey]);
+  renderPersonaConfigEditor();
+  persistPersonaConfigs();
+  persistSession();
+  setPersonaConfigStatus(`Persona "${PERSONA_META[editorKey].label}" restaurada para o padrao.`);
+}
+
+function getActivePersonaConfig() {
+  const key = PERSONA_META[state.selectedPersona] ? state.selectedPersona : PERSONA_DEFAULT;
+  return getPersonaConfigFor(key);
+}
+
+function setTipsOpen(open) {
+  if (!tipsPopover) return;
+  if (open) {
+    tipsPopover.hidden = false;
+    requestAnimationFrame(() => tipsPopover.classList.add("tips-popover--visible"));
+  } else {
+    tipsPopover.classList.remove("tips-popover--visible");
+    setTimeout(() => { tipsPopover.hidden = true; }, 180);
   }
 }
 
@@ -766,10 +971,98 @@ function setRagConfigStatus(text, isError = false) {
   ragConfigStatus.className = isError ? "rag-config-status error" : "rag-config-status";
 }
 
+function setTtsProviderStatus(text, isError = false) {
+  if (!ttsProviderStatus) return;
+  ttsProviderStatus.textContent = text || "";
+  ttsProviderStatus.className = isError ? "rag-config-status error" : "rag-config-status";
+}
+
 function setUserCorpusStatus(text, isError = false) {
   if (!userCorpusStatus) return;
   userCorpusStatus.textContent = text || "";
   userCorpusStatus.className = isError ? "rag-config-status error" : "rag-config-status";
+}
+
+function renderTtsProviderOptions(options) {
+  if (!ttsProviderSelect) return;
+  const normalized = Array.isArray(options)
+    ? options
+      .filter((item) => item && typeof item === "object")
+      .map((item) => ({
+        id: normalizeTtsProviderValue(item.id),
+        label: safeText(item.label, normalizeTtsProviderValue(item.id))
+      }))
+    : [];
+  if (!normalized.length) return;
+  const seen = new Set();
+  const unique = normalized.filter((item) => {
+    if (seen.has(item.id)) return false;
+    seen.add(item.id);
+    return true;
+  });
+  ttsProviderSelect.innerHTML = unique
+    .map((item) => `<option value="${escapeAttr(item.id)}">${escapeHtml(item.label)}</option>`)
+    .join("");
+}
+
+async function applyTtsProviderSelection(provider, { announce = false, persistEnv = false } = {}) {
+  if (!ttsProviderSelect) return false;
+  const normalized = normalizeTtsProviderValue(provider);
+  const previous = normalizeTtsProviderValue(state.ttsProviderPreference);
+  ttsProviderSelect.disabled = true;
+  try {
+    const result = await postJson("/api/tts/config", {
+      provider: normalized,
+      persist_env: !!persistEnv
+    });
+    renderTtsProviderOptions(result?.options);
+    const appliedProvider = normalizeTtsProviderValue(result?.provider || normalized);
+    const label = safeText(result?.provider_label, appliedProvider);
+    state.ttsProviderPreference = appliedProvider;
+    ttsProviderSelect.value = appliedProvider;
+    persistSession();
+    setTtsProviderStatus(`Motor ativo: ${label}.`);
+    if (announce) {
+      setRequestState(`Motor de voz atualizado: ${label}. A proxima leitura usara essa configuracao.`);
+    }
+    return true;
+  } catch (err) {
+    state.ttsProviderPreference = previous;
+    ttsProviderSelect.value = previous;
+    const detail = String(err?.message || "Falha desconhecida.");
+    setTtsProviderStatus(`Falha ao aplicar motor de voz: ${detail}`, true);
+    if (announce) {
+      setRequestState(`Falha ao salvar motor de voz: ${detail}`, true);
+    }
+    return false;
+  } finally {
+    ttsProviderSelect.disabled = false;
+  }
+}
+
+async function loadTtsProviderConfig() {
+  if (!ttsProviderSelect) return;
+  const base = state.apiBase.replace(/\/$/, "");
+  try {
+    const response = await fetch(`${base}/api/tts/config`);
+    if (!response.ok) throw new Error(String(response.status));
+    const payload = await response.json();
+    renderTtsProviderOptions(payload?.options);
+    const serverProvider = normalizeTtsProviderValue(payload?.provider);
+    const preferredProvider = normalizeTtsProviderValue(state.ttsProviderPreference || serverProvider);
+    if (preferredProvider !== serverProvider) {
+      await applyTtsProviderSelection(preferredProvider, { announce: false, persistEnv: false });
+      return;
+    }
+    state.ttsProviderPreference = serverProvider;
+    ttsProviderSelect.value = serverProvider;
+    persistSession();
+    setTtsProviderStatus(`Motor ativo: ${safeText(payload?.provider_label, serverProvider)}.`);
+  } catch (err) {
+    ttsProviderSelect.value = normalizeTtsProviderValue(state.ttsProviderPreference);
+    const detail = String(err?.message || "Falha desconhecida.");
+    setTtsProviderStatus(`Nao foi possivel carregar motor de voz: ${detail}`, true);
+  }
 }
 
 function stopUserCorpusStageTicker() {
@@ -895,6 +1188,215 @@ async function pollUserCorpusJobUntilDone(jobId, pollMs = USER_CORPUS_JOB_POLL_D
       throw timeoutErr;
     }
     await sleepMs(pollMs);
+  }
+}
+
+function setJurisUpdateStatus(text, errored = false) {
+  if (!jurisUpdateStatus) return;
+  jurisUpdateStatus.textContent = String(text || "");
+  jurisUpdateStatus.classList.toggle("error", !!errored);
+}
+
+function setJurisUpdateSummary(text) {
+  if (!jurisUpdateSummary) return;
+  jurisUpdateSummary.textContent = String(text || "");
+}
+
+function setJurisUpdateStage(stage, { errored = false } = {}) {
+  if (!jurisUpdateStages) return;
+  const idx = JURIS_UPDATE_STAGE_FLOW.indexOf(stage);
+  const resolved = idx >= 0 ? idx : 0;
+  jurisUpdateStages.querySelectorAll("[data-juris-stage]").forEach((item, itemIdx) => {
+    item.classList.remove("active", "done", "error");
+    if (itemIdx < resolved) item.classList.add("done");
+    if (itemIdx === resolved) item.classList.add("active");
+  });
+  if (errored) {
+    const node = jurisUpdateStages.querySelector(`[data-juris-stage="${stage}"]`);
+    if (node) node.classList.add("error");
+  }
+}
+
+function jurisUpdateStageFromBackend(job) {
+  const status = String(job?.status || "").trim().toLowerCase();
+  const stage = String(job?.stage || "").trim().toLowerCase();
+  if (status === "done") return "done";
+  if (status === "error") return stage && JURIS_UPDATE_STAGE_FLOW.includes(stage) ? stage : "upsert_start";
+  if (JURIS_UPDATE_STAGE_FLOW.includes(stage)) return stage;
+  if (stage.startsWith("stf")) return "stf_start";
+  if (stage.startsWith("stj")) return "stj_start";
+  if (stage.startsWith("embed")) return "embed_start";
+  if (stage.startsWith("upsert")) return "upsert_start";
+  return "idle";
+}
+
+function formatIsoDatePt(raw) {
+  const text = String(raw || "").trim();
+  const m = text.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!m) return "-";
+  return `${m[3]}/${m[2]}/${m[1]}`;
+}
+
+function formatIsoDateTimePt(raw) {
+  const text = String(raw || "").trim();
+  if (!text) return "-";
+  const normalized = /z$/i.test(text) ? text : text.replace(" ", "T");
+  const dt = new Date(normalized);
+  if (!Number.isFinite(dt.getTime())) return "-";
+  return dt.toLocaleString("pt-BR", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit"
+  });
+}
+
+function renderJurisResultSummary(result, cursor = null) {
+  const upsert = result?.upsert && typeof result.upsert === "object" ? result.upsert : {};
+  const latest = result?.latest_dates && typeof result.latest_dates === "object" ? result.latest_dates : {};
+  const stfLatest = formatIsoDatePt(latest.stf || "");
+  const stjLatest = formatIsoDatePt(latest.stj || "");
+  const inserted = Number(upsert.inserted || 0);
+  const updated = Number(upsert.updated || 0);
+  const checkedAt = formatIsoDateTimePt(result?.finished_at || cursor?.last_checked_at || "");
+  setJurisUpdateSummary(
+    `Ultima verificacao: ${checkedAt}. Atualizado ate STF: ${stfLatest} | STJ: ${stjLatest}. Novos: ${inserted}. Atualizados: ${updated}.`
+  );
+}
+
+function applyJurisUpdateJobSnapshot(job) {
+  const status = String(job?.status || "").trim().toLowerCase();
+  const stage = jurisUpdateStageFromBackend(job);
+  const message = String(job?.message || "").trim();
+  const result = job?.result && typeof job.result === "object" ? job.result : {};
+  const progress = job?.progress && typeof job.progress === "object" ? job.progress : {};
+  const stageFields = progress?.stage_fields && typeof progress.stage_fields === "object" ? progress.stage_fields : {};
+
+  if (status === "error") {
+    const detail = String(job?.error?.message || message || "Falha desconhecida.");
+    setJurisUpdateStage(stage, { errored: true });
+    setJurisUpdateStatus(`Falha na atualizacao: ${detail}`, true);
+    return;
+  }
+
+  if (status === "done") {
+    setJurisUpdateStage("done");
+    setJurisUpdateStatus(message || "Atualizacao concluida.");
+    renderJurisResultSummary(result);
+    return;
+  }
+
+  setJurisUpdateStage(stage);
+  const infoBits = [];
+  if (stageFields?.stf_collected) infoBits.push(`STF: ${stageFields.stf_collected}`);
+  if (stageFields?.stj_edition) infoBits.push(`Edicao STJ: ${stageFields.stj_edition}`);
+  if (stageFields?.embedded && stageFields?.embed_total) {
+    infoBits.push(`Embeddings: ${stageFields.embedded}/${stageFields.embed_total}`);
+  }
+  const suffix = infoBits.length ? ` (${infoBits.join(" | ")})` : "";
+  setJurisUpdateStatus(`${message || "Atualizando base oficial..."}${suffix}`);
+}
+
+async function fetchJurisUpdateJobStatus(jobId) {
+  const base = state.apiBase.replace(/\/$/, "");
+  const response = await fetch(`${base}/api/juris-update/jobs/${encodeURIComponent(jobId)}`);
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw apiErrorFromDetail(response.status, response.statusText, payload?.detail);
+  }
+  return payload;
+}
+
+async function pollJurisUpdateJobUntilDone(jobId, pollMs = JURIS_UPDATE_JOB_POLL_DEFAULT_MS) {
+  const startedAt = Date.now();
+  while (true) {
+    const job = await fetchJurisUpdateJobStatus(jobId);
+    applyJurisUpdateJobSnapshot(job);
+    const status = String(job?.status || "").trim().toLowerCase();
+    if (status === "done") return job;
+    if (status === "error") {
+      const err = new Error(String(job?.error?.message || job?.message || "Falha na atualizacao."));
+      err.code = String(job?.error?.code || "juris_update_failed");
+      throw err;
+    }
+    if (Date.now() - startedAt > JURIS_UPDATE_JOB_TIMEOUT_MS) {
+      const timeoutErr = new Error(
+        `A atualizacao oficial demorou mais de ${Math.round(JURIS_UPDATE_JOB_TIMEOUT_MS / 1000)}s e foi interrompida.`
+      );
+      timeoutErr.code = "request_timeout";
+      throw timeoutErr;
+    }
+    await sleepMs(pollMs);
+  }
+}
+
+async function loadJurisUpdateLastStatus() {
+  const base = state.apiBase.replace(/\/$/, "");
+  try {
+    const response = await fetch(`${base}/api/juris-update/last`);
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw apiErrorFromDetail(response.status, response.statusText, payload?.detail);
+    }
+    const last = payload?.last_result && typeof payload.last_result === "object" ? payload.last_result : null;
+    if (last) {
+      setJurisUpdateStage("done");
+      setJurisUpdateStatus(String(last.message || "Base oficial atualizada anteriormente."));
+      renderJurisResultSummary(last, payload?.cursor);
+    } else {
+      setJurisUpdateStage("idle");
+      setJurisUpdateStatus("Nenhuma atualizacao automatica registrada ainda.");
+      setJurisUpdateSummary("");
+    }
+    const runningJobId = String(payload?.running_job_id || "").trim();
+    if (runningJobId) {
+      runJurisUpdateBtn && (runJurisUpdateBtn.disabled = true);
+      const pollMs = Math.max(500, Number(payload?.defaults?.poll_after_ms || JURIS_UPDATE_JOB_POLL_DEFAULT_MS));
+      await pollJurisUpdateJobUntilDone(runningJobId, pollMs);
+    }
+  } catch (err) {
+    setJurisUpdateStatus(`Nao foi possivel carregar status da base oficial: ${String(err?.message || err)}`, true);
+  } finally {
+    runJurisUpdateBtn && (runJurisUpdateBtn.disabled = false);
+  }
+}
+
+async function runJurisUpdateNow() {
+  if (!runJurisUpdateBtn) return;
+  const confirmText = [
+    "Iniciar atualizacao automatica da base oficial?",
+    "A busca e incremental a partir da ultima data verificada, sem duplicar itens ja existentes.",
+    "Podera abrir uma nova janela do Chrome na etapa STF para validacao do portal."
+  ].join("\n");
+  if (!window.confirm(confirmText)) {
+    setJurisUpdateStatus("Atualizacao cancelada.");
+    return;
+  }
+  runJurisUpdateBtn.disabled = true;
+  setJurisUpdateStage("stf_start");
+  setJurisUpdateSummary("");
+  setJurisUpdateStatus("Iniciando atualizacao oficial em segundo plano...");
+  try {
+    const result = await postJson("/api/juris-update/start", {
+      include_stf: true,
+      include_stj: true,
+      target_year: 2026,
+      visible_browser: true
+    });
+    const jobId = String(result?.job_id || "").trim();
+    if (!jobId) {
+      throw new Error("Backend nao retornou job_id para acompanhamento.");
+    }
+    const pollEveryMs = Math.max(500, Number(result?.poll_after_ms || JURIS_UPDATE_JOB_POLL_DEFAULT_MS));
+    const finalJob = await pollJurisUpdateJobUntilDone(jobId, pollEveryMs);
+    applyJurisUpdateJobSnapshot(finalJob);
+  } catch (err) {
+    const detail = String(err?.message || err);
+    setJurisUpdateStage("upsert_start", { errored: true });
+    setJurisUpdateStatus(`Falha na atualizacao oficial: ${detail}`, true);
+  } finally {
+    runJurisUpdateBtn.disabled = false;
   }
 }
 
@@ -1210,6 +1712,13 @@ function apiPayload(query) {
   const tribunais = selectedValues("tribunal-checkbox");
   const tipos = selectedValues("tipo-checkbox");
   const sources = selectedSourceValues();
+  const personaCfg = getActivePersonaConfig();
+  const personaPrompt = normalizePersonaPrompt(personaCfg.prompt);
+  const personaModel = normalizePersonaModel(personaCfg.model);
+  const ragConfigPayload = { ...(state.ragConfigValues || {}) };
+  if (personaModel) {
+    ragConfigPayload.generation_model = personaModel;
+  }
   state.acervo.selectedSources = sources.length ? sources : ["ratio"];
   return {
     query,
@@ -1219,7 +1728,9 @@ function apiPayload(query) {
     prefer_recent: !!preferRecent.checked,
     prefer_user_sources: userSourcePriorityToggle?.checked !== false,
     reranker_backend: rerankerBackend.value,
-    rag_config: state.ragConfigValues
+    persona: state.selectedPersona || PERSONA_DEFAULT,
+    persona_prompt: personaPrompt || null,
+    rag_config: ragConfigPayload
   };
 }
 
@@ -1309,6 +1820,14 @@ function apiErrorFromDetail(status, statusText, detail) {
   const traceId = detail && typeof detail === "object"
     ? String(detail.trace_id || "").trim()
     : "";
+  if (Array.isArray(detail) && detail.length) {
+    const first = detail[0] || {};
+    const loc = Array.isArray(first?.loc) ? first.loc.join(".") : "";
+    const msg = String(first?.msg || "").trim();
+    if (msg) {
+      message = loc ? `${loc}: ${msg}` : msg;
+    }
+  } else
   if (detail && typeof detail === "object") {
     const baseMsg = String(detail.message || message).trim();
     const hint = String(detail.hint || "").trim();
@@ -2699,8 +3218,9 @@ function renderSources(turn) {
         </details>
       `
       : "";
-    const link = d.inteiro_teor_url
-      ? `<a class="source-link" href="${escapeHtml(d.inteiro_teor_url)}" target="_blank" rel="noopener noreferrer" data-source-action="open-external" data-doc-index="${escapeHtml(docIndex)}">Ler inteiro teor</a>`
+    const safeInteiroTeorUrl = sanitizeUrl(d.inteiro_teor_url);
+    const link = safeInteiroTeorUrl
+      ? `<a class="source-link" href="${escapeHtml(safeInteiroTeorUrl)}" target="_blank" rel="noopener noreferrer" data-source-action="open-external" data-doc-index="${escapeHtml(docIndex)}">Ler inteiro teor</a>`
       : `<button class="source-link source-link-btn" type="button" data-source-action="open-inline" data-doc-index="${escapeHtml(docIndex)}" ${inlineReadable ? "" : "disabled"}>Ler inteiro teor</button>`;
     return `
       <article class="source-card source-card-actionable" data-doc-index="${escapeHtml(docIndex)}" data-open-doc="1" tabindex="0" role="button" aria-label="Abrir DOC ${escapeHtml(docIndex)}">
@@ -3349,6 +3869,45 @@ function bindEvents() {
   clearChatBtn?.addEventListener("click", clearChatHistory);
   closeLibraryBtn?.addEventListener("click", () => setLibraryOpen(false));
 
+  personaChips.forEach((chip) => {
+    chip.addEventListener("click", () => {
+      const key = chip.dataset.persona || PERSONA_DEFAULT;
+      applyPersonaSelection(key);
+      persistSession();
+    });
+  });
+  personaChipBtn?.addEventListener("click", () => {
+    const keys = Object.keys(PERSONA_META);
+    const idx = keys.indexOf(state.selectedPersona);
+    const next = keys[(idx + 1) % keys.length];
+    applyPersonaSelection(next);
+    persistSession();
+  });
+  tipsBtn?.addEventListener("click", () => {
+    const isOpen = tipsPopover && !tipsPopover.hidden;
+    setTipsOpen(!isOpen);
+  });
+  closeTipsBtn?.addEventListener("click", () => setTipsOpen(false));
+  document.addEventListener("click", (e) => {
+    if (tipsPopover && !tipsPopover.hidden && !tipsPopover.contains(e.target) && e.target !== tipsBtn && !tipsBtn?.contains(e.target)) {
+      setTipsOpen(false);
+    }
+  });
+  personaConfigSelect?.addEventListener("change", () => {
+    const key = String(personaConfigSelect.value || "").trim();
+    state.personaConfigEditor = PERSONA_META[key] ? key : PERSONA_DEFAULT;
+    renderPersonaConfigEditor();
+    setPersonaConfigStatus("Selecione modelo/prompt e clique em Salvar persona.");
+  });
+  personaModelInput?.addEventListener("input", () => {
+    setPersonaConfigStatus("Alteracoes pendentes. Clique em Salvar persona.");
+  });
+  personaPromptInput?.addEventListener("input", () => {
+    setPersonaConfigStatus("Alteracoes pendentes. Clique em Salvar persona.");
+  });
+  savePersonaConfigBtn?.addEventListener("click", savePersonaConfigEditor);
+  resetPersonaConfigBtn?.addEventListener("click", resetPersonaConfigEditor);
+
   railModeButtons.forEach((button) => {
     button.addEventListener("click", () => {
       const mode = normalizeLibraryMode(button.dataset.libraryMode);
@@ -3426,6 +3985,7 @@ function bindEvents() {
     localStorage.setItem("jurisai_api_base", state.apiBase);
     checkHealth();
     loadRagConfigMetadata();
+    loadTtsProviderConfig();
     loadUserCorpusSources();
   });
 
@@ -3447,6 +4007,7 @@ function bindEvents() {
     persistSession();
   });
   indexUserCorpusBtn?.addEventListener("click", indexUserCorpusNow);
+  runJurisUpdateBtn?.addEventListener("click", runJurisUpdateNow);
   sourceFiltersList?.addEventListener("change", (event) => {
     const target = event.target instanceof Element ? event.target : null;
     if (!target || !target.matches(".source-checkbox")) return;
@@ -3481,6 +4042,11 @@ function bindEvents() {
     syncGenerationModelStateFromInputs();
     setRagConfigStatus("Modelo fallback atualizado. Clique em Salvar ajustes para feedback.");
     persistSession();
+  });
+
+  ttsProviderSelect?.addEventListener("change", () => {
+    const provider = normalizeTtsProviderValue(ttsProviderSelect.value);
+    applyTtsProviderSelection(provider, { announce: true, persistEnv: false });
   });
 
   onboardingSaveKeyBtn?.addEventListener("click", saveGeminiKeyFromOnboarding);
@@ -3631,10 +4197,17 @@ function init() {
   state.library.mode = normalizeLibraryMode(stored.libraryMode);
   state.ragConfigVersion = stored.ragConfigVersion || "";
   state.ragConfigValues = stored.ragConfigValues || {};
+  state.ttsProviderPreference = normalizeTtsProviderValue(stored.ttsProviderPreference);
+  state.selectedPersona = stored.selectedPersona || PERSONA_DEFAULT;
+  state.personaConfigs = loadStoredPersonaConfigs();
+  state.personaConfigEditor = state.selectedPersona || PERSONA_DEFAULT;
   state.acervo.selectedSources = Array.isArray(stored.sourceSelection) && stored.sourceSelection.length
     ? stored.sourceSelection
     : ["ratio"];
   applyAnswerFontScale();
+  applyPersonaSelection(state.selectedPersona);
+  renderPersonaConfigEditor();
+  setPersonaConfigStatus("Configuracoes de persona carregadas.");
 
   apiBaseInput.value = state.apiBase;
   rerankerBackend.value = stored.rerankerBackend || "local";
@@ -3642,7 +4215,11 @@ function init() {
   if (userSourcePriorityToggle) {
     userSourcePriorityToggle.checked = stored.preferUserSources !== false;
   }
+  if (ttsProviderSelect) {
+    ttsProviderSelect.value = normalizeTtsProviderValue(state.ttsProviderPreference);
+  }
   resetUserCorpusStages();
+  setJurisUpdateStage("idle");
   refreshHeaderBadges();
 
   if (window.innerWidth <= 1160) {
@@ -3662,6 +4239,7 @@ function init() {
   refreshIcons();
   setAboutActiveTab(state.about.activeTab || "acervo");
   setAboutOpen(false);
+  persistPersonaConfigs();
   persistSession();
   syncGenerationModelInputsFromState();
   syncGeminiRerankModelInputFromState();
@@ -3673,7 +4251,9 @@ function init() {
   }
   checkHealth();
   loadRagConfigMetadata();
+  loadTtsProviderConfig();
   loadUserCorpusSources();
+  loadJurisUpdateLastStatus();
   fetchGeminiStatus().then((hasKey) => {
     if (!hasKey) {
       setOnboardingOpen(true);
@@ -3750,4 +4330,3 @@ function init() {
 }
 
 init();
-
