@@ -42,9 +42,9 @@ flowchart LR
 2. Desenvolvimento: roda backend/frontend manualmente com Python.
 
 Download do pacote Windows:
-<https://drive.google.com/file/d/1fHNvcpugTT9b2y2C1F193HefmxhO9hmM/view?usp=sharing>
+<https://drive.google.com/file/d/1mQ6wwpNA2J_iRd7rfBscR062MWijR02-/view?usp=sharing>
 
-Versao da landing page em producao (`ratiojuris.me`): v2026.03.02 (deploy em 02/03/2026). Atualizacoes locais mais recentes podem ainda nao estar publicadas.
+Versao da landing page em producao (`ratiojuris.me`): v2026.03.05 (deploy em 05/03/2026). Atualizacoes locais mais recentes podem ainda nao estar publicadas.
 
 ---
 
@@ -351,12 +351,18 @@ No painel **Meu Acervo**, existe o bloco **Atualizacao da base oficial (STF/STJ)
 Esse processo:
 
 1. Busca apenas novos registros de **2026 em diante**.
-2. Roda em segundo plano (com acompanhamento por status).
-3. No STJ, aplica tratamento de qualidade antes da insercao:
+2. Usa cursor da **ultima verificacao concluida** para consultar somente o que ainda nao entrou no banco local.
+3. Roda em segundo plano (com acompanhamento por status no painel).
+4. Aplica deduplicacao antes do upsert (nao duplica itens ja existentes no banco vetorial).
+5. No STJ, aplica tratamento de qualidade antes da insercao:
    - limpeza local de OCR/quebras;
    - reparo condicional com Gemini (`gemini-3-flash-preview`) para campos suspeitos/quebrados.
-4. Atualiza LanceDB com deduplicacao por `doc_id`.
-5. Exibe no final o resumo de "atualizado ate" para STF e STJ.
+6. Exibe no final o resumo de "atualizado ate" (STF e STJ), alem da data/hora da ultima verificacao.
+
+Endpoints da API usados na UI:
+- `POST /api/juris-update/start`
+- `GET /api/juris-update/jobs/{job_id}`
+- `GET /api/juris-update/last`
 
 Observacao importante:
 - Na etapa STF, pode abrir uma janela Chromium para validacao do portal de jurisprudencia.
@@ -420,6 +426,12 @@ Suite principal do contrato/API/frontend:
 
 ```bash
 py -m pytest -q tests/test_api_contract.py tests/test_frontend_sidebar_saved.py tests/test_packaging_support.py
+```
+
+Suite focada na atualizacao automatica STF/STJ:
+
+```bash
+py -m pytest -q tests/test_juris_update_metadata.py
 ```
 
 ---
