@@ -20,8 +20,46 @@
   <script src="https://cdn.jsdelivr.net/npm/lucide@0.460.0/dist/umd/lucide.min.js" integrity="sha384-ieG+IKD0d/ZPXyCBTMVAbqsQdns8QGJR/e26WMw7M4fkaI/rHcS/YIoi+ah9WGge" crossorigin="anonymous"></script>
   <link rel="stylesheet" href="./styles.css" />
 </head>
-<body data-settings-open="false" data-acervo-open="false" data-evidence-open="true" data-library-open="false" data-onboarding-open="false" data-about-open="false">
+<body data-settings-open="false" data-acervo-open="false" data-evidence-open="true" data-library-open="false" data-onboarding-open="false" data-about-open="false" data-tips-open="false" data-support-open="false">
   <div id="overlay" class="overlay"></div>
+
+  <section id="supportModal" class="support-modal panel-shell" role="dialog" aria-modal="true" aria-labelledby="supportTitle">
+    <div class="support-modal-accent"></div>
+    <button id="closeSupportBtn" class="support-close-btn icon-btn" type="button" aria-label="Fechar">
+      <i data-lucide="x"></i>
+    </button>
+    <div class="support-modal-body">
+      <div class="support-modal-header" data-support-stagger="1">
+        <i data-lucide="heart" class="support-heart-icon"></i>
+        <h2 id="supportTitle" class="support-title">Apoie o Ratio</h2>
+        <p class="support-lead">Projeto open-source gratuito. Seu apoio ajuda a manter e evoluir a plataforma.</p>
+      </div>
+      <div class="support-pix-area" data-support-stagger="2">
+        <div class="support-qr-frame">
+          <img class="support-qr-img" src="./apoio-pix.jpeg" alt="QR code de apoio via PIX ao projeto Ratio" loading="eager" />
+        </div>
+        <div class="support-pix-key-area">
+          <span class="support-pix-label">Chave PIX copia-e-cola</span>
+          <p id="supportPixKeyText" class="support-pix-key">00020126920014BR.GOV.BCB.PIX013607cdc77f-cd4b-44b8-a910-a254f58642f40230Apoie o Ratio - Jurisprudencia5204000053039865802BR5925Carlos Victor de Oliveira6009SAO PAULO621405102qCvdJp89F6304E670</p>
+          <button id="copySupportPixBtn" class="support-copy-btn" type="button">
+            <i data-lucide="copy"></i>
+            Copiar chave PIX
+          </button>
+        </div>
+      </div>
+      <div class="support-modal-footer" data-support-stagger="3">
+        <div class="support-contact">
+          <a href="https://instagram.com/carlosvictorodrigues" target="_blank" rel="noopener noreferrer">@carlosvictorodrigues</a>
+          <span class="support-contact-sep"></span>
+          <a href="mailto:contato@ratiojuris.me">contato@ratiojuris.me</a>
+        </div>
+        <button id="dismissSupportBtn" class="support-dismiss-btn" type="button">
+          Continuar para o Ratio
+          <i data-lucide="arrow-right"></i>
+        </button>
+      </div>
+    </div>
+  </section>
 
   <section id="onboardingModal" class="onboarding-modal panel-shell" role="dialog" aria-modal="true" aria-labelledby="onboardingTitle">
     <div class="panel-head">
@@ -282,6 +320,97 @@
     </div>
   </section>
 
+  <section id="tipsModal" class="tips-modal panel-shell" role="dialog" aria-modal="true" aria-labelledby="tipsTitle" hidden>
+    <div class="panel-head">
+      <h2 id="tipsTitle">Dicas e Guia</h2>
+      <button id="closeTipsModalBtn" class="icon-btn" type="button" aria-label="Fechar dicas">
+        <i data-lucide="x"></i>
+      </button>
+    </div>
+    <nav id="tipsTabs" class="tips-tabs" role="tablist">
+      <button class="tips-tab active" type="button" role="tab" data-tips-tab-target="perguntas" aria-selected="true">Perguntas</button>
+      <button class="tips-tab" type="button" role="tab" data-tips-tab-target="parametros" aria-selected="false">Parâmetros</button>
+    </nav>
+    <div class="tips-modal-body">
+      <div class="tips-tab-pane active" data-tips-pane="perguntas">
+        <p class="tips-modal-lead">
+          Perguntas mais delimitadas tendem a produzir respostas mais úteis, com melhor seleção de precedentes e menos ruído no dossiê.
+        </p>
+        <div class="tips-modal-block">
+          <p class="tips-section">Evite pedidos vagos</p>
+          <p class="tips-example"><span class="tips-bad">aposentadoria e contrato</span></p>
+          <p class="tips-example"><span class="tips-good">A aposentadoria espontânea extingue o contrato de trabalho?</span></p>
+        </div>
+        <div class="tips-modal-block">
+          <p class="tips-section">Adicione contexto</p>
+          <p class="tips-example"><span class="tips-good">No caso de empregado público celetista aposentado antes da EC 103/2019...</span></p>
+        </div>
+        <div class="tips-modal-block">
+          <p class="tips-section">Peça o produto final</p>
+          <p class="tips-example"><span class="tips-good">Preciso de precedentes do STF que sustentem que...</span></p>
+          <p class="tips-example"><span class="tips-good">Compare a posição do STF com a do STJ sobre...</span></p>
+        </div>
+        <div class="tips-modal-block">
+          <p class="tips-section">Delimite no tempo</p>
+          <p class="tips-example"><span class="tips-good">Qual é a jurisprudência mais recente (2023-2025) sobre...</span></p>
+        </div>
+      </div>
+      <div class="tips-tab-pane" data-tips-pane="parametros">
+        <p class="tips-modal-lead">
+          Os parâmetros ajustam como o Ratio busca e seleciona precedentes. Na maioria dos casos, os valores padrão funcionam bem.
+        </p>
+        <div class="tips-modal-block">
+          <p class="tips-section">Candidatos Híbridos</p>
+          <p class="tips-param-desc">Quantos documentos o sistema analisa inicialmente. Valor padrão: 80.</p>
+          <div class="tips-when-box">
+            <span class="tips-when-label">Quando ajustar</span>
+            Aumente para 100-120 se o tema for muito específico e os primeiros resultados não forem satisfatórios.
+          </div>
+        </div>
+        <div class="tips-modal-block">
+          <p class="tips-section">Documentos Finais</p>
+          <p class="tips-param-desc">Quantos documentos aparecem na resposta e no Dossiê Documental. Valor padrão: 11.</p>
+          <div class="tips-when-box">
+            <span class="tips-when-label">Quando ajustar</span>
+            Aumente para 15-20 se quiser uma visão mais ampla dos precedentes disponíveis.
+          </div>
+        </div>
+        <div class="tips-modal-block">
+          <p class="tips-section">Priorizar Recentes</p>
+          <p class="tips-param-desc">Dá preferência a decisões mais novas no ranking. Ativado por padrão.</p>
+          <div class="tips-when-box">
+            <span class="tips-when-label">Quando desativar</span>
+            Se você busca a evolução histórica de um tema ou precedentes clássicos mais antigos.
+          </div>
+        </div>
+        <div class="tips-modal-block">
+          <p class="tips-section">Reranker</p>
+          <p class="tips-param-desc">Método de reordenação dos resultados. "Local" usa seu computador; "Gemini" usa a nuvem (mais preciso, consome créditos da API).</p>
+          <div class="tips-when-box">
+            <span class="tips-when-label">Quando usar Gemini</span>
+            Em pesquisas decisivas onde a precisão máxima justifica o custo extra de API.
+          </div>
+        </div>
+        <div class="tips-modal-block">
+          <p class="tips-section">Fontes (STF / STJ)</p>
+          <p class="tips-param-desc">Filtre para buscar apenas em um tribunal específico.</p>
+          <div class="tips-when-box">
+            <span class="tips-when-label">Quando filtrar</span>
+            Quando seu caso tramita em instância específica ou você quer apenas súmulas vinculantes (STF) ou temas repetitivos (STJ).
+          </div>
+        </div>
+        <div class="tips-modal-block">
+          <p class="tips-section">Tipos de Documento</p>
+          <p class="tips-param-desc">Filtre por acórdãos, súmulas, decisões monocráticas, informativos, etc.</p>
+          <div class="tips-when-box">
+            <span class="tips-when-label">Quando filtrar</span>
+            Se você precisa apenas de súmulas vinculantes ou temas repetitivos como precedentes qualificados.
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
   <aside class="left-rail" aria-label="Navegacao lateral">
     <div class="rail-brand">
       <i data-lucide="scale"></i>
@@ -295,6 +424,10 @@
       </button>
       <button class="rail-btn" type="button" data-open-about aria-label="Sobre o Ratio">
         <i data-lucide="info"></i>
+      </button>
+      <button id="openWatchTopicsBtn" class="rail-btn" type="button" aria-label="Alertas de topicos">
+        <i data-lucide="bell"></i>
+        <span id="watchBadge" class="rail-badge" hidden>0</span>
       </button>
     </nav>
     <button class="rail-btn" type="button" data-open-acervo aria-label="Abrir Meu Acervo">
@@ -317,6 +450,30 @@
       <p id="libraryHint">Consultas recentes da sessao atual.</p>
     </div>
     <div id="libraryList" class="library-list"></div>
+  </aside>
+
+  <aside id="watchTopicsPanel" class="watch-topics-panel panel-shell" aria-label="Alertas de topicos" hidden>
+    <div class="panel-head">
+      <h2><i data-lucide="bell"></i> Alertas de Tópicos</h2>
+      <button id="closeWatchTopicsBtn" class="icon-btn" type="button" aria-label="Fechar alertas">
+        <i data-lucide="x"></i>
+      </button>
+    </div>
+    <div class="watch-topics-body">
+      <div class="watch-topics-add">
+        <input id="watchTopicInput" class="watch-topic-input" type="text" placeholder="Ex: prisão em segunda instância" maxlength="200" />
+        <button id="addWatchTopicBtn" class="watch-topic-add-btn" type="button">
+          <i data-lucide="plus"></i>
+        </button>
+      </div>
+      <div class="watch-topics-actions">
+        <button id="checkWatchTopicsBtn" class="watch-topic-check-btn" type="button">
+          <i data-lucide="refresh-cw"></i> Verificar agora
+        </button>
+        <span id="watchTopicsStatus" class="watch-topics-status"></span>
+      </div>
+      <div id="watchTopicsList" class="watch-topics-list"></div>
+    </div>
   </aside>
 
   <section class="app-shell">
@@ -349,63 +506,53 @@
         <section id="thread" class="thread"></section>
 
         <footer class="composer panel-shell">
-          <label for="queryInput" class="composer-label">Pergunta juridica</label>
+          <label for="queryInput" class="composer-label">Pergunta jurídica</label>
           <div class="composer-row">
-            <textarea id="queryInput" rows="3" placeholder=""></textarea>
+            <textarea id="queryInput" rows="2" placeholder=""></textarea>
             <button id="askBtn" type="button">
               <i data-lucide="send"></i>
               Enviar
             </button>
           </div>
           <div class="persona-row">
-            <button class="persona-chip persona-chip--active" type="button" data-persona="visao_geral">Visao Geral</button>
-            <button class="persona-chip" type="button" data-persona="parecer">Parecer Juridico</button>
+            <button class="persona-chip persona-chip--active" type="button" data-persona="visao_geral">Visão Geral</button>
+            <button class="persona-chip" type="button" data-persona="parecer">Parecer Jurídico</button>
             <button class="persona-chip" type="button" data-persona="estudos">Estudos</button>
-            <button class="persona-chip" type="button" data-persona="peticao">Peticao</button>
-            <button id="tipsBtn" class="persona-tips-btn" type="button" title="Dicas de prompt">
-              <i data-lucide="lightbulb" style="width:14px;height:14px"></i>
-            </button>
-          </div>
-          <div id="tipsPopover" class="tips-popover" hidden>
-            <div class="tips-popover-header">
-              <span class="tips-popover-title">Dicas de prompt</span>
-              <button id="closeTipsBtn" class="tips-popover-close" type="button" title="Fechar">
-                <i data-lucide="x" style="width:14px;height:14px"></i>
+            <button class="persona-chip" type="button" data-persona="peticao">Petição</button>
+            <div class="persona-row-actions">
+              <button id="tipsBtn" class="persona-aux-btn" type="button" title="Abrir dicas de pergunta">
+                <i data-lucide="lightbulb" style="width:14px;height:14px"></i>
+                Dicas
+              </button>
+              <button id="toggleComposerToolsBtn" class="persona-aux-btn" type="button" aria-expanded="false" aria-controls="composerToolsPanel">
+                <i data-lucide="panel-bottom-open" style="width:14px;height:14px"></i>
+                Mais opções
               </button>
             </div>
-            <div class="tips-popover-body">
-              <p class="tips-example"><span class="tips-bad">aposentadoria e contrato</span></p>
-              <p class="tips-example"><span class="tips-good">A aposentadoria espontanea extingue o contrato de trabalho?</span></p>
-              <p class="tips-section">Adicione contexto:</p>
-              <p class="tips-example"><span class="tips-good">No caso de empregado publico celetista aposentado antes da EC 103/2019...</span></p>
-              <p class="tips-section">Peca o que precisa:</p>
-              <p class="tips-example"><span class="tips-good">Preciso de precedentes do STF que sustentem que...</span></p>
-              <p class="tips-example"><span class="tips-good">Compare a posicao do STF com a do STJ sobre...</span></p>
-              <p class="tips-section">Delimite no tempo:</p>
-              <p class="tips-example"><span class="tips-good">Qual a jurisprudencia mais recente (2023-2025) sobre...</span></p>
+          </div>
+          <div id="composerToolsPanel" class="composer-tools-panel" hidden>
+            <div class="composer-meta">
+              <button class="meta-btn" type="button" data-open-settings>
+                <i data-lucide="sliders-horizontal"></i>
+                Parâmetros
+              </button>
+              <button class="meta-btn" type="button" data-open-acervo>
+                <i data-lucide="folder-plus"></i>
+                Meu Acervo
+              </button>
+              <span>STF e STJ selecionados</span>
             </div>
-          </div>
-          <div class="composer-meta">
-            <button class="meta-btn" type="button" data-open-settings>
-              <i data-lucide="sliders-horizontal"></i>
-              Parametros
-            </button>
-            <button class="meta-btn" type="button" data-open-acervo>
-              <i data-lucide="folder-plus"></i>
-              Meu Acervo
-            </button>
-            <span>STF, STJ selecionados</span>
-          </div>
-          <div class="composer-contact" aria-label="Contato institucional">
-            <span class="composer-contact-label">Contato</span>
-            <a class="composer-contact-link" href="mailto:contato@ratiojuris.me">contato@ratiojuris.me</a>
+            <div class="composer-contact" aria-label="Contato institucional">
+              <span class="composer-contact-label">Contato</span>
+              <a class="composer-contact-link" href="mailto:contato@ratiojuris.me">contato@ratiojuris.me</a>
+            </div>
           </div>
           <p id="requestState" class="request-state"></p>
         </footer>
       </main>
 
       <aside id="evidencePanel" class="evidence-panel panel-shell">
-        <h2><i data-lucide="database"></i> Dossie Documental</h2>
+        <h2><i data-lucide="database"></i> Dossiê Documental <span id="dossieHeaderCount" class="dossie-header-count">0</span></h2>
         <ul id="metricsBox" class="metrics-list"></ul>
         <div class="evidence-head">
           <h3>Anexos</h3>
@@ -510,27 +657,34 @@
       <summary>Personas de resposta</summary>
       <div class="disclosure-body">
         <p class="rag-panel-note">
-          Ajuste prompt e modelo por persona. Essas configuracoes ficam salvas localmente e valem na proxima consulta.
+          Ajuste prompt e modelo por persona. Essas configurações ficam salvas localmente e valem na próxima consulta.
         </p>
         <div class="persona-config-grid">
           <label class="field">
             <span>Persona</span>
             <select id="personaConfigSelect">
-              <option value="visao_geral">Visao Geral</option>
-              <option value="parecer">Parecer Juridico</option>
+              <option value="visao_geral">Visão Geral</option>
+              <option value="parecer">Parecer Jurídico</option>
               <option value="estudos">Estudos</option>
-              <option value="peticao">Peticao</option>
+              <option value="peticao">Petição</option>
             </select>
           </label>
           <label class="field">
             <span>Modelo da persona (opcional)</span>
-            <input id="personaModelInput" list="geminiModelsList" type="text" autocomplete="off" placeholder="Vazio = usa modelo global" />
+            <input id="personaModelInput" list="geminiModelsList" type="text" autocomplete="off" placeholder="Vazio = usa o modelo global" />
           </label>
         </div>
         <label class="field">
-          <span>Prompt da persona (opcional)</span>
-          <textarea id="personaPromptInput" class="persona-prompt-input" rows="7" maxlength="6000" placeholder="Vazio = usa prompt padrao da persona."></textarea>
+          <span>Prompt customizado da persona (opcional)</span>
+          <textarea id="personaPromptInput" class="persona-prompt-input" rows="7" maxlength="6000" placeholder="Vazio = usa o prompt padrão abaixo."></textarea>
         </label>
+        <div class="persona-default-card" aria-live="polite">
+          <div class="persona-default-card-head">
+            <span>Prompt padrão atual</span>
+            <strong id="personaDefaultPromptLabel">Visão Geral</strong>
+          </div>
+          <pre id="personaDefaultPromptPreview" class="persona-default-prompt">Carregando prompt padrão...</pre>
+        </div>
         <div class="rag-panel-actions">
           <button id="savePersonaConfigBtn" class="meta-btn" type="button">
             <i data-lucide="save"></i>
@@ -538,9 +692,9 @@
           </button>
           <button id="resetPersonaConfigBtn" class="meta-btn" type="button">
             <i data-lucide="rotate-ccw"></i>
-            Restaurar padrao
+            Restaurar padrão
           </button>
-          <span id="personaConfigStatus" class="rag-config-status">Carregando configuracoes de persona...</span>
+          <span id="personaConfigStatus" class="rag-config-status">Carregando configurações de persona...</span>
         </div>
       </div>
     </details>

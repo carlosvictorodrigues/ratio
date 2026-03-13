@@ -380,10 +380,38 @@ def test_frontend_query_stream_has_timeout_and_uses_real_pipeline_runtime():
     assert 'makePipelineRuntime("real")' in js
 
 
-def test_composer_has_visible_contact_strip():
+def test_composer_moves_secondary_actions_into_collapsible_more_panel():
     html = _read("frontend/index.html")
     composer_slice = html.split('<footer class="composer panel-shell">', 1)[1].split("</footer>", 1)[0]
 
+    assert 'id="toggleComposerToolsBtn"' in composer_slice
+    assert 'id="composerToolsPanel"' in composer_slice
     assert 'class="composer-contact"' in composer_slice
+    assert "Mais opções" in composer_slice
     assert "Contato" in composer_slice
     assert 'href="mailto:contato@ratiojuris.me"' in composer_slice
+
+
+def test_persona_tips_use_modal_instead_of_overlaying_popover():
+    html = _read("frontend/index.html")
+    js = _read("frontend/app.js")
+    css = _read("frontend/styles.css")
+
+    assert 'id="tipsModal"' in html
+    assert 'id="closeTipsModalBtn"' in html
+    assert 'id="tipsPopover"' not in html
+    assert "setTipsModalOpen" in js
+    assert ".tips-modal" in css
+    assert ".tips-popover" not in css
+
+
+def test_persona_settings_use_pt_br_copy_and_show_default_prompt_block():
+    html = _read("frontend/index.html")
+    js = _read("frontend/app.js")
+
+    assert "Visão Geral" in html
+    assert "Parecer Jurídico" in html
+    assert "Petição" in html
+    assert "Configurações de persona carregadas." in js
+    assert "Prompt padrão atual" in html
+    assert 'id="personaDefaultPromptPreview"' in html

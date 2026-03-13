@@ -935,7 +935,7 @@ STJ_RELATOR_RE = re.compile(
     re.IGNORECASE,
 )
 STJ_JULGAMENTO_RE = re.compile(r"julgado\s+em\s+(\d{1,2}/\d{1,2}/\d{4})", re.IGNORECASE)
-STJ_DJE_RE = re.compile(r"DJe\s+(\d{1,2}/\d{1,2}/\d{4})", re.IGNORECASE)
+STJ_DJE_RE = re.compile(r"DJE(?:N)?(?:\s+de)?\s+(\d{1,2}/\d{1,2}/\d{4})", re.IGNORECASE)
 STJ_ORGAO_RE = re.compile(
     r"\b(Primeira\s+Turma|Segunda\s+Turma|Terceira\s+Turma|Quarta\s+Turma|Quinta\s+Turma|Sexta\s+Turma|Primeira\s+Se[cç][ãa]o|Segunda\s+Se[cç][ãa]o|Terceira\s+Se[cç][ãa]o|Corte\s+Especial)\b",
     re.IGNORECASE,
@@ -976,6 +976,23 @@ STJ_RAMO_ALIAS = {
     "outros": "Outros",
 }
 
+STJ_PROCESS_CLASS_PATTERN = (
+    r"(?:ProAfR|AgRg|AgInt|Ag|EDcl|EAREsp|EREsp|AREsp|REsp|RHC|HC|RMS|CC|Pet|MC|RCL|Rcl|MS|AI|AR|SE|CR|SD|RPV|SS|SLS|RO|APn|IDC|QC|TutCautAnt|PUIL|AC|RvCr|IF|Inq|HDE|MI|ExSusp|ExeMS|SEC|SIRDR)"
+)
+STJ_SECRET_PROCESSO_RE = re.compile(
+    r"\bProcesso em segredo (?:(?:de )?justi[cç]a+|judicial)\b",
+    re.IGNORECASE,
+)
+STJ_PROCESSO_RE = re.compile(
+    rf"\b(({STJ_PROCESS_CLASS_PATTERN})(?:\s+(?:no|na|nos|nas)\s+{STJ_PROCESS_CLASS_PATTERN}){{0,2}}\s+\d[\d\.\-/A-Z]*)",
+    re.IGNORECASE,
+)
+STJ_RELATOR_RE = re.compile(
+    r"Rel(?:ator)?\.?\s*(?:p/?\s*)?(?:para\s+ac[óo]rd[ãa]o\s*)?"
+    r"((?:Min\.?|Ministro|Ministra)\s+[A-ZÀ-ÖØ-öø-ÿ][A-ZÀ-ÖØ-öø-ÿ\s\.'-]+?)(?=\s*(?:,|\(|\n|$))",
+    re.IGNORECASE,
+)
+
 
 def _clamp01(value: Any) -> float:
     try:
@@ -1010,6 +1027,15 @@ def _is_quota_or_rate_limit_error(exc: Exception) -> bool:
         "rate limit",
         "too many requests",
         "429",
+        "401",
+        "403",
+        "permission_denied",
+        "unauthenticated",
+        "invalid api key",
+        "api key not valid",
+        "api_key_invalid",
+        "billing",
+        "disabled",
     )
     return any(token in norm for token in indicators)
 
@@ -1019,6 +1045,12 @@ def _stj_fix_common_ocr_glitches(name: str) -> str:
     if not clean:
         return ""
     lower = _remove_accents(clean).lower()
+    if lower.startswith("min. "):
+        return "Min. " + clean[5:].strip()
+    if lower.startswith("ministro "):
+        return "Ministro " + clean[9:].strip()
+    if lower.startswith("ministra "):
+        return "Ministra " + clean[9:].strip()
     if lower.startswith("istro "):
         return "Min" + clean
     if lower.startswith("inistro "):
@@ -1287,14 +1319,19 @@ def _stj_repair_records_with_gemini(
 
 
 def _stj_extract_processo(text: str) -> str:
-    match = STJ_PROCESSO_RE.search(text or "")
+    normalized = _normalize_space(text or "")
+    if not normalized:
+        return ""
+    if STJ_SECRET_PROCESSO_RE.search(normalized):
+        return "Processo em segredo de justiça"
+    match = STJ_PROCESSO_RE.search(normalized)
     if not match:
         return ""
     return _normalize_space(re.sub(r"[,\.\s]+$", "", match.group(1)))[:120]
 
 
 def _stj_extract_relator(text: str) -> str:
-    match = STJ_RELATOR_RE.search(text or "")
+    match = STJ_RELATOR_RE.search(_normalize_space(text or ""))
     if not match:
         return ""
     clean = _normalize_space(re.sub(r"[,\.\s]+$", "", match.group(1)))[:100]
@@ -1664,6 +1701,14 @@ def _collect_stj_documents(
             )
         }
     )
+    # Bundled Python (PyInstaller) may lack proper CA certs for Cloudflare-protected
+    # sites like STJ.  Try with default certs first; on SSL error fall back to
+    # verify=False so the pipeline isn't blocked.
+    try:
+        session.get("https://processo.stj.jus.br/", timeout=15)
+    except requests.exceptions.SSLError:
+        _log(log_cb, "stj_ssl_fallback", hint="SSL verification disabled for STJ requests (bundled cert issue)")
+        session.verify = False
 
     _emit(progress_cb, "stj_discovery", "STJ: verificando ultima edicao publicada.")
     latest_edition = _stj_latest_edition(session)

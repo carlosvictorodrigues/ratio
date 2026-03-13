@@ -261,6 +261,7 @@ GEMINI_RERANK_RETRY_MAX_SECONDS = float(os.getenv("GEMINI_RERANK_RETRY_MAX_SECON
 RERANK_DEDUP_PROCESS = os.getenv("RERANK_DEDUP_PROCESS", "1").strip() != "0"
 _RERANKER: Optional[CrossEncoder] = None
 _RERANKER_RUNTIME_MODEL = ""
+_RERANKER_WARNING = ""
 _RESOLVED_MODEL_CACHE: dict[str, str] = {}
 _AVAILABLE_MODELS_CACHE: Optional[set[str]] = None
 
@@ -917,9 +918,11 @@ def _probe_cross_encoder_model(model_name: str) -> tuple[bool, str]:
         cmd = [sys.executable, "--probe-reranker", str(model_name)]
     else:
         probe_code = (
+            "import os\n"
+            "os.environ['CUDA_VISIBLE_DEVICES'] = ''\n"
             "import sys\n"
             "from sentence_transformers import CrossEncoder\n"
-            "CrossEncoder(sys.argv[1], max_length=64)\n"
+            "CrossEncoder(sys.argv[1], max_length=64, device='cpu')\n"
             "print('ok')\n"
         )
         cmd = [sys.executable, "-c", probe_code, str(model_name)]
@@ -927,6 +930,7 @@ def _probe_cross_encoder_model(model_name: str) -> tuple[bool, str]:
     env.setdefault("TOKENIZERS_PARALLELISM", "false")
     env.setdefault("HF_HUB_DISABLE_PROGRESS_BARS", "1")
     env.setdefault("TRANSFORMERS_VERBOSITY", "error")
+    env["CUDA_VISIBLE_DEVICES"] = ""
 
     try:
         completed = subprocess.run(
@@ -957,8 +961,15 @@ def get_active_local_reranker_model() -> str:
     return (_RERANKER_RUNTIME_MODEL or RERANKER_MODEL).strip()
 
 
+_CUDA_ERROR_KEYWORDS = ("cuda", "cusolver", "cublas", "nvrtc", "gpu", "driver", "cudnn")
+
+
+def get_reranker_warning() -> str:
+    return _RERANKER_WARNING
+
+
 def get_reranker() -> CrossEncoder:
-    global _RERANKER, _RERANKER_RUNTIME_MODEL
+    global _RERANKER, _RERANKER_RUNTIME_MODEL, _RERANKER_WARNING
     if _RERANKER is not None:
         return _RERANKER
 
@@ -972,6 +983,13 @@ def get_reranker() -> CrossEncoder:
         ok, detail = _probe_cross_encoder_model(model_name)
         if not ok:
             last_error = detail or "falha sem detalhes"
+            err_lower = last_error.lower()
+            if any(kw in err_lower for kw in _CUDA_ERROR_KEYWORDS):
+                _RERANKER_WARNING = (
+                    "GPU detectada mas incompativel com PyTorch. "
+                    "Usando CPU automaticamente — desempenho nao sera afetado."
+                )
+                print(f"[GPU fallback] {_RERANKER_WARNING}", file=sys.stderr)
             print(
                 f"Reranker probe failed ({model_name}): {last_error}. Tentando fallback...",
                 file=sys.stderr,
@@ -979,12 +997,19 @@ def get_reranker() -> CrossEncoder:
             continue
 
         try:
-            _RERANKER = CrossEncoder(model_name, max_length=512)
+            _RERANKER = CrossEncoder(model_name, max_length=512, device="cpu")
             _RERANKER_RUNTIME_MODEL = model_name
-            print(f"Reranker ready ({model_name}).", file=sys.stderr)
+            print(f"Reranker ready ({model_name}) [device=cpu].", file=sys.stderr)
             return _RERANKER
         except Exception as exc:
             last_error = str(exc).strip() or repr(exc)
+            err_lower = last_error.lower()
+            if any(kw in err_lower for kw in _CUDA_ERROR_KEYWORDS):
+                _RERANKER_WARNING = (
+                    "GPU detectada mas incompativel com PyTorch. "
+                    "Usando CPU automaticamente — desempenho nao sera afetado."
+                )
+                print(f"[GPU fallback] {_RERANKER_WARNING}", file=sys.stderr)
             print(
                 f"Reranker load warning ({model_name}): {last_error}. Tentando fallback...",
                 file=sys.stderr,
@@ -1430,6 +1455,129 @@ def search_lancedb(
         reverse=True,
     )
     return merged_rows
+
+
+# ── Timeline: recent high-authority items without vector search ──
+
+_TIMELINE_COLUMNS = [
+    "doc_id", "tipo", "tribunal", "processo", "relator",
+    "orgao_julgador", "data_julgamento", "texto_busca",
+    "_authority_level", "_authority_label",
+    "inteiro_teor_url", "texto_integral", "metadata_extra",
+]
+
+_TIMELINE_HIGH_AUTHORITY_TYPES = {
+    "sumula_vinculante", "sumula", "sumula_stj",
+    "tema_repetitivo_stj", "acordao", "acordao_sv",
+}
+
+
+def get_recent_timeline_items(
+    limit: int = 20,
+    tribunal: Optional[str] = None,
+    tipos: Optional[list[str]] = None,
+    days_back: int = 365,
+) -> list[dict]:
+    """Return recent high-authority items from the ratio table (no vector search)."""
+    try:
+        db = lancedb.connect(str(LANCE_DIR))
+        tbl = db.open_table("jurisprudencia")
+    except Exception as exc:
+        print(f"Timeline: cannot open table: {exc}", file=sys.stderr)
+        return []
+
+    cutoff = (date.today().replace(year=date.today().year - 1)).isoformat()
+    if days_back and days_back != 365:
+        from datetime import timedelta
+        cutoff = (date.today() - timedelta(days=days_back)).isoformat()
+
+    clauses = [f"data_julgamento >= {_quote_sql(cutoff)}"]
+
+    filter_tipos = list(tipos or [])
+    if not filter_tipos:
+        filter_tipos = list(_TIMELINE_HIGH_AUTHORITY_TYPES)
+    clean_tipos = [t.strip() for t in filter_tipos if t.strip()]
+    if clean_tipos:
+        clauses.append("tipo IN (" + ", ".join(_quote_sql(t) for t in clean_tipos) + ")")
+
+    if tribunal and tribunal.strip():
+        clauses.append(f"tribunal = {_quote_sql(tribunal.strip())}")
+
+    where_str = " AND ".join(clauses)
+
+    try:
+        lance_ds = tbl.to_lance()
+        available_cols = set(lance_ds.schema.names)
+        select_cols = [c for c in _TIMELINE_COLUMNS if c in available_cols]
+        arrow_table = lance_ds.to_table(columns=select_cols, filter=where_str)
+        rows = arrow_table.to_pylist()
+    except Exception as exc:
+        print(f"Timeline: scan failed: {exc}", file=sys.stderr)
+        return []
+
+    rows.sort(key=lambda r: r.get("data_julgamento") or "", reverse=True)
+    rows = rows[:limit]
+
+    results = []
+    for row in rows:
+        results.append({
+            "doc_id": row.get("doc_id"),
+            "tipo": (row.get("tipo") or "").strip(),
+            "tipo_label": type_label((row.get("tipo") or "").strip()),
+            "tribunal": (row.get("tribunal") or "-").strip(),
+            "processo": (row.get("processo") or row.get("doc_id") or "-").strip(),
+            "relator": (row.get("relator") or "-").strip(),
+            "orgao_julgador": (row.get("orgao_julgador") or "-").strip(),
+            "data_julgamento": (row.get("data_julgamento") or "").strip(),
+            "authority_level": (row.get("_authority_level") or "-").strip().upper(),
+            "authority_label": (row.get("_authority_label") or "-").strip(),
+        })
+    return results
+
+
+def check_topic_matches(
+    topics: list[dict],
+    top_k: int = 5,
+) -> list[list[dict]]:
+    """Check watched topics against recent documents.
+
+    Each topic dict has: {"query": str, "since_date": str (YYYY-MM-DD)}.
+    Returns a list of match-lists, one per topic.
+    """
+    if not topics:
+        return []
+
+    results: list[list[dict]] = []
+    for topic in topics[:5]:
+        query_text = (topic.get("query") or "").strip()
+        since_date = (topic.get("since_date") or "").strip()
+        if not query_text:
+            results.append([])
+            continue
+        try:
+            vec = embed_query(query_text)
+            rows = search_lancedb(
+                query=query_text,
+                query_vector=vec,
+                top_k=top_k,
+                date_from=since_date or None,
+            )
+            matches = []
+            for row in rows[:top_k]:
+                matches.append({
+                    "doc_id": row.get("doc_id"),
+                    "tipo": (row.get("tipo") or "").strip(),
+                    "tipo_label": type_label((row.get("tipo") or "").strip()),
+                    "tribunal": (row.get("tribunal") or "-").strip(),
+                    "processo": (row.get("processo") or row.get("doc_id") or "-").strip(),
+                    "relator": (row.get("relator") or "-").strip(),
+                    "data_julgamento": (row.get("data_julgamento") or "").strip(),
+                })
+            results.append(matches)
+        except Exception as exc:
+            print(f"Topic check failed for '{query_text[:40]}': {exc}", file=sys.stderr)
+            results.append([])
+    return results
 
 
 def _build_semantic_excerpt(row: dict, max_chars: int = GEMINI_RERANK_EXCERPT_CHARS) -> str:
@@ -2301,6 +2449,13 @@ PERSONA_LABELS: dict[str, str] = {
     "estudos": "Estudos",
     "peticao": "Petição",
 }
+
+
+def get_persona_prompt_defaults() -> dict[str, str]:
+    defaults: dict[str, str] = {}
+    for key in PERSONA_LABELS:
+        defaults[key] = str(PERSONA_PROMPTS.get(key, "") or "").strip()
+    return defaults
 
 
 def generate_answer(

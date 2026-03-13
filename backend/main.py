@@ -67,9 +67,13 @@ from rag.query import (  # noqa: E402
     configure_gemini_api_key,
     explain_answer,
     get_gemini_client,
+    get_persona_prompt_defaults,
     get_supported_generation_models,
     get_rag_tuning_defaults,
     get_rag_tuning_schema,
+    check_topic_matches,
+    get_recent_timeline_items,
+    get_reranker_warning,
     has_gemini_api_key,
     orgao_label,
     run_query,
@@ -686,6 +690,16 @@ def _parse_metadata_extra(raw: Any) -> dict[str, Any]:
     except Exception:
         return {}
     return parsed if isinstance(parsed, dict) else {}
+
+
+def _resolve_doc_open_url(raw_url: Any, *, texto_integral: str = "", texto_busca: str = "") -> str:
+    url = str(raw_url or "").strip()
+    if not url:
+        return ""
+    has_local_copy = bool(str(texto_integral or "").strip() or str(texto_busca or "").strip())
+    if has_local_copy and re.search(r"(?i)^https?://portal\.stf\.jus\.br/processos/downloadpeca\.asp\b", url):
+        return ""
+    return url
 
 
 def _infer_informativo_numero(*, explicit_value: Any, source_pdf: str) -> str:
@@ -1766,6 +1780,11 @@ def _serialize_doc(idx: int, row: dict[str, Any]) -> dict[str, Any]:
     )
     informativo_titulo = str(metadata_extra.get("informativo_titulo") or "").strip()
     texto_integral_full = (row.get("texto_integral") or "").strip()
+    doc_open_url = _resolve_doc_open_url(
+        row.get("inteiro_teor_url") or row.get("url") or "",
+        texto_integral=texto_integral_full,
+        texto_busca=row.get("texto_busca") or "",
+    )
 
     return {
         "index": idx,
@@ -1781,7 +1800,7 @@ def _serialize_doc(idx: int, row: dict[str, Any]) -> dict[str, Any]:
         "authority_label": authority_label,
         "final_score": round(final_score, 6),
         "semantic_backend": (row.get("_semantic_backend") or "").strip(),
-        "inteiro_teor_url": (row.get("inteiro_teor_url") or row.get("url") or "").strip(),
+        "inteiro_teor_url": doc_open_url,
         "texto_busca": _short(row.get("texto_busca") or "", max_chars=1500),
         "texto_integral_excerpt": _short(row.get("texto_integral") or "", max_chars=1800),
         "normative_statement": _short(normative_statement, max_chars=520),
@@ -2313,12 +2332,34 @@ def _new_juris_update_job(
     return job_id
 
 
+JURIS_UPDATE_STALE_TIMEOUT_SECONDS = 300  # 5 min without progress → consider dead
+
+
 def _active_juris_update_job() -> dict[str, Any] | None:
+    now_ts = time.time()
     with _JURIS_UPDATE_JOBS_LOCK:
-        for value in _JURIS_UPDATE_JOBS.values():
+        for key, value in list(_JURIS_UPDATE_JOBS.items()):
             status = str(value.get("status") or "").strip().lower()
-            if status in {"queued", "running"}:
-                return copy.deepcopy(value)
+            if status not in {"queued", "running"}:
+                continue
+            updated_ts = float(value.get("updated_ts") or value.get("started_ts") or 0.0)
+            if updated_ts > 0 and (now_ts - updated_ts) > JURIS_UPDATE_STALE_TIMEOUT_SECONDS:
+                value["status"] = "error"
+                value["stage"] = "error"
+                value["finished_ts"] = now_ts
+                value["finished_at"] = _utc_now_iso()
+                value["updated_ts"] = now_ts
+                value["updated_at"] = _utc_now_iso()
+                value.setdefault("error", {})
+                value["error"] = {
+                    "code": "juris_update_stale",
+                    "message": "Job expirou sem progresso por mais de 5 minutos. O thread pode ter crashado.",
+                    "hint": "Reinicie a atualizacao.",
+                }
+                value["message"] = "Job expirou sem progresso. Tente novamente."
+                _JURIS_LOGGER.warning("Stale juris update job %s auto-expired after %ds", key, int(now_ts - updated_ts))
+                continue
+            return copy.deepcopy(value)
     return None
 
 
@@ -3495,16 +3536,96 @@ def _jsonl_line(payload: dict[str, Any]) -> bytes:
     return (json.dumps(payload, ensure_ascii=False) + "\n").encode("utf-8")
 
 
+# ── Timeline endpoint ──
+
+_timeline_cache: dict[str, Any] = {"data": None, "key": "", "ts": 0.0}
+_TIMELINE_CACHE_TTL = 300  # 5 minutes
+
+
+@app.get("/api/timeline")
+def timeline_api(
+    request: Request,
+    limit: int = 20,
+    tribunal: Optional[str] = None,
+    tipo: Optional[str] = None,
+) -> dict[str, Any]:
+    _enforce_rate_limit(request, bucket="timeline", limit=30, window_seconds=60)
+    limit = max(1, min(limit, 50))
+    cache_key = f"{limit}:{tribunal or ''}:{tipo or ''}"
+    now = __import__("time").time()
+    if _timeline_cache["key"] == cache_key and _timeline_cache["data"] is not None:
+        if now - _timeline_cache["ts"] < _TIMELINE_CACHE_TTL:
+            return _timeline_cache["data"]
+
+    tipos_list = [tipo.strip()] if tipo and tipo.strip() else None
+    items = get_recent_timeline_items(
+        limit=limit,
+        tribunal=tribunal.strip() if tribunal else None,
+        tipos=tipos_list,
+    )
+
+    last_update = _get_last_juris_update_date()
+
+    result = {
+        "items": items,
+        "count": len(items),
+        "last_update": last_update,
+    }
+    _timeline_cache["data"] = result
+    _timeline_cache["key"] = cache_key
+    _timeline_cache["ts"] = now
+    return result
+
+
+class WatchTopicItem(BaseModel):
+    query: str = Field(min_length=3, max_length=500)
+    since_date: str = Field(default="", max_length=10)
+
+
+class WatchTopicsRequest(BaseModel):
+    topics: list[WatchTopicItem] = Field(max_length=5)
+
+
+@app.post("/api/watch-topics/check")
+def watch_topics_check_api(
+    request: Request,
+    body: WatchTopicsRequest,
+) -> dict[str, Any]:
+    _enforce_rate_limit(request, bucket="watch_topics", limit=4, window_seconds=3600)
+    topics_dicts = [{"query": t.query, "since_date": t.since_date} for t in body.topics]
+    matches = check_topic_matches(topics_dicts, top_k=5)
+    return {
+        "results": [
+            {"topic_index": i, "matches": m}
+            for i, m in enumerate(matches)
+        ]
+    }
+
+
+def _get_last_juris_update_date() -> Optional[str]:
+    try:
+        manifest_path = _runtime_logs_dir() / "juris_update_last.json"
+        if manifest_path.exists():
+            data = json.loads(manifest_path.read_text(encoding="utf-8"))
+            return data.get("finished_at") or data.get("started_at") or None
+    except Exception:
+        pass
+    return None
+
+
 @app.get("/health")
 def health() -> dict[str, Any]:
+    rw = get_reranker_warning()
     return {
         "status": "ok",
         "has_gemini_api_key": has_gemini_api_key(),
+        "reranker_warning": rw if rw else None,
         "defaults": {
             "reranker_backend": RERANKER_BACKEND,
             "reranker_model": RERANKER_MODEL,
             "gemini_rerank_model": GEMINI_RERANK_MODEL,
             "generation_model": GENERATION_MODEL,
+            "persona_prompt_defaults": get_persona_prompt_defaults(),
             "explain_model": EXPLAIN_MODEL,
             "tts_provider": TTS_PROVIDER,
             "tts_model": _tts_response_model(),

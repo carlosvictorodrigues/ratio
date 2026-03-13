@@ -49,14 +49,47 @@ const RAG_SCHEMA_FALLBACK = [];
 const LIBRARY_MODE_DEFAULT = "history";
 const PERSONA_CONFIG_STORAGE_KEY = "jurisai_persona_config_v1";
 const PERSONA_META = {
-  visao_geral: { label: "Visao Geral", short: "Visao Geral" },
-  parecer:     { label: "Parecer Juridico", short: "Parecer" },
+  visao_geral: { label: "Visão Geral", short: "Visão Geral" },
+  parecer:     { label: "Parecer Jurídico", short: "Parecer" },
   estudos:     { label: "Estudos", short: "Estudos" },
-  peticao:     { label: "Peticao", short: "Peticao" }
+  peticao:     { label: "Petição", short: "Petição" }
 };
 const PERSONA_DEFAULT = "visao_geral";
 const PERSONA_PROMPT_MAX_CHARS = 6000;
 const PERSONA_MODEL_MAX_CHARS = 80;
+
+const EXAMPLE_PROMPTS = [
+  {
+    label: "Jurisprudência recente",
+    icon: "clock",
+    query: "Quais as decisões mais recentes do STF sobre liberdade de expressão em redes sociais?",
+  },
+  {
+    label: "Súmula vinculante",
+    icon: "bookmark",
+    query: "Qual o entendimento consolidado nas súmulas vinculantes sobre responsabilidade civil do Estado?",
+  },
+  {
+    label: "Comparativo STF × STJ",
+    icon: "git-compare",
+    query: "Compare a posição do STF com a do STJ sobre a aplicação do CDC em contratos bancários.",
+  },
+  {
+    label: "Tema repetitivo",
+    icon: "layers",
+    query: "Quais temas repetitivos do STJ tratam de prescrição em ações de cobrança de tarifas bancárias?",
+  },
+  {
+    label: "Mudança jurisprudencial",
+    icon: "refresh-cw",
+    query: "Houve mudança recente na jurisprudência do STF sobre a constitucionalidade da prisão em segunda instância?",
+  },
+  {
+    label: "Precedente qualificado",
+    icon: "shield",
+    query: "Quais precedentes vinculantes do STF tratam do direito à saúde e fornecimento de medicamentos pelo SUS?",
+  },
+];
 
 const PERSONA_CONFIG_DEFAULTS = {
   visao_geral: { model: "", prompt: "" },
@@ -127,12 +160,20 @@ const state = {
   ragConfigDefaults: {},
   ragConfigSchema: [],
   ragConfigValues: {},
+  personaPromptDefaults: {},
   selectedPersona: PERSONA_DEFAULT,
   personaConfigs: JSON.parse(JSON.stringify(PERSONA_CONFIG_DEFAULTS)),
   personaConfigEditor: PERSONA_DEFAULT,
+  composerToolsOpen: false,
   acervo: {
     sources: [],
     selectedSources: ["ratio"]
+  },
+  timeline: {
+    items: [],
+    lastUpdate: null,
+    lastFetched: 0,
+    filter: { tribunal: "", tipo: "" }
   },
   speech: {
     activeTurnId: null,
@@ -166,6 +207,11 @@ const onboardingApiKeyInput = $("onboardingApiKeyInput");
 const onboardingPersistEnv = $("onboardingPersistEnv");
 const onboardingSaveKeyBtn = $("onboardingSaveKeyBtn");
 const onboardingKeyStatus = $("onboardingKeyStatus");
+const supportModal = $("supportModal");
+const closeSupportBtn = $("closeSupportBtn");
+const dismissSupportBtn = $("dismissSupportBtn");
+const copySupportPixBtn = $("copySupportPixBtn");
+const supportPixKeyText = $("supportPixKeyText");
 const aboutModal = $("aboutModal");
 const closeAboutBtn = $("closeAboutBtn");
 const aboutTabs = $("aboutTabs");
@@ -189,6 +235,7 @@ const thread = $("thread");
 const metricsBox = $("metricsBox");
 const sourcesBox = $("sourcesBox");
 const docCountTag = $("docCountTag");
+const dossieHeaderCount = $("dossieHeaderCount");
 const topSourceCount = $("topSourceCount");
 const rerankerChipValue = $("rerankerChipValue");
 const clearChatBtn = $("clearChatBtn");
@@ -206,14 +253,28 @@ const personaChipBtn = $("personaChipBtn");
 const personaChipValue = $("personaChipValue");
 const personaChips = Array.from(document.querySelectorAll(".persona-chip[data-persona]"));
 const tipsBtn = $("tipsBtn");
-const tipsPopover = $("tipsPopover");
-const closeTipsBtn = $("closeTipsBtn");
+const tipsModal = $("tipsModal");
+const closeTipsModalBtn = $("closeTipsModalBtn");
+const tipsTabs = $("tipsTabs");
+const openWatchTopicsBtn = $("openWatchTopicsBtn");
+const closeWatchTopicsBtn = $("closeWatchTopicsBtn");
+const watchTopicsPanel = $("watchTopicsPanel");
+const watchTopicInput = $("watchTopicInput");
+const addWatchTopicBtn = $("addWatchTopicBtn");
+const checkWatchTopicsBtn = $("checkWatchTopicsBtn");
+const watchTopicsList = $("watchTopicsList");
+const watchTopicsStatus = $("watchTopicsStatus");
+const watchBadge = $("watchBadge");
+const toggleComposerToolsBtn = $("toggleComposerToolsBtn");
+const composerToolsPanel = $("composerToolsPanel");
 const personaConfigSelect = $("personaConfigSelect");
 const personaModelInput = $("personaModelInput");
 const personaPromptInput = $("personaPromptInput");
 const savePersonaConfigBtn = $("savePersonaConfigBtn");
 const resetPersonaConfigBtn = $("resetPersonaConfigBtn");
 const personaConfigStatus = $("personaConfigStatus");
+const personaDefaultPromptPreview = $("personaDefaultPromptPreview");
+const personaDefaultPromptLabel = $("personaDefaultPromptLabel");
 
 const toggleSettingsBtn = $("toggleSettingsBtn");
 const closeSettingsBtn = $("closeSettingsBtn");
@@ -477,6 +538,25 @@ function normalizePersonaConfigs(raw) {
   return next;
 }
 
+function normalizePersonaPromptDefaults(raw) {
+  const next = {};
+  const source = raw && typeof raw === "object" ? raw : {};
+  for (const key of Object.keys(PERSONA_META)) {
+    next[key] = normalizePersonaPrompt(source[key]);
+  }
+  return next;
+}
+
+function personaDefaultPromptText(key) {
+  const validKey = PERSONA_META[key] ? key : PERSONA_DEFAULT;
+  const rawPrompt = normalizePersonaPrompt((state.personaPromptDefaults || {})[validKey]);
+  if (rawPrompt) return rawPrompt;
+  if (validKey === PERSONA_DEFAULT) {
+    return "Esta persona usa apenas o prompt-base geral do Ratio, sem instruções extras específicas.";
+  }
+  return "Esta persona não possui instruções adicionais carregadas no momento.";
+}
+
 function loadStoredPersonaConfigs() {
   try {
     const raw = localStorage.getItem(PERSONA_CONFIG_STORAGE_KEY);
@@ -647,6 +727,12 @@ function renderPersonaConfigEditor() {
   if (personaPromptInput) {
     personaPromptInput.value = cfg.prompt;
   }
+  if (personaDefaultPromptLabel) {
+    personaDefaultPromptLabel.textContent = (PERSONA_META[editorKey] || PERSONA_META[PERSONA_DEFAULT]).label;
+  }
+  if (personaDefaultPromptPreview) {
+    personaDefaultPromptPreview.textContent = personaDefaultPromptText(editorKey);
+  }
 }
 
 function savePersonaConfigEditor() {
@@ -660,7 +746,7 @@ function savePersonaConfigEditor() {
   if (personaPromptInput) personaPromptInput.value = nextEntry.prompt;
   persistPersonaConfigs();
   persistSession();
-  setPersonaConfigStatus(`Configuracao da persona "${PERSONA_META[editorKey].label}" salva.`);
+  setPersonaConfigStatus(`Configuração da persona "${PERSONA_META[editorKey].label}" salva.`);
 }
 
 function resetPersonaConfigEditor() {
@@ -669,7 +755,7 @@ function resetPersonaConfigEditor() {
   renderPersonaConfigEditor();
   persistPersonaConfigs();
   persistSession();
-  setPersonaConfigStatus(`Persona "${PERSONA_META[editorKey].label}" restaurada para o padrao.`);
+  setPersonaConfigStatus(`Persona "${PERSONA_META[editorKey].label}" restaurada para o padrão.`);
 }
 
 function getActivePersonaConfig() {
@@ -677,15 +763,22 @@ function getActivePersonaConfig() {
   return getPersonaConfigFor(key);
 }
 
-function setTipsOpen(open) {
-  if (!tipsPopover) return;
-  if (open) {
-    tipsPopover.hidden = false;
-    requestAnimationFrame(() => tipsPopover.classList.add("tips-popover--visible"));
-  } else {
-    tipsPopover.classList.remove("tips-popover--visible");
-    setTimeout(() => { tipsPopover.hidden = true; }, 180);
+function setComposerToolsOpen(open) {
+  state.composerToolsOpen = !!open;
+  if (composerToolsPanel) {
+    composerToolsPanel.hidden = !state.composerToolsOpen;
+    composerToolsPanel.classList.toggle("composer-tools-panel--open", state.composerToolsOpen);
   }
+  if (toggleComposerToolsBtn) {
+    toggleComposerToolsBtn.setAttribute("aria-expanded", String(state.composerToolsOpen));
+  }
+}
+
+function setTipsModalOpen(open) {
+  const isOpen = !!open;
+  document.body.dataset.tipsOpen = isOpen ? "true" : "false";
+  if (!tipsModal) return;
+  tipsModal.hidden = !isOpen;
 }
 
 function setRequestState(text, isError = false) {
@@ -717,6 +810,7 @@ function adjustAnswerFontScale(deltaStep) {
 
 function setSettingsOpen(open) {
   if (open) {
+    setTipsModalOpen(false);
     state.about.open = false;
     document.body.dataset.aboutOpen = "false";
     document.body.dataset.onboardingOpen = "false";
@@ -732,6 +826,7 @@ function setAcervoOpen(open) {
   const isOpen = !!open;
   document.body.dataset.acervoOpen = isOpen ? "true" : "false";
   if (isOpen) {
+    setTipsModalOpen(false);
     state.about.open = false;
     document.body.dataset.aboutOpen = "false";
     document.body.dataset.onboardingOpen = "false";
@@ -766,6 +861,7 @@ function setLibraryOpen(open) {
   state.library.open = !!open;
   document.body.dataset.libraryOpen = state.library.open ? "true" : "false";
   if (state.library.open) {
+    setTipsModalOpen(false);
     state.about.open = false;
     document.body.dataset.aboutOpen = "false";
     document.body.dataset.onboardingOpen = "false";
@@ -790,10 +886,40 @@ function setLibraryMode(mode, { open = true } = {}) {
   }
 }
 
+const SUPPORT_SESSION_KEY = "jurisai_support_shown_v1";
+
+function setSupportOpen(open) {
+  document.body.dataset.supportOpen = open ? "true" : "false";
+  if (open) {
+    setTipsModalOpen(false);
+    state.about.open = false;
+    document.body.dataset.aboutOpen = "false";
+    document.body.dataset.onboardingOpen = "false";
+    document.body.dataset.settingsOpen = "false";
+    document.body.dataset.acervoOpen = "false";
+    state.library.open = false;
+    document.body.dataset.libraryOpen = "false";
+    refreshRailButtons();
+  }
+}
+
+function dismissSupport() {
+  setSupportOpen(false);
+  try {
+    sessionStorage.setItem(SUPPORT_SESSION_KEY, "1");
+  } catch (_) { /* Ignore */ }
+  // If onboarding still needed, show it after support is dismissed
+  if (!state.onboardingSeen) {
+    setOnboardingOpen(true);
+    setRequestState("Guia inicial aberto. Configure GEMINI_API_KEY para comecar.");
+  }
+}
+
 function setOnboardingOpen(open, options = {}) {
   const markSeen = !!options.markSeen;
   document.body.dataset.onboardingOpen = open ? "true" : "false";
   if (open) {
+    setTipsModalOpen(false);
     state.about.open = false;
     document.body.dataset.aboutOpen = "false";
     document.body.dataset.settingsOpen = "false";
@@ -835,6 +961,7 @@ function setAboutOpen(open) {
   document.body.dataset.aboutOpen = state.about.open ? "true" : "false";
   if (!state.about.open) return;
 
+  setTipsModalOpen(false);
   document.body.dataset.settingsOpen = "false";
   document.body.dataset.acervoOpen = "false";
   document.body.dataset.onboardingOpen = "false";
@@ -2833,12 +2960,311 @@ function updatePendingPipelineUI(turn) {
   return true;
 }
 
+// ── Watch Topics (Alertas por topico) ──
+
+const WATCH_TOPICS_STORAGE_KEY = "jurisai_watch_topics_v1";
+const WATCH_TOPICS_CHECK_INTERVAL_MS = 12 * 60 * 60 * 1000; // 12 hours
+
+function _loadWatchTopics() {
+  try {
+    const raw = localStorage.getItem(WATCH_TOPICS_STORAGE_KEY);
+    if (!raw) return { topics: [], lastGlobalCheck: "", notifications: [] };
+    return JSON.parse(raw);
+  } catch (_) {
+    return { topics: [], lastGlobalCheck: "", notifications: [] };
+  }
+}
+
+function _saveWatchTopics(data) {
+  localStorage.setItem(WATCH_TOPICS_STORAGE_KEY, JSON.stringify(data));
+}
+
+function _genId() {
+  return Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+}
+
+function addWatchTopic(label) {
+  const text = (label || "").trim();
+  if (!text || text.length < 3) return;
+  const data = _loadWatchTopics();
+  if (data.topics.length >= 10) return;
+  if (data.topics.some(t => t.label.toLowerCase() === text.toLowerCase())) return;
+  data.topics.push({
+    id: _genId(),
+    label: text,
+    query: text,
+    lastChecked: "",
+  });
+  _saveWatchTopics(data);
+  renderWatchTopicsPanel();
+}
+
+function removeWatchTopic(id) {
+  const data = _loadWatchTopics();
+  data.topics = data.topics.filter(t => t.id !== id);
+  data.notifications = data.notifications.filter(n => n.topicId !== id);
+  _saveWatchTopics(data);
+  renderWatchTopicsPanel();
+  _updateWatchBadge();
+}
+
+async function checkWatchTopics() {
+  const data = _loadWatchTopics();
+  if (!data.topics.length) {
+    _setWatchStatus("Nenhum tópico para verificar.");
+    return;
+  }
+  _setWatchStatus("Verificando...");
+  if (checkWatchTopicsBtn) checkWatchTopicsBtn.disabled = true;
+
+  const base = state.apiBase.replace(/\/$/, "");
+  const now = new Date().toISOString();
+  const topics = data.topics.map(t => ({
+    query: t.query,
+    since_date: t.lastChecked || _daysAgoISO(30),
+  }));
+
+  try {
+    const resp = await fetch(`${base}/api/watch-topics/check`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ topics }),
+    });
+    if (!resp.ok) {
+      _setWatchStatus("Erro ao verificar. Tente novamente.");
+      return;
+    }
+    const result = await resp.json();
+    let newCount = 0;
+    for (const item of (result.results || [])) {
+      const topic = data.topics[item.topic_index];
+      if (!topic) continue;
+      for (const match of (item.matches || [])) {
+        const exists = data.notifications.some(n =>
+          n.topicId === topic.id && n.docId === match.doc_id
+        );
+        if (!exists) {
+          data.notifications.push({
+            topicId: topic.id,
+            docId: match.doc_id,
+            tribunal: match.tribunal,
+            tipo: match.tipo_label || match.tipo,
+            processo: match.processo,
+            date: match.data_julgamento,
+            seen: false,
+          });
+          newCount++;
+        }
+      }
+      topic.lastChecked = now.slice(0, 10);
+    }
+    data.lastGlobalCheck = now;
+    _saveWatchTopics(data);
+    _updateWatchBadge();
+    renderWatchTopicsPanel();
+    _setWatchStatus(newCount > 0 ? `${newCount} novo(s) resultado(s) encontrado(s).` : "Nenhuma novidade encontrada.");
+  } catch (_) {
+    _setWatchStatus("Erro de conexão. Verifique se a API está ativa.");
+  } finally {
+    if (checkWatchTopicsBtn) checkWatchTopicsBtn.disabled = false;
+  }
+}
+
+function _daysAgoISO(n) {
+  const d = new Date();
+  d.setDate(d.getDate() - n);
+  return d.toISOString().slice(0, 10);
+}
+
+function _setWatchStatus(msg) {
+  if (watchTopicsStatus) watchTopicsStatus.textContent = msg;
+}
+
+function _updateWatchBadge() {
+  const data = _loadWatchTopics();
+  const unseen = data.notifications.filter(n => !n.seen).length;
+  if (watchBadge) {
+    watchBadge.textContent = String(unseen);
+    watchBadge.hidden = unseen === 0;
+  }
+}
+
+function _markWatchNotificationsSeen() {
+  const data = _loadWatchTopics();
+  let changed = false;
+  for (const n of data.notifications) {
+    if (!n.seen) { n.seen = true; changed = true; }
+  }
+  if (changed) {
+    _saveWatchTopics(data);
+    _updateWatchBadge();
+  }
+}
+
+function setWatchTopicsOpen(open) {
+  if (!watchTopicsPanel) return;
+  watchTopicsPanel.hidden = !open;
+  if (open) {
+    renderWatchTopicsPanel();
+    _markWatchNotificationsSeen();
+  }
+}
+
+function renderWatchTopicsPanel() {
+  if (!watchTopicsList) return;
+  const data = _loadWatchTopics();
+
+  const topicsHtml = data.topics.length
+    ? data.topics.map(t => {
+        const notifs = data.notifications.filter(n => n.topicId === t.id);
+        const matchesHtml = notifs.length
+          ? `<div class="watch-topic-matches">${notifs.map(n => `
+              <div class="watch-topic-match${n.seen ? "" : " watch-topic-match--new"}">
+                <span class="watch-match-tribunal" data-tribunal="${escapeHtml(n.tribunal)}">${escapeHtml(n.tribunal)}</span>
+                <span class="watch-match-tipo">${escapeHtml(n.tipo)}</span>
+                <span class="watch-match-processo">${escapeHtml(n.processo)}</span>
+                <span class="watch-match-date">${escapeHtml(dateHuman(n.date))}</span>
+              </div>
+            `).join("")}</div>`
+          : `<p class="watch-topic-no-matches">Nenhum resultado recente.</p>`;
+        return `
+          <div class="watch-topic-item">
+            <div class="watch-topic-header">
+              <span class="watch-topic-label">${escapeHtml(t.label)}</span>
+              <button class="watch-topic-remove" type="button" data-remove-topic="${escapeHtml(t.id)}" aria-label="Remover topico">
+                <i data-lucide="x"></i>
+              </button>
+            </div>
+            ${matchesHtml}
+          </div>
+        `;
+      }).join("")
+    : `<p class="watch-topics-empty">Adicione tópicos acima para monitorar mudanças jurisprudenciais.</p>`;
+
+  watchTopicsList.innerHTML = topicsHtml;
+  lucide.createIcons({ nodes: watchTopicsList.querySelectorAll("[data-lucide]") });
+}
+
+async function _autoCheckWatchTopics() {
+  const data = _loadWatchTopics();
+  if (!data.topics.length) return;
+  const lastCheck = data.lastGlobalCheck ? new Date(data.lastGlobalCheck).getTime() : 0;
+  if (Date.now() - lastCheck > WATCH_TOPICS_CHECK_INTERVAL_MS) {
+    await checkWatchTopics();
+  }
+}
+
+// ── Timeline ──
+
+const _TIMELINE_CACHE_TTL = 300_000; // 5 min
+
+async function fetchTimeline() {
+  const now = Date.now();
+  if (state.timeline.items.length && now - state.timeline.lastFetched < _TIMELINE_CACHE_TTL) return;
+  try {
+    const base = state.apiBase.replace(/\/$/, "");
+    const resp = await fetch(`${base}/api/timeline?limit=24`);
+    if (!resp.ok) return;
+    const data = await resp.json();
+    state.timeline.items = data.items || [];
+    state.timeline.lastUpdate = data.last_update || null;
+    state.timeline.lastFetched = now;
+  } catch (_) {
+    // silently fail — timeline is optional
+  }
+}
+
+function _filteredTimelineItems() {
+  const { tribunal, tipo } = state.timeline.filter;
+  return state.timeline.items.filter(item => {
+    if (tribunal && item.tribunal !== tribunal) return false;
+    if (tipo && item.tipo !== tipo) return false;
+    return true;
+  });
+}
+
+function _renderTimelineFilterChips() {
+  const { tribunal, tipo } = state.timeline.filter;
+  const tribunalChips = [
+    { value: "", label: "Todos" },
+    { value: "STF", label: "STF" },
+    { value: "STJ", label: "STJ" },
+  ];
+  const tipoChips = [
+    { value: "", label: "Todos" },
+    { value: "sumula_vinculante", label: "Súmulas Vinc." },
+    { value: "sumula_stj", label: "Súmulas STJ" },
+    { value: "tema_repetitivo_stj", label: "Temas Rep." },
+    { value: "acordao", label: "Acórdãos" },
+  ];
+  const chip = (val, label, current, group) =>
+    `<button class="timeline-chip${val === current ? " active" : ""}" type="button" data-timeline-filter="${escapeHtml(group)}" data-timeline-value="${escapeHtml(val)}">${escapeHtml(label)}</button>`;
+
+  return `
+    <div class="timeline-filters">
+      <div class="timeline-filter-group">
+        ${tribunalChips.map(c => chip(c.value, c.label, tribunal, "tribunal")).join("")}
+      </div>
+      <div class="timeline-filter-group">
+        ${tipoChips.map(c => chip(c.value, c.label, tipo, "tipo")).join("")}
+      </div>
+    </div>
+  `;
+}
+
+function renderTimeline() {
+  const items = _filteredTimelineItems();
+  if (!items.length) return "";
+
+  const lastUpdate = state.timeline.lastUpdate
+    ? `<span class="timeline-last-update">Última atualização do acervo: ${escapeHtml(dateHuman(state.timeline.lastUpdate?.slice(0, 10) || ""))}</span>`
+    : "";
+
+  const cards = items.slice(0, 12).map((item, i) => {
+    const query = `Qual o entendimento atual sobre ${escapeHtml(item.tipo_label || item.tipo)}: ${escapeHtml(item.processo)}?`;
+    return `
+      <button class="timeline-card" type="button" data-example-query="${escapeHtml(query)}" style="animation-delay: ${60 + i * 40}ms">
+        <div class="timeline-card-head">
+          <span class="timeline-tribunal-tag" data-tribunal="${escapeHtml(item.tribunal)}">${escapeHtml(item.tribunal)}</span>
+          <span class="timeline-card-date">${escapeHtml(dateHuman(item.data_julgamento))}</span>
+        </div>
+        <p class="timeline-card-tipo">${escapeHtml(item.tipo_label || item.tipo)}</p>
+        <p class="timeline-card-processo">${escapeHtml(item.processo)}</p>
+        <p class="timeline-card-relator">Rel: ${escapeHtml(item.relator)}</p>
+      </button>
+    `;
+  }).join("");
+
+  return `
+    <div class="timeline-section">
+      <div class="timeline-header">
+        <h3 class="timeline-title"><i data-lucide="newspaper"></i> Atualizações Jurisprudenciais Recentes</h3>
+        ${lastUpdate}
+      </div>
+      ${_renderTimelineFilterChips()}
+      <div class="timeline-grid">${cards}</div>
+    </div>
+  `;
+}
+
 function renderEmptyThread() {
+  const cards = EXAMPLE_PROMPTS.map((p, i) => `
+    <button class="example-prompt-card" type="button" data-example-query="${escapeHtml(p.query)}" style="animation-delay: ${80 + i * 60}ms">
+      <span class="example-prompt-icon"><i data-lucide="${escapeHtml(p.icon)}"></i></span>
+      <span class="example-prompt-label">${escapeHtml(p.label)}</span>
+      <span class="example-prompt-text">${escapeHtml(p.query)}</span>
+    </button>
+  `).join("");
+  const timelineHtml = renderTimeline();
   thread.innerHTML = `
     <section class="empty-state">
-      <p>Formule sua consulta juridica para iniciar a sintese.</p>
+      ${timelineHtml}
+      <p class="empty-state-heading">Formule sua consulta jurídica para iniciar a síntese.</p>
+      <p class="empty-state-sub">Ou experimente um dos exemplos abaixo:</p>
+      <div class="example-prompts-grid">${cards}</div>
     </section>
   `;
+  lucide.createIcons({ nodes: thread.querySelectorAll("[data-lucide]") });
 }
 
 function renderTurn(turn) {
@@ -3186,15 +3612,27 @@ function renderMetrics(turn) {
   `;
 }
 
+function _syncDossieHeaderCount(count) {
+  if (!dossieHeaderCount) return;
+  const prev = dossieHeaderCount.textContent;
+  dossieHeaderCount.textContent = String(count);
+  if (prev !== String(count) && count > 0) {
+    dossieHeaderCount.classList.add("dossie-count-pop");
+    setTimeout(() => dossieHeaderCount.classList.remove("dossie-count-pop"), 300);
+  }
+}
+
 function renderSources(turn) {
   if (!turn || turn.status !== "done") {
     docCountTag.textContent = "0";
+    _syncDossieHeaderCount(0);
     sourcesBox.innerHTML = `<p class="sources-empty">Nenhum anexo no momento.</p>`;
     refreshHeaderBadges();
     return;
   }
   const docs = turn.docs || [];
   docCountTag.textContent = String(docs.length);
+  _syncDossieHeaderCount(docs.length);
   refreshHeaderBadges();
   if (!docs.length) {
     sourcesBox.innerHTML = `<p class="sources-empty">Nenhum anexo retornado.</p>`;
@@ -3223,9 +3661,9 @@ function renderSources(turn) {
       ? `<a class="source-link" href="${escapeHtml(safeInteiroTeorUrl)}" target="_blank" rel="noopener noreferrer" data-source-action="open-external" data-doc-index="${escapeHtml(docIndex)}">Ler inteiro teor</a>`
       : `<button class="source-link source-link-btn" type="button" data-source-action="open-inline" data-doc-index="${escapeHtml(docIndex)}" ${inlineReadable ? "" : "disabled"}>Ler inteiro teor</button>`;
     return `
-      <article class="source-card source-card-actionable" data-doc-index="${escapeHtml(docIndex)}" data-open-doc="1" tabindex="0" role="button" aria-label="Abrir DOC ${escapeHtml(docIndex)}">
+      <article class="source-card source-card-actionable" data-doc-index="${escapeHtml(docIndex)}" data-tribunal="${escapeHtml((d.tribunal || '').toUpperCase())}" data-open-doc="1" tabindex="0" role="button" aria-label="Abrir DOC ${escapeHtml(docIndex)}">
         <div class="source-top">
-          <span class="source-doc-tag">DOC ${escapeHtml(docIndex)}</span>
+          <span class="source-doc-tag" data-tribunal="${escapeHtml((d.tribunal || '').toUpperCase())}">${escapeHtml((d.tribunal || '').toUpperCase())} · DOC ${escapeHtml(docIndex)}</span>
           <span class="source-date">${escapeHtml(date)}</span>
         </div>
         <p class="source-title">${escapeHtml(title)}</p>
@@ -3246,7 +3684,13 @@ function renderSources(turn) {
 function renderEvidence() {
   const turn = getTurn(state.activeTurnId);
   renderMetrics(turn);
+  const hadDocs = (docCountTag?.textContent || "0") !== "0";
   renderSources(turn);
+  const hasDocs = (turn?.docs || []).length > 0;
+  if (!hadDocs && hasDocs && evidencePanel) {
+    evidencePanel.classList.add("evidence-panel--fresh");
+    setTimeout(() => evidencePanel.classList.remove("evidence-panel--fresh"), 1400);
+  }
   refreshHeaderBadges();
 }
 
@@ -3779,6 +4223,7 @@ async function submitQuery() {
   state.activeTurnId = turn.id;
   queryInput.value = "";
   persistSession();
+  setComposerToolsOpen(false);
   setSettingsOpen(false);
   setAcervoOpen(false);
   renderThread();
@@ -3824,10 +4269,15 @@ async function submitQuery() {
 async function checkHealth() {
   const base = state.apiBase.replace(/\/$/, "");
   const fallbackBase = "http://127.0.0.1:8000";
+  const applyHealthDefaults = (data) => {
+    state.personaPromptDefaults = normalizePersonaPromptDefaults(data?.defaults?.persona_prompt_defaults);
+    renderPersonaConfigEditor();
+  };
   try {
     const response = await fetch(`${base}/health`);
     if (!response.ok) throw new Error(`${response.status}`);
     const data = await response.json();
+    applyHealthDefaults(data);
     const model = safeText(data?.defaults?.reranker_model, "-");
     const tts = safeText(data?.defaults?.tts_voice, "charon");
     const ttsRate = safeText(String(data?.defaults?.tts_rate ?? "1.2"), "1.2");
@@ -3844,6 +4294,7 @@ async function checkHealth() {
         const fallbackResponse = await fetch(`${fallbackBase}/health`);
         if (fallbackResponse.ok) {
           const data = await fallbackResponse.json();
+          applyHealthDefaults(data);
           state.apiBase = fallbackBase;
           localStorage.setItem("jurisai_api_base", state.apiBase);
           if (apiBaseInput) apiBaseInput.value = state.apiBase;
@@ -3883,27 +4334,58 @@ function bindEvents() {
     applyPersonaSelection(next);
     persistSession();
   });
-  tipsBtn?.addEventListener("click", () => {
-    const isOpen = tipsPopover && !tipsPopover.hidden;
-    setTipsOpen(!isOpen);
-  });
-  closeTipsBtn?.addEventListener("click", () => setTipsOpen(false));
-  document.addEventListener("click", (e) => {
-    if (tipsPopover && !tipsPopover.hidden && !tipsPopover.contains(e.target) && e.target !== tipsBtn && !tipsBtn?.contains(e.target)) {
-      setTipsOpen(false);
+  tipsBtn?.addEventListener("click", () => setTipsModalOpen(true));
+  closeTipsModalBtn?.addEventListener("click", () => setTipsModalOpen(false));
+  openWatchTopicsBtn?.addEventListener("click", () => setWatchTopicsOpen(true));
+  closeWatchTopicsBtn?.addEventListener("click", () => setWatchTopicsOpen(false));
+  addWatchTopicBtn?.addEventListener("click", () => {
+    if (watchTopicInput) {
+      addWatchTopic(watchTopicInput.value);
+      watchTopicInput.value = "";
     }
+  });
+  watchTopicInput?.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") {
+      addWatchTopic(watchTopicInput.value);
+      watchTopicInput.value = "";
+    }
+  });
+  checkWatchTopicsBtn?.addEventListener("click", () => checkWatchTopics());
+  watchTopicsList?.addEventListener("click", (e) => {
+    const target = e.target instanceof Element ? e.target : null;
+    const removeBtn = target?.closest("[data-remove-topic]");
+    if (removeBtn) {
+      removeWatchTopic(removeBtn.getAttribute("data-remove-topic") || "");
+    }
+  });
+
+  tipsTabs?.addEventListener("click", (event) => {
+    const target = event.target instanceof Element ? event.target.closest("[data-tips-tab-target]") : null;
+    if (!target) return;
+    const pane = target.getAttribute("data-tips-tab-target");
+    tipsTabs.querySelectorAll(".tips-tab").forEach(t => {
+      const isActive = t.getAttribute("data-tips-tab-target") === pane;
+      t.classList.toggle("active", isActive);
+      t.setAttribute("aria-selected", String(isActive));
+    });
+    tipsModal?.querySelectorAll("[data-tips-pane]").forEach(p => {
+      p.classList.toggle("active", p.getAttribute("data-tips-pane") === pane);
+    });
+  });
+  toggleComposerToolsBtn?.addEventListener("click", () => {
+    setComposerToolsOpen(!state.composerToolsOpen);
   });
   personaConfigSelect?.addEventListener("change", () => {
     const key = String(personaConfigSelect.value || "").trim();
     state.personaConfigEditor = PERSONA_META[key] ? key : PERSONA_DEFAULT;
     renderPersonaConfigEditor();
-    setPersonaConfigStatus("Selecione modelo/prompt e clique em Salvar persona.");
+    setPersonaConfigStatus("Selecione modelo e prompt e clique em Salvar persona.");
   });
   personaModelInput?.addEventListener("input", () => {
-    setPersonaConfigStatus("Alteracoes pendentes. Clique em Salvar persona.");
+    setPersonaConfigStatus("Alterações pendentes. Clique em Salvar persona.");
   });
   personaPromptInput?.addEventListener("input", () => {
-    setPersonaConfigStatus("Alteracoes pendentes. Clique em Salvar persona.");
+    setPersonaConfigStatus("Alterações pendentes. Clique em Salvar persona.");
   });
   savePersonaConfigBtn?.addEventListener("click", savePersonaConfigEditor);
   resetPersonaConfigBtn?.addEventListener("click", resetPersonaConfigEditor);
@@ -3929,10 +4411,56 @@ function bindEvents() {
   closeOnboardingBtn?.addEventListener("click", () => setOnboardingOpen(false, { markSeen: true }));
   onboardingPrimaryBtn?.addEventListener("click", () => setOnboardingOpen(false, { markSeen: true }));
   openOnboardingGuideBtn?.addEventListener("click", () => setOnboardingOpen(true));
+  closeSupportBtn?.addEventListener("click", dismissSupport);
+  dismissSupportBtn?.addEventListener("click", dismissSupport);
+  copySupportPixBtn?.addEventListener("click", async () => {
+    const key = String(supportPixKeyText?.textContent || "").trim();
+    if (!key) return;
+    try {
+      await navigator.clipboard.writeText(key);
+      copySupportPixBtn.classList.add("copied");
+      copySupportPixBtn.innerHTML = '<i data-lucide="check"></i> Copiado!';
+      refreshIcons();
+      setTimeout(() => {
+        copySupportPixBtn.classList.remove("copied");
+        copySupportPixBtn.innerHTML = '<i data-lucide="copy"></i> Copiar chave PIX';
+        refreshIcons();
+      }, 2400);
+    } catch (_) {
+      setRequestState("Nao foi possivel copiar automaticamente.", true);
+    }
+  });
+
   closeAboutBtn?.addEventListener("click", () => setAboutOpen(false));
   for (const button of openAboutBtns) {
     button.addEventListener("click", () => setAboutOpen(true));
   }
+
+  thread?.addEventListener("click", (e) => {
+    const target = e.target instanceof Element ? e.target : null;
+    if (!target) return;
+
+    // Timeline filter chips
+    const filterBtn = target.closest("[data-timeline-filter]");
+    if (filterBtn) {
+      const group = filterBtn.getAttribute("data-timeline-filter");
+      const value = filterBtn.getAttribute("data-timeline-value") || "";
+      if (group === "tribunal") state.timeline.filter.tribunal = value;
+      if (group === "tipo") state.timeline.filter.tipo = value;
+      renderEmptyThread();
+      return;
+    }
+
+    // Example prompt cards & timeline cards
+    const card = target.closest(".example-prompt-card") || target.closest(".timeline-card");
+    if (!card) return;
+    const query = card.dataset.exampleQuery;
+    if (query && queryInput) {
+      queryInput.value = query;
+      queryInput.focus();
+      queryInput.dispatchEvent(new Event("input", { bubbles: true }));
+    }
+  });
 
   aboutTabs?.addEventListener("click", (event) => {
     const target = event.target instanceof Element ? event.target.closest("[data-about-tab-target]") : null;
@@ -3956,8 +4484,16 @@ function bindEvents() {
   });
 
   overlay?.addEventListener("click", () => {
+    if (document.body.dataset.supportOpen === "true") {
+      dismissSupport();
+      return;
+    }
     if (document.body.dataset.onboardingOpen === "true") {
       setOnboardingOpen(false, { markSeen: true });
+      return;
+    }
+    if (document.body.dataset.tipsOpen === "true") {
+      setTipsModalOpen(false);
       return;
     }
     if (document.body.dataset.aboutOpen === "true") {
@@ -4167,8 +4703,16 @@ function bindEvents() {
 
   window.addEventListener("keydown", (event) => {
     if (event.key !== "Escape") return;
+    if (document.body.dataset.supportOpen === "true") {
+      dismissSupport();
+      return;
+    }
     if (document.body.dataset.onboardingOpen === "true") {
       setOnboardingOpen(false, { markSeen: true });
+      return;
+    }
+    if (document.body.dataset.tipsOpen === "true") {
+      setTipsModalOpen(false);
       return;
     }
     if (document.body.dataset.aboutOpen === "true") {
@@ -4206,8 +4750,10 @@ function init() {
     : ["ratio"];
   applyAnswerFontScale();
   applyPersonaSelection(state.selectedPersona);
+  setTipsModalOpen(false);
+  setComposerToolsOpen(false);
   renderPersonaConfigEditor();
-  setPersonaConfigStatus("Configuracoes de persona carregadas.");
+  setPersonaConfigStatus("Configurações de persona carregadas.");
 
   apiBaseInput.value = state.apiBase;
   rerankerBackend.value = stored.rerankerBackend || "local";
@@ -4243,13 +4789,22 @@ function init() {
   persistSession();
   syncGenerationModelInputsFromState();
   syncGeminiRerankModelInputFromState();
-  if (!state.onboardingSeen) {
+  const supportShownThisSession = sessionStorage.getItem(SUPPORT_SESSION_KEY) === "1";
+  if (!supportShownThisSession) {
+    setSupportOpen(true);
+    // Onboarding will open after support is dismissed (see dismissSupport)
+  } else if (!state.onboardingSeen) {
     setOnboardingOpen(true);
     setRequestState("Guia inicial aberto. Configure GEMINI_API_KEY para comecar.");
   } else {
     setOnboardingOpen(false);
   }
   checkHealth();
+  _updateWatchBadge();
+  fetchTimeline().then(() => {
+    if (!state.activeTurnId) renderEmptyThread();
+  }).catch(() => {});
+  _autoCheckWatchTopics().catch(() => {});
   loadRagConfigMetadata();
   loadTtsProviderConfig();
   loadUserCorpusSources();

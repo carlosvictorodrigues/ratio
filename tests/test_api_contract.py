@@ -68,6 +68,14 @@ def _load_backend_with_stub():
     def get_supported_generation_models():
         return ["gemini-3.1-pro-preview", "gemini-2.5-flash"]
 
+    def get_persona_prompt_defaults():
+        return {
+            "visao_geral": "",
+            "parecer": "Prompt padrao de parecer.",
+            "estudos": "Prompt padrao de estudos.",
+            "peticao": "Prompt padrao de peticao.",
+        }
+
     class _StubModels:
         def generate_content(self, **_kwargs):
             raise RuntimeError("stub generate_content should be mocked in tests")
@@ -79,7 +87,36 @@ def _load_backend_with_stub():
     def get_gemini_client():
         return _StubClient()
 
+    def get_reranker_warning():
+        return ""
+
+    def get_recent_timeline_items(limit=20, tribunal=None, tipos=None, days_back=365):
+        return [
+            {
+                "doc_id": "stub-1",
+                "tipo": "sumula_vinculante",
+                "tipo_label": "Súmula Vinculante",
+                "tribunal": "STF",
+                "processo": "SV 123",
+                "relator": "Min. Exemplo",
+                "orgao_julgador": "Tribunal Pleno",
+                "data_julgamento": "2026-01-15",
+                "authority_level": "A",
+                "authority_label": "Vinculante Forte",
+            }
+        ]
+
+    def check_topic_matches(topics, top_k=5):
+        return [
+            [{"doc_id": "stub-match-1", "tipo": "acordao", "tipo_label": "Acórdão",
+              "tribunal": "STF", "processo": "RE 123456", "relator": "Min. Stub",
+              "data_julgamento": "2026-03-01"}]
+        ] * len(topics)
+
     stub.run_query = run_query
+    stub.get_reranker_warning = get_reranker_warning
+    stub.get_recent_timeline_items = get_recent_timeline_items
+    stub.check_topic_matches = check_topic_matches
     stub.explain_answer = explain_answer
     stub.orgao_label = orgao_label
     stub.type_label = type_label
@@ -88,6 +125,7 @@ def _load_backend_with_stub():
     stub.has_gemini_api_key = has_gemini_api_key
     stub.configure_gemini_api_key = configure_gemini_api_key
     stub.get_supported_generation_models = get_supported_generation_models
+    stub.get_persona_prompt_defaults = get_persona_prompt_defaults
     stub.get_gemini_client = get_gemini_client
 
     sys.modules["rag.query"] = stub
@@ -107,6 +145,7 @@ def test_health_contract():
     assert payload["status"] == "ok"
     assert payload["defaults"]["reranker_backend"] == "local"
     assert payload["defaults"]["generation_model"] == "stub-generation"
+    assert payload["defaults"]["persona_prompt_defaults"]["parecer"] == "Prompt padrao de parecer."
     assert "rag_tuning" in payload["defaults"]
 
 
@@ -152,6 +191,29 @@ def test_query_contract_serialization():
     assert len(payload["docs"]) == 1
     assert payload["docs"][0]["doc_id"] == "stf-mon-123"
     assert payload["docs"][0]["tipo_label"] == "monocratica"
+
+
+def test_serialize_doc_falls_back_to_inline_for_stf_downloadpeca_links():
+    backend_main = _load_backend_with_stub()
+
+    payload = backend_main._serialize_doc(
+        1,
+        {
+            "doc_id": "stf-mon-despacho1638302",
+            "tipo": "monocratica",
+            "tribunal": "STF",
+            "processo": "ARE 1544059",
+            "relator": "PRESIDENTE",
+            "orgao_julgador": "Decisao Monocratica",
+            "data_julgamento": "2025-04-03",
+            "texto_busca": "Trecho indexado",
+            "texto_integral": "Inteiro teor local disponivel",
+            "url": "https://portal.stf.jus.br/processos/downloadPeca.asp?id=15375578399&ext=.pdf",
+        },
+    )
+
+    assert payload["inteiro_teor_url"] == ""
+    assert payload["texto_integral_full"] == "Inteiro teor local disponivel"
 
 
 def test_query_contract_forwards_sources_and_user_priority():
@@ -1023,7 +1085,9 @@ def test_frontend_removed_instruction_field_and_added_persona_settings():
     assert 'id="personaConfigSelect"' in html
     assert 'id="personaPromptInput"' in html
     assert 'id="savePersonaConfigBtn"' in html
+    assert 'id="personaDefaultPromptPreview"' in html
     assert "PERSONA_CONFIG_STORAGE_KEY" in js
+    assert "personaPromptDefaults" in js
 
 
 def test_query_stream_contract_emits_stage_and_result():
