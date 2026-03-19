@@ -57,6 +57,7 @@ const PERSONA_META = {
 const PERSONA_DEFAULT = "visao_geral";
 const PERSONA_PROMPT_MAX_CHARS = 6000;
 const PERSONA_MODEL_MAX_CHARS = 80;
+const THEME_STORAGE_KEY = "ratio_theme";
 
 const EXAMPLE_PROMPTS = [
   {
@@ -1080,6 +1081,32 @@ function refreshIcons() {
   if (window.lucide && typeof window.lucide.createIcons === "function") {
     window.lucide.createIcons();
   }
+}
+
+/* ── Theme (dark mode) ── */
+function getSystemTheme() {
+  return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+}
+function getStoredTheme() {
+  try { return localStorage.getItem(THEME_STORAGE_KEY); } catch (_) { return null; }
+}
+function applyTheme(theme) {
+  const resolved = theme || getSystemTheme();
+  document.body.setAttribute("data-theme", resolved);
+  const btn = $("themeToggleBtn");
+  if (btn) {
+    const icon = btn.querySelector("[data-lucide]");
+    if (icon) {
+      icon.setAttribute("data-lucide", resolved === "dark" ? "sun" : "moon");
+      refreshIcons();
+    }
+  }
+}
+function toggleTheme() {
+  const current = document.body.getAttribute("data-theme") || getSystemTheme();
+  const next = current === "dark" ? "light" : "dark";
+  try { localStorage.setItem(THEME_STORAGE_KEY, next); } catch (_) {}
+  applyTheme(next);
 }
 
 function selectedValues(className) {
@@ -4746,6 +4773,7 @@ async function checkHealth() {
 }
 
 function bindEvents() {
+  $("themeToggleBtn")?.addEventListener("click", toggleTheme);
   toggleSettingsBtn?.addEventListener("click", () => setSettingsOpen(true));
   closeSettingsBtn?.addEventListener("click", () => setSettingsOpen(false));
   closeAcervoBtn?.addEventListener("click", () => setAcervoOpen(false));
@@ -5222,6 +5250,10 @@ function bindEvents() {
 }
 
 function init() {
+  applyTheme(getStoredTheme());
+  window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", (e) => {
+    if (!getStoredTheme()) applyTheme(e.matches ? "dark" : "light");
+  });
   const stored = loadStoredSession();
   state.turns = stored.turns;
   state.activeTurnId = stored.activeTurnId;
