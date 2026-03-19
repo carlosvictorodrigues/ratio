@@ -14,11 +14,19 @@ from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any, Callable
 
-import fitz
 import lancedb
 import requests
 from google.genai import types
-from playwright.async_api import async_playwright
+
+# Lazy imports — only needed at runtime for scraping / PDF extraction
+fitz = None  # type: ignore[assignment]
+
+def _get_fitz():
+    global fitz
+    if fitz is None:
+        import fitz as _fitz
+        fitz = _fitz
+    return fitz
 
 STF_API_URL = "https://jurisprudencia.stf.jus.br/api/search/search"
 STF_SEARCH_URL = "https://jurisprudencia.stf.jus.br/pages/search?base=acordaos"
@@ -704,6 +712,7 @@ async def _collect_stf_documents_async(
     )
     _log(log_cb, "stf_browser_launch", visible_browser=bool(visible_browser), executable_path=chromium_executable_path or "")
 
+    from playwright.async_api import async_playwright
     async with async_playwright() as playwright:
         browser = await playwright.chromium.launch(**launch_kwargs)
         context = await browser.new_context(ignore_https_errors=True)
@@ -921,7 +930,7 @@ def _stj_clean_pdf_text(raw_text: str) -> str:
 
 
 def _stj_extract_text(pdf_path: Path) -> str:
-    with fitz.open(pdf_path) as doc:
+    with _get_fitz().open(pdf_path) as doc:
         pages = [doc.load_page(i).get_text("text") for i in range(doc.page_count)]
     return _stj_clean_pdf_text("\n".join(pages))
 

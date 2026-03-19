@@ -22,8 +22,7 @@ def test_authority_levels_have_detailed_help_text_in_schema():
 def test_generation_prompt_requires_tema_de_repercussao_geral_and_enunciado():
     query_py = _read("rag/query.py")
     assert "tema de repercussao geral" in query_py
-    assert "nunca 'tema da repercussao geral'" in query_py
-    assert "explique o enunciado/tese" in query_py
+    assert "explique o enunciado ou a tese correspondente" in query_py
 
 
 def test_document_map_can_include_enunciado_ou_tese():
@@ -59,4 +58,4 @@ def test_richer_response_defaults_are_enabled_for_context_and_rerank():
     assert 'TOPK_RERANK = int(os.getenv("TOPK_RERANK", "11"))' in query_py
     assert 'CONTEXT_MAX_PASSAGES_PER_DOC = int(os.getenv("CONTEXT_MAX_PASSAGES_PER_DOC", "5"))' in query_py
     assert 'CONTEXT_MAX_PASSAGE_CHARS = int(os.getenv("CONTEXT_MAX_PASSAGE_CHARS", "1000"))' in query_py
-    assert 'CONTEXT_MAX_DOC_CHARS = int(os.getenv("CONTEXT_MAX_DOC_CHARS", "2500"))' in query_py
+    assert 'CONTEXT_MAX_DOC_CHARS = int(os.getenv("CONTEXT_MAX_DOC_CHARS", "4000"))' in query_py

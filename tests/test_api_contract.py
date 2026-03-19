@@ -20,10 +20,12 @@ def _load_backend_with_stub():
     stub.EXPLAIN_MODEL = "stub-explain"
     stub.GEMINI_RERANK_MODEL = "stub-gemini-rerank"
     stub.GENERATION_MODEL = "stub-generation"
+    stub.GENERATION_PROVIDER = "gemini"
     stub.RERANKER_BACKEND = "local"
     stub.RERANKER_MODEL = "stub-reranker"
     stub._gemini_has_key = False
     stub._gemini_last_model = ""
+    stub._anthropic_has_key = False
 
     def run_query(**_kwargs):
         return "stub answer", [], {"source": "stub"}
@@ -113,6 +115,25 @@ def _load_backend_with_stub():
               "data_julgamento": "2026-03-01"}]
         ] * len(topics)
 
+    def configure_anthropic_api_key(api_key: str, *, validate: bool = False):
+        key = str(api_key or "").strip()
+        if not key:
+            raise RuntimeError("ANTHROPIC_API_KEY ausente.")
+        stub._anthropic_has_key = True
+        return {"validated": bool(validate)}
+
+    def has_anthropic_api_key():
+        return bool(stub._anthropic_has_key)
+
+    def get_anthropic_client():
+        return None
+
+    def get_supported_claude_models():
+        return ["claude-sonnet-4-20250514"]
+
+    def get_informativo_items(limit=20, tribunal=None, offset=0):
+        return []
+
     stub.run_query = run_query
     stub.get_reranker_warning = get_reranker_warning
     stub.get_recent_timeline_items = get_recent_timeline_items
@@ -127,6 +148,11 @@ def _load_backend_with_stub():
     stub.get_supported_generation_models = get_supported_generation_models
     stub.get_persona_prompt_defaults = get_persona_prompt_defaults
     stub.get_gemini_client = get_gemini_client
+    stub.configure_anthropic_api_key = configure_anthropic_api_key
+    stub.has_anthropic_api_key = has_anthropic_api_key
+    stub.get_anthropic_client = get_anthropic_client
+    stub.get_supported_claude_models = get_supported_claude_models
+    stub.get_informativo_items = get_informativo_items
 
     sys.modules["rag.query"] = stub
     sys.modules.pop("backend.main", None)
