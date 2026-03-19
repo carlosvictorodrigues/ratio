@@ -1,0 +1,95 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install fastapi pydantic requests pytest httpx uvicorn sentence-transformers
+
+      - name: Run tests
+        run: python -m pytest -q
+
+      - name: Extract release info
+        id: info
+        run: |
+          TAG="${GITHUB_REF#refs/tags/}"
+          VERSION=$(python -c "import json; print(json.load(open('version.json'))['version'])")
+          BUILD=$(python -c "import json; print(json.load(open('version.json'))['build'])")
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "build=$BUILD" >> "$GITHUB_OUTPUT"
+
+      - name: Generate update manifest
+        run: |
+          python installer/generate_manifest.py \
+            --tag "${{ steps.info.outputs.tag }}" \
+            --notes "Ratio ${{ steps.info.outputs.version }} (build ${{ steps.info.outputs.build }})" \
+            --output update-manifest.json
+
+      - name: Prepare delta files for upload
+        id: delta
+        run: |
+          # Read the manifest and copy each file with flattened name
+          # (path separators replaced with --)
+          mkdir -p _release_assets
+          cp update-manifest.json _release_assets/
+
+          python3 - <<'PYEOF'
+          import json, shutil
+          from pathlib import Path
+
+          manifest = json.loads(Path("update-manifest.json").read_text())
+          assets_dir = Path("_release_assets")
+
+          for entry in manifest.get("files", []):
+              src = Path(entry["path"])
+              if not src.exists():
+                  print(f"  SKIP (not found): {src}")
+                  continue
+              asset_name = entry["path"].replace("/", "--")
+              dest = assets_dir / asset_name
+              shutil.copy2(src, dest)
+              print(f"  {asset_name} ({dest.stat().st_size} bytes)")
+
+          print(f"\nTotal assets: {len(list(assets_dir.iterdir()))}")
+          PYEOF
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.info.outputs.tag }}
+          name: Ratio ${{ steps.info.outputs.version }}
+          body: |
+            ## Ratio ${{ steps.info.outputs.version }} (build ${{ steps.info.outputs.build }})
+
+            ### Atualização automática
+            Usuários com o Ratio instalado receberão esta atualização automaticamente.
+
+            ### Instalação manual
+            Se esta é sua primeira instalação, baixe o instalador completo no Google Drive (solicite o link ao administrador).
+
+            ---
+            _Release gerada automaticamente._
+          draft: false
+          prerelease: false
+          files: _release_assets/*

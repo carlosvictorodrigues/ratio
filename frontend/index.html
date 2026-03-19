@@ -425,6 +425,9 @@
       <button class="rail-btn" type="button" data-open-about aria-label="Sobre o Ratio">
         <i data-lucide="info"></i>
       </button>
+      <button id="openInformativoBtn" class="rail-btn" type="button" aria-label="Informativo Juridico">
+        <i data-lucide="newspaper"></i>
+      </button>
       <button id="openWatchTopicsBtn" class="rail-btn" type="button" aria-label="Alertas de topicos">
         <i data-lucide="bell"></i>
         <span id="watchBadge" class="rail-badge" hidden>0</span>
@@ -435,6 +438,10 @@
     </button>
     <button class="rail-btn rail-settings" type="button" data-open-settings aria-label="Abrir configuracoes">
       <i data-lucide="settings"></i>
+    </button>
+    <button id="openUpdateBtn" class="rail-btn rail-update-btn" type="button" aria-label="Atualizar Ratio" hidden>
+      <i data-lucide="download"></i>
+      <span id="updateBadge" class="rail-badge" hidden></span>
     </button>
   </aside>
 
@@ -603,7 +610,7 @@
           <span>Reranker</span>
           <select id="rerankerBackend">
             <option value="local">Local (BAAI/bge-reranker-v2-m3)</option>
-            <option value="gemini">Gemini (maior custo)</option>
+            <option value="gemini">Gemini (recomendado)</option>
           </select>
         </label>
         <label class="field">
@@ -622,33 +629,75 @@
           <input id="preferRecent" type="checkbox" checked />
         </label>
         <p class="rag-panel-note">
-          Recomendacao: manter reranker <strong>local</strong> como padrao para melhor custo/estabilidade.
-          Ative reranker Gemini apenas quando quiser maior refinamento semantico.
+          <strong>Recomendado: Gemini.</strong> O reranker Gemini compreende contexto juridico e distingue teses de merito de ruido processual, entregando documentos de maior qualidade para a resposta final. O reranker local (BAAI) faz matching semantico superficial e pode priorizar decisoes sem tese de merito.
         </p>
       </div>
     </details>
 
     <details class="disclosure" open>
-      <summary>Modelo Gemini</summary>
+      <summary>Modelo de Resposta</summary>
       <div class="disclosure-body">
         <label class="field">
-          <span>Modelo principal de resposta</span>
-          <input id="generationModelInput" list="geminiModelsList" type="text" autocomplete="off" />
+          <span>Provedor de geracao</span>
+          <select id="generationProvider">
+            <option value="gemini">Gemini</option>
+            <option value="claude">Claude (Anthropic)</option>
+          </select>
         </label>
-        <label class="field">
-          <span>Modelo fallback de resposta</span>
-          <input id="generationFallbackModelInput" list="geminiModelsList" type="text" autocomplete="off" />
-        </label>
-        <datalist id="geminiModelsList">
-          <option value="gemini-3.1-pro-preview"></option>
-          <option value="gemini-3-flash-preview"></option>
-          <option value="gemini-2.5-pro"></option>
-          <option value="gemini-2.5-flash"></option>
-          <option value="gemini-3-flash"></option>
-          <option value="gemini-2.0-flash"></option>
-        </datalist>
+        <p class="rag-panel-note">
+          <strong>Recomendado: Claude.</strong> Tende a produzir respostas com maior aderencia as regras do sistema, profundidade argumentativa e qualidade de citacao em portugues juridico. Gemini oferece menor custo e funciona sem chave adicional.
+        </p>
+        <div id="geminiModelFields">
+          <label class="field">
+            <span>Modelo principal de resposta</span>
+            <input id="generationModelInput" list="geminiModelsList" type="text" autocomplete="off" />
+          </label>
+          <label class="field">
+            <span>Modelo fallback de resposta</span>
+            <input id="generationFallbackModelInput" list="geminiModelsList" type="text" autocomplete="off" />
+          </label>
+          <datalist id="geminiModelsList">
+            <option value="gemini-3.1-pro-preview"></option>
+            <option value="gemini-3-flash-preview"></option>
+            <option value="gemini-2.5-pro"></option>
+            <option value="gemini-2.5-flash"></option>
+            <option value="gemini-3-flash"></option>
+            <option value="gemini-2.0-flash"></option>
+          </datalist>
+        </div>
+        <div id="claudeModelFields" style="display:none">
+          <label class="field">
+            <span>Modelo Claude</span>
+            <select id="claudeModelInput">
+              <option value="claude-sonnet-4-20250514">Claude Sonnet 4 (recomendado)</option>
+              <option value="claude-haiku-4-5-20251001">Claude Haiku 4.5 (mais rapido)</option>
+            </select>
+          </label>
+        </div>
         <p class="rag-panel-note">
           Esses modelos sao enviados ao backend em cada consulta para refletir imediatamente sua configuracao.
+        </p>
+      </div>
+    </details>
+
+    <details class="disclosure" id="claudeKeyDisclosure">
+      <summary>Chave Claude (Anthropic)</summary>
+      <div class="disclosure-body">
+        <label class="field">
+          <span>ANTHROPIC_API_KEY</span>
+          <input id="settingsClaudeKeyInput" type="password" autocomplete="off" placeholder="sk-ant-..." />
+        </label>
+        <div class="rag-panel-actions" style="margin-top:0.5rem">
+          <label class="onboarding-persist-row" style="margin-bottom:0.4rem">
+            <input id="settingsClaudePersistEnv" type="checkbox" checked />
+            <span>Salvar em <code>.env</code></span>
+          </label>
+          <button id="settingsSaveClaudeKeyBtn" class="chip-btn" type="button">Validar e salvar chave</button>
+        </div>
+        <p id="settingsClaudeKeyStatus" class="rag-config-status"></p>
+        <p class="rag-panel-note">
+          Opcional. Necessaria apenas quando o provedor estiver configurado como Claude.
+          Obtenha sua chave em <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noopener noreferrer">console.anthropic.com</a>.
         </p>
       </div>
     </details>

@@ -46,6 +46,7 @@ from backend.tts_legacy_google import (
     synthesize_legacy_google_tts as _run_legacy_tts_sync,
 )
 from backend.juris_update import run_jurisprudencia_incremental_update
+from backend.auto_update import load_local_version, check_for_update, apply_update, schedule_restart
 
 def _resolve_project_root() -> Path:
     raw = (os.getenv("RATIO_PROJECT_ROOT") or "").strip()
@@ -55,6 +56,20 @@ def _resolve_project_root() -> Path:
 
 
 PROJECT_ROOT = _resolve_project_root()
+# PyInstaller places Tree/datas inside _internal/; resolve data paths
+# checking both PROJECT_ROOT and PROJECT_ROOT/_internal.
+_INTERNAL_ROOT = PROJECT_ROOT / "_internal"
+
+
+def _resolve_data_dir(name: str) -> Path:
+    """Return the first existing directory for *name* under PROJECT_ROOT or _internal."""
+    direct = PROJECT_ROOT / name
+    if direct.is_dir():
+        return direct
+    internal = _INTERNAL_ROOT / name
+    if internal.is_dir():
+        return internal
+    return direct  # fallback to default (will be created on demand)
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
@@ -62,18 +77,24 @@ from rag.query import (  # noqa: E402
     EXPLAIN_MODEL,
     GEMINI_RERANK_MODEL,
     GENERATION_MODEL,
+    GENERATION_PROVIDER,
     RERANKER_BACKEND,
     RERANKER_MODEL,
+    configure_anthropic_api_key,
     configure_gemini_api_key,
     explain_answer,
+    get_anthropic_client,
     get_gemini_client,
     get_persona_prompt_defaults,
+    get_supported_claude_models,
     get_supported_generation_models,
     get_rag_tuning_defaults,
     get_rag_tuning_schema,
     check_topic_matches,
+    get_informativo_items,
     get_recent_timeline_items,
     get_reranker_warning,
+    has_anthropic_api_key,
     has_gemini_api_key,
     orgao_label,
     run_query,
@@ -429,6 +450,7 @@ class ExplainRequest(BaseModel):
     answer: str = Field(min_length=1, max_length=40000)
     docs: Optional[list[dict[str, Any]]] = None
     model_name: Optional[str] = Field(default=None, max_length=120)
+    generation_provider: Optional[str] = Field(default=None, max_length=20)
 
 
 class TTSRequest(BaseModel):
@@ -446,6 +468,15 @@ class GeminiConfigRequest(BaseModel):
         ge=3000,
         le=120000,
     )
+
+
+class AnthropicConfigRequest(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+    api_key: str = Field(min_length=8, max_length=400)
+    persist_env: bool = True
+    validate_key: bool = Field(default=True, alias="validate")
+    test_model: Optional[str] = Field(default="claude-sonnet-4-20250514", max_length=120)
+    validation_timeout_ms: int = Field(default=12000, ge=3000, le=120000)
 
 
 class TTSProviderConfigRequest(BaseModel):
@@ -548,7 +579,7 @@ LEGACY_GCLOUD_TO_GEMINI_VOICE = {
 USER_ACERVO_TABLE = (os.getenv("USER_ACERVO_TABLE") or "meu_acervo").strip() or "meu_acervo"
 USER_ACERVO_MANIFEST = _runtime_logs_dir() / "meu_acervo_manifest.json"
 USER_ACERVO_UPLOAD_DIR = _runtime_logs_dir() / "meu_acervo_uploads"
-USER_ACERVO_LANCE_DIR = PROJECT_ROOT / "lancedb_store"
+USER_ACERVO_LANCE_DIR = _resolve_data_dir("lancedb_store")
 USER_ACERVO_CHUNK_CHARS = max(500, min(int(os.getenv("USER_ACERVO_CHUNK_CHARS", "1400")), 4000))
 USER_ACERVO_MAX_FILES_PER_REQUEST = max(1, min(int(os.getenv("USER_ACERVO_MAX_FILES_PER_REQUEST", "24")), 100))
 USER_ACERVO_MAX_FILE_SIZE_MB = max(1, min(int(os.getenv("USER_ACERVO_MAX_FILE_SIZE_MB", "1024")), 10240))
@@ -614,7 +645,7 @@ JURIS_UPDATE_EMBED_FALLBACK_ON_QUOTA = os.getenv("JURIS_UPDATE_EMBED_FALLBACK_ON
 JURIS_UPDATE_JOB_POLL_MS = max(500, min(int(os.getenv("JURIS_UPDATE_JOB_POLL_MS", "1500")), 10000))
 JURIS_UPDATE_JOB_TTL_SECONDS = max(600, min(int(os.getenv("JURIS_UPDATE_JOB_TTL_SECONDS", "86400")), 604800))
 JURIS_UPDATE_MANIFEST = _runtime_logs_dir() / "juris_update_manifest.json"
-JURIS_UPDATE_DOWNLOADS_DIR = PROJECT_ROOT / "data" / "stj_informativos" / "docs"
+JURIS_UPDATE_DOWNLOADS_DIR = _resolve_data_dir("data") / "stj_informativos" / "docs"
 _JURIS_UPDATE_JOBS: dict[str, dict[str, Any]] = {}
 _JURIS_UPDATE_JOBS_LOCK = threading.Lock()
 
@@ -1820,6 +1851,21 @@ def _upsert_env_gemini_key(api_key: str) -> Path:
     current = env_path.read_text(encoding="utf-8") if env_path.exists() else ""
     if re.search(r"(?im)^\s*GEMINI_API_KEY\s*=", current):
         updated = re.sub(r"(?im)^\s*GEMINI_API_KEY\s*=.*$", key_line, current, count=1)
+    else:
+        updated = current
+        if updated and not updated.endswith("\n"):
+            updated += "\n"
+        updated += key_line + "\n"
+    env_path.write_text(updated, encoding="utf-8")
+    return env_path
+
+
+def _upsert_env_anthropic_key(api_key: str) -> Path:
+    env_path = PROJECT_ROOT / ".env"
+    key_line = f"ANTHROPIC_API_KEY={api_key}"
+    current = env_path.read_text(encoding="utf-8") if env_path.exists() else ""
+    if re.search(r"(?im)^\s*ANTHROPIC_API_KEY\s*=", current):
+        updated = re.sub(r"(?im)^\s*ANTHROPIC_API_KEY\s*=.*$", key_line, current, count=1)
     else:
         updated = current
         if updated and not updated.endswith("\n"):
@@ -3577,6 +3623,109 @@ def timeline_api(
     return result
 
 
+_informativo_cache: dict[str, Any] = {"data": None, "key": "", "ts": 0.0}
+_INFORMATIVO_CACHE_TTL = 600  # 10 minutes
+
+
+@app.get("/api/informativo")
+def informativo_api(
+    request: Request,
+    limit: int = 60,
+    tribunal: Optional[str] = None,
+    days_back: int = 90,
+) -> dict[str, Any]:
+    _enforce_rate_limit(request, bucket="informativo", limit=10, window_seconds=60)
+    limit = max(1, min(limit, 100))
+    days_back = max(1, min(days_back, 365))
+    cache_key = f"{limit}:{tribunal or ''}:{days_back}"
+    now = __import__("time").time()
+    if _informativo_cache["key"] == cache_key and _informativo_cache["data"] is not None:
+        if now - _informativo_cache["ts"] < _INFORMATIVO_CACHE_TTL:
+            return _informativo_cache["data"]
+
+    items = get_informativo_items(
+        limit=limit,
+        tribunal=tribunal.strip() if tribunal else None,
+        days_back=days_back,
+    )
+
+    last_update = _get_last_juris_update_date()
+
+    result = {
+        "items": items,
+        "count": len(items),
+        "last_update": last_update,
+    }
+    _informativo_cache["data"] = result
+    _informativo_cache["key"] = cache_key
+    _informativo_cache["ts"] = now
+    return result
+
+
+# ── Auto-update endpoints ──
+
+_auto_update_last_check_ts: float = 0.0
+_auto_update_last_result: dict[str, Any] | None = None
+_auto_update_lock = threading.Lock()
+_auto_update_applying = False
+
+
+@app.get("/api/auto-update/version")
+def auto_update_version_api() -> dict[str, Any]:
+    return {"status": "ok", **load_local_version(PROJECT_ROOT)}
+
+
+@app.get("/api/auto-update/check")
+def auto_update_check_api(request: Request) -> dict[str, Any]:
+    global _auto_update_last_check_ts, _auto_update_last_result
+    _enforce_rate_limit(request, bucket="auto_update_check", limit=4, window_seconds=3600)
+    with _auto_update_lock:
+        result = check_for_update(PROJECT_ROOT, _auto_update_last_check_ts)
+        if result.get("reason") != "cooldown":
+            _auto_update_last_check_ts = time.time()
+            _auto_update_last_result = result
+        else:
+            result = _auto_update_last_result or result
+    return result
+
+
+@app.post("/api/auto-update/apply")
+def auto_update_apply_api(request: Request) -> dict[str, Any]:
+    global _auto_update_applying
+    _enforce_rate_limit(request, bucket="auto_update_apply", limit=2, window_seconds=3600)
+    with _auto_update_lock:
+        if _auto_update_applying:
+            raise HTTPException(status_code=409, detail="Ja existe uma atualizacao em andamento.")
+        cached = _auto_update_last_result
+        if not cached or not cached.get("available"):
+            raise HTTPException(status_code=400, detail="Nenhuma atualizacao disponivel.")
+        manifest = cached.get("manifest")
+        if not manifest:
+            raise HTTPException(status_code=400, detail="Manifesto de atualizacao nao encontrado.")
+        _auto_update_applying = True
+    try:
+        result = apply_update(PROJECT_ROOT, manifest)
+        return result
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+    finally:
+        with _auto_update_lock:
+            _auto_update_applying = False
+
+
+@app.post("/api/auto-update/restart")
+def auto_update_restart_api(request: Request) -> dict[str, Any]:
+    _enforce_rate_limit(request, bucket="auto_update_restart", limit=2, window_seconds=60)
+    result = schedule_restart(PROJECT_ROOT)
+    if result.get("status") == "restarting":
+        # Gracefully shut down the backend after a short delay
+        def _shutdown() -> None:
+            time.sleep(0.5)
+            os._exit(0)
+        threading.Thread(target=_shutdown, daemon=True).start()
+    return result
+
+
 class WatchTopicItem(BaseModel):
     query: str = Field(min_length=3, max_length=500)
     since_date: str = Field(default="", max_length=10)
@@ -3613,12 +3762,19 @@ def _get_last_juris_update_date() -> Optional[str]:
     return None
 
 
+def _install_id() -> str:
+    """Stable identifier for this installation, derived from the install path."""
+    import hashlib as _hl
+    return _hl.sha256(str(PROJECT_ROOT).encode()).hexdigest()[:12]
+
+
 @app.get("/health")
 def health() -> dict[str, Any]:
     rw = get_reranker_warning()
     return {
         "status": "ok",
         "has_gemini_api_key": has_gemini_api_key(),
+        "install_id": _install_id(),
         "reranker_warning": rw if rw else None,
         "defaults": {
             "reranker_backend": RERANKER_BACKEND,
@@ -3746,6 +3902,66 @@ def gemini_config_api(payload: GeminiConfigRequest) -> dict[str, Any]:
         "has_api_key": has_gemini_api_key(),
         "validation_timeout_ms": int(payload.validation_timeout_ms),
         "validation_warning": validation_warning,
+    }
+
+
+@app.post("/api/anthropic/config")
+def anthropic_config_api(payload: AnthropicConfigRequest) -> dict[str, Any]:
+    key = payload.api_key.strip()
+    if not key:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "code": "missing_api_key",
+                "message": "ANTHROPIC_API_KEY ausente.",
+                "hint": "Informe uma chave valida para continuar.",
+            },
+        )
+    validation_warning = ""
+    validated = False
+    setup_result: dict[str, Any] = {}
+
+    try:
+        setup_result = configure_anthropic_api_key(
+            key,
+            validate=payload.validate_key,
+            test_model=payload.test_model,
+            validation_timeout_ms=payload.validation_timeout_ms,
+        )
+        validated = bool(setup_result.get("validated"))
+    except Exception as exc:
+        norm = str(exc).lower()
+        if "rate" in norm or "overloaded" in norm:
+            validation_warning = str(exc).strip()
+            try:
+                setup_result = configure_anthropic_api_key(key, validate=False)
+            except Exception as fallback_exc:
+                _raise_api_error(fallback_exc)
+            validated = False
+        else:
+            _raise_api_error(exc)
+
+    if payload.persist_env:
+        _upsert_env_anthropic_key(key)
+    return {
+        "status": "ok",
+        "saved": True,
+        "validated": bool(validated),
+        "test_model": setup_result.get("model", payload.test_model),
+        "persisted_env": bool(payload.persist_env),
+        "has_api_key": has_anthropic_api_key(),
+        "supported_models": get_supported_claude_models(),
+        "validation_warning": validation_warning,
+    }
+
+
+@app.get("/api/anthropic/status")
+def anthropic_status_api() -> dict[str, Any]:
+    return {
+        "status": "ok",
+        "required": False,
+        "has_api_key": has_anthropic_api_key(),
+        "supported_models": get_supported_claude_models(),
     }
 
 
@@ -4183,6 +4399,7 @@ def explain_api(payload: ExplainRequest) -> dict[str, Any]:
             answer=payload.answer,
             docs=payload.docs or [],
             model_name=payload.model_name or EXPLAIN_MODEL,
+            generation_provider=payload.generation_provider or "gemini",
         )
     except Exception as exc:
         _raise_api_error(exc)

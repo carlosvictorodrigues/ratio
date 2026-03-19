@@ -98,13 +98,72 @@ SUPPORTED_GENERATION_MODELS: tuple[str, ...] = (
 GEMINI_KEY_VALIDATION_MODEL = os.getenv("GEMINI_KEY_VALIDATION_MODEL", "gemini-2.5-flash")
 GEMINI_KEY_VALIDATION_TIMEOUT_MS = int(os.getenv("GEMINI_KEY_VALIDATION_TIMEOUT_MS", "12000"))
 
+# --- Claude / Anthropic --------------------------------------------------
+ANTHROPIC_KEY = (os.getenv("ANTHROPIC_API_KEY") or "").strip()
+_ANTHROPIC_CLIENT: Optional[Any] = None
+
+SUPPORTED_CLAUDE_MODELS: tuple[str, ...] = (
+    "claude-sonnet-4-20250514",
+    "claude-haiku-4-5-20251001",
+)
+
+GENERATION_PROVIDER = os.getenv("GENERATION_PROVIDER", "gemini").strip().lower()
+
 
 def get_supported_generation_models() -> list[str]:
     return list(SUPPORTED_GENERATION_MODELS)
 
 
+def get_supported_claude_models() -> list[str]:
+    return list(SUPPORTED_CLAUDE_MODELS)
+
+
 def has_gemini_api_key() -> bool:
     return bool((GEMINI_KEY or "").strip())
+
+
+def has_anthropic_api_key() -> bool:
+    return bool((ANTHROPIC_KEY or "").strip())
+
+
+def get_anthropic_client() -> Any:
+    global _ANTHROPIC_CLIENT
+    key = (ANTHROPIC_KEY or "").strip()
+    if not key:
+        raise RuntimeError(
+            "ANTHROPIC_API_KEY ausente. Configure a chave Claude para usar geracao com Claude."
+        )
+    if _ANTHROPIC_CLIENT is None:
+        import anthropic
+        _ANTHROPIC_CLIENT = anthropic.Anthropic(api_key=key)
+    return _ANTHROPIC_CLIENT
+
+
+def configure_anthropic_api_key(
+    api_key: str,
+    *,
+    validate: bool = False,
+    test_model: Optional[str] = None,
+    validation_timeout_ms: int = 12000,
+) -> dict[str, Any]:
+    global ANTHROPIC_KEY, _ANTHROPIC_CLIENT
+    key = str(api_key or "").strip()
+    if not key:
+        raise RuntimeError("ANTHROPIC_API_KEY ausente. Informe uma chave valida.")
+
+    import anthropic
+    probe_model = (test_model or "claude-sonnet-4-20250514").strip()
+    candidate = anthropic.Anthropic(api_key=key)
+    if validate:
+        candidate.messages.create(
+            model=probe_model,
+            max_tokens=8,
+            messages=[{"role": "user", "content": "Responda somente: OK"}],
+        )
+    ANTHROPIC_KEY = key
+    os.environ["ANTHROPIC_API_KEY"] = key
+    _ANTHROPIC_CLIENT = candidate
+    return {"validated": bool(validate), "model": probe_model}
 
 
 def _reset_runtime_model_cache() -> None:
@@ -189,7 +248,8 @@ def configure_gemini_api_key(
         "model": probe_model,
     }
 
-LANCE_DIR = PROJECT_ROOT / "lancedb_store"
+_INTERNAL_ROOT = PROJECT_ROOT / "_internal"
+LANCE_DIR = _INTERNAL_ROOT / "lancedb_store" if (_INTERNAL_ROOT / "lancedb_store").is_dir() else PROJECT_ROOT / "lancedb_store"
 USER_ACERVO_TABLE = os.getenv("USER_ACERVO_TABLE", "meu_acervo")
 USER_ACERVO_MANIFEST = PROJECT_ROOT / "logs" / "runtime" / "meu_acervo_manifest.json"
 EMBED_DIM = 768
@@ -210,7 +270,7 @@ RECENCY_MIN_SEMANTIC_GATE = float(os.getenv("RECENCY_MIN_SEMANTIC_GATE", "0.60")
 RECENCY_MAX_CONTRIBUTION = float(os.getenv("RECENCY_MAX_CONTRIBUTION", "0.14"))
 RECENCY_UNKNOWN_SCORE = float(os.getenv("RECENCY_UNKNOWN_SCORE", "0.05"))
 THESIS_BONUS_WEIGHT = float(os.getenv("THESIS_BONUS_WEIGHT", "0.16"))
-PROCEDURAL_PENALTY_WEIGHT = float(os.getenv("PROCEDURAL_PENALTY_WEIGHT", "0.14"))
+PROCEDURAL_PENALTY_WEIGHT = float(os.getenv("PROCEDURAL_PENALTY_WEIGHT", "0.22"))
 PROCEDURAL_INTENT_PENALTY_MULTIPLIER = float(os.getenv("PROCEDURAL_INTENT_PENALTY_MULTIPLIER", "0.30"))
 AUTHORITY_BONUS_WEIGHT = float(os.getenv("AUTHORITY_BONUS_WEIGHT", "0.22"))
 AUTHORITY_INTENT_MULTIPLIER = float(os.getenv("AUTHORITY_INTENT_MULTIPLIER", "1.20"))
@@ -232,7 +292,7 @@ PARAGRAPH_CITATION_MIN_CHARS = int(os.getenv("PARAGRAPH_CITATION_MIN_CHARS", "12
 PREFER_RECENT_DEFAULT = os.getenv("PREFER_RECENT_DEFAULT", "1").strip() != "0"
 CONTEXT_MAX_PASSAGES_PER_DOC = int(os.getenv("CONTEXT_MAX_PASSAGES_PER_DOC", "5"))
 CONTEXT_MAX_PASSAGE_CHARS = int(os.getenv("CONTEXT_MAX_PASSAGE_CHARS", "1000"))
-CONTEXT_MAX_DOC_CHARS = int(os.getenv("CONTEXT_MAX_DOC_CHARS", "2500"))
+CONTEXT_MAX_DOC_CHARS = int(os.getenv("CONTEXT_MAX_DOC_CHARS", "4000"))
 
 RERANKER_BACKEND = os.getenv("RERANKER_BACKEND", "local").strip().lower()
 RERANKER_MODEL = os.getenv("RERANKER_MODEL", "BAAI/bge-reranker-v2-m3")
@@ -424,6 +484,7 @@ RAG_TUNING_DEFAULTS: dict[str, Any] = {
     "generation_temperature": 0.1,
     "generation_max_output_tokens": GENERATION_MAX_OUTPUT_TOKENS,
     "generation_thinking_budget": GENERATION_THINKING_BUDGET,
+    "generation_provider": GENERATION_PROVIDER,
 }
 
 _RAG_TUNING_NUMERIC_BOUNDS: dict[str, tuple[float, float]] = {
@@ -482,6 +543,7 @@ _RAG_TUNING_STRING_KEYS = {
     "generation_model",
     "generation_fallback_model",
     "gemini_rerank_model",
+    "generation_provider",
 }
 
 
@@ -588,6 +650,7 @@ def get_rag_tuning_schema() -> list[dict[str, Any]]:
             "type": "string",
             "options": get_supported_generation_models(),
             "help": "Usado apenas quando o reranker da consulta estiver em modo Gemini.",
+            "tip": "Recomendado: usar reranker Gemini em vez do local. O reranker Gemini entende contexto juridico e filtra melhor ruido processual, entregando documentos de maior qualidade para a geracao da resposta. O reranker local (BAAI) faz matching semantico superficial e pode priorizar decisoes processuais sem tese de merito.",
             "impact_more": "Modelos mais robustos melhoram qualidade do rerank, com maior custo e latencia.",
             "impact_less": "Modelos mais leves reduzem custo e tempo, com possivel queda de qualidade.",
         },
@@ -761,6 +824,17 @@ def get_rag_tuning_schema() -> list[dict[str, Any]]:
             "step": 50,
             "impact_more": "Permite contexto mais completo por fonte.",
             "impact_less": "Reduz comprimento de contexto e custo.",
+        },
+        {
+            "key": "generation_provider",
+            "label": "Provedor de Geracao",
+            "group": "Modelo de Resposta",
+            "type": "string",
+            "options": ["gemini", "claude"],
+            "help": "Selecione qual API sera usada para gerar respostas e explicacoes. Requer chave do provedor selecionado.",
+            "tip": "Recomendado: Claude. Tende a produzir respostas com maior aderencia as regras do sistema, profundidade argumentativa e qualidade de citacao em portugues juridico. Gemini oferece menor custo e funciona sem chave adicional.",
+            "impact_more": "Claude: respostas mais estruturadas e com maior fidelidade ao sistema de regras.",
+            "impact_less": "Gemini: menor custo, integracao nativa com embeddings e reranker.",
         },
         {
             "key": "generation_temperature",
@@ -1533,6 +1607,227 @@ def get_recent_timeline_items(
             "authority_label": (row.get("_authority_label") or "-").strip(),
         })
     return results
+
+
+# ── Informativo Juridico ──
+
+# All document types eligible for the Informativo feed.
+# Includes high-authority (sumulas, temas, acordaos) and also
+# informativos/monocraticas which carry recent substantive content.
+_INFORMATIVO_TYPES = {
+    "sumula_vinculante", "sumula_stj", "sumula",
+    "tema_repetitivo_stj",
+    "acordao", "acordao_sv",
+    "informativo",
+    "monocratica", "monocratica_sv",
+}
+
+_INFORMATIVO_SELECT_COLS = [
+    "doc_id", "tipo", "tribunal", "processo", "relator",
+    "orgao_julgador", "data_julgamento", "texto_busca",
+    "texto_integral", "metadata_extra",
+]
+
+
+def _extract_destaque(row: dict, max_chars: int = 500) -> str:
+    """Extract the DESTAQUE section from STJ informativo texts.
+
+    STJ informativos have a structured format with DESTAQUE containing
+    the key holding/thesis of the decision.
+    """
+    integral = (row.get("texto_integral") or "")
+    busca = (row.get("texto_busca") or "")
+
+    # Try texto_integral first: look for "DESTAQUE\n..." until next section header
+    m = re.search(
+        r"DESTAQUE\s*\n(.+?)(?:\n(?:INFORMA|PROCESSO|RAMO DO|TEMA\b)|\Z)",
+        integral,
+        re.DOTALL,
+    )
+    if m:
+        text = re.sub(r"\s+", " ", m.group(1)).strip()
+        if len(text) >= 30:
+            return text[:max_chars]
+
+    # Fallback: in texto_busca, the thesis is the paragraph after the TEMA line
+    # and before "PROCESSO". Structure: <processo>\n<tema>\n<destaque>\nPROCESSO\n...
+    parts = re.split(r"\nPROCESSO\b", busca, maxsplit=1)
+    if parts:
+        header_block = parts[0]
+        lines = [l.strip() for l in header_block.splitlines() if l.strip()]
+        # Skip first line (processo number) and topic line — thesis is usually line 3+
+        # The thesis line is typically the longest substantive paragraph
+        for line in lines[1:]:
+            clean = re.sub(r"\s+", " ", line).strip()
+            # Skip short topic headers, look for the actual thesis statement
+            if len(clean) >= 50:
+                return clean[:max_chars]
+
+    return ""
+
+
+def _parse_date_loose(raw: str) -> str:
+    """Normalize varied date formats to YYYY-MM-DD for reliable sorting/filtering."""
+    s = (raw or "").strip()[:10]
+    if not s:
+        return ""
+    # ISO: 2025-12-30 or 2025-12-30T...
+    if re.match(r"\d{4}-\d{2}-\d{2}", s):
+        return s[:10]
+    # European with dots or dashes: DD.MM.YYYY or D-M-YYYY
+    m = re.match(r"(\d{1,2})[.\-/](\d{1,2})[.\-/](\d{4})", s)
+    if m:
+        return f"{m.group(3)}-{m.group(2).zfill(2)}-{m.group(1).zfill(2)}"
+    return ""
+
+
+def _informativo_scan(tbl, tipo_where: str, per_tribunal: int = 2000) -> list[dict]:
+    """Query LanceDB for informativo items.
+
+    Queries each tribunal separately to ensure STJ coverage (STF has 533K rows
+    vs 6K STJ — a single query would return mostly STF).
+    Date filtering is NOT done in SQL because date formats are inconsistent
+    (ISO, DD/MM/YYYY, empty) and string comparison is unreliable.
+    Date filtering happens in Python after normalization.
+    """
+    # Primary: lance native scan (fastest, requires pylance) — returns ALL matches
+    try:
+        lance_ds = tbl.to_lance()
+        available_cols = set(lance_ds.schema.names)
+        safe_cols = [c for c in _INFORMATIVO_SELECT_COLS if c in available_cols]
+        arrow_table = lance_ds.to_table(columns=safe_cols, filter=tipo_where)
+        return arrow_table.to_pylist()
+    except Exception as exc:
+        print(f"Informativo: lance scan unavailable ({exc}), using search API", file=sys.stderr)
+
+    # Fallback: lancedb search API — query per tribunal to ensure coverage
+    all_rows: list[dict] = []
+    for tribunal in ("STF", "STJ"):
+        tribunal_where = f"{tipo_where} AND tribunal = {_quote_sql(tribunal)}"
+        try:
+            rows = (
+                tbl.search()
+                .where(tribunal_where)
+                .select(_INFORMATIVO_SELECT_COLS)
+                .limit(per_tribunal)
+                .to_list()
+            )
+            all_rows.extend(rows)
+        except Exception as exc:
+            print(f"Informativo: search failed for {tribunal}: {exc}", file=sys.stderr)
+
+    return all_rows
+
+
+def get_informativo_items(
+    limit: int = 60,
+    tribunal: Optional[str] = None,
+    days_back: int = 90,
+) -> list[dict]:
+    """Return recent high-authority items with extracted thesis/ementa text."""
+    try:
+        db = lancedb.connect(str(LANCE_DIR))
+        tbl = db.open_table("jurisprudencia")
+    except Exception as exc:
+        print(f"Informativo: cannot open table: {exc}", file=sys.stderr)
+        return []
+
+    from datetime import timedelta
+    cutoff = (date.today() - timedelta(days=max(1, days_back))).isoformat()
+
+    # SQL filter: types + loose date pre-filter. The date comparison is
+    # unreliable for non-ISO formats (DD/MM/YYYY), so it's intentionally
+    # broad — Python does the precise filtering after date normalization.
+    clauses = []
+    clean_tipos = list(_INFORMATIVO_TYPES)
+    clauses.append("tipo IN (" + ", ".join(_quote_sql(t) for t in clean_tipos) + ")")
+    clauses.append(f"data_julgamento >= {_quote_sql(cutoff)}")
+
+    if tribunal and tribunal.strip():
+        clauses.append(f"tribunal = {_quote_sql(tribunal.strip())}")
+
+    where_str = " AND ".join(clauses)
+
+    rows = _informativo_scan(tbl, where_str, per_tribunal=5000)
+
+    # Normalize dates and filter in Python (reliable across all date formats)
+    for row in rows:
+        row["_date_norm"] = _parse_date_loose(row.get("data_julgamento") or "")
+    rows = [r for r in rows if r["_date_norm"] and r["_date_norm"] >= cutoff]
+    rows.sort(key=lambda r: r["_date_norm"], reverse=True)
+
+    # Build enriched items from rows
+    enriched: list[dict] = []
+    for row in rows:
+        # Extract substantive text — fallback chain
+        tese_text = _extract_normative_statement(row, max_chars=500)
+        if not tese_text:
+            tese_text = _extract_destaque(row, max_chars=500)
+        if not tese_text:
+            tese_text = _extract_ementa_literal(row, max_chars=500, require_marker=True)
+        if not tese_text:
+            tese_text = _extract_ementa_literal(row, max_chars=500, require_marker=False)
+
+        # Skip entries with no extractable content
+        if not tese_text:
+            continue
+
+        score, level, label = classify_authority(row)
+
+        # Extract data_publicacao from metadata_extra JSON if available
+        data_publicacao = ""
+        try:
+            meta_raw = row.get("metadata_extra") or ""
+            if meta_raw and isinstance(meta_raw, str):
+                meta = json.loads(meta_raw)
+                data_publicacao = _parse_date_loose(str(meta.get("publicacao_data") or ""))
+        except (json.JSONDecodeError, TypeError, AttributeError):
+            pass
+
+        date_norm = row.get("_date_norm") or ""
+        enriched.append({
+            "doc_id": row.get("doc_id"),
+            "tipo": (row.get("tipo") or "").strip(),
+            "tipo_label": type_label((row.get("tipo") or "").strip()),
+            "tribunal": (row.get("tribunal") or "-").strip(),
+            "processo": (row.get("processo") or row.get("doc_id") or "-").strip(),
+            "relator": (row.get("relator") or "-").strip(),
+            "orgao_julgador": (row.get("orgao_julgador") or "-").strip(),
+            "data_julgamento": date_norm or (row.get("data_julgamento") or "").strip(),
+            "data_publicacao": data_publicacao,
+            "authority_level": level.upper(),
+            "authority_label": label,
+            "tese_text": tese_text,
+        })
+
+    # ── Fair tribunal representation ──
+    # Without balancing, STF (533K rows) completely drowns out STJ (6K rows).
+    # Reserve at least 40% of slots for the minority tribunal.
+    if not tribunal:
+        stf_items = [r for r in enriched if r["tribunal"] == "STF"]
+        stj_items = [r for r in enriched if r["tribunal"] == "STJ"]
+        other_items = [r for r in enriched if r["tribunal"] not in ("STF", "STJ")]
+
+        min_per_tribunal = max(1, limit * 2 // 5)  # 40% reserved
+        stf_take = stf_items[:limit]
+        stj_take = stj_items[:limit]
+
+        if len(stj_take) <= min_per_tribunal:
+            # STJ has fewer items than its quota — give it all, STF gets the rest
+            stf_take = stf_items[:limit - len(stj_take)]
+        elif len(stf_take) <= min_per_tribunal:
+            # STF has fewer items — give it all, STJ gets the rest
+            stj_take = stj_items[:limit - len(stf_take)]
+        else:
+            # Both have enough — split proportionally with minimum guarantee
+            stf_take = stf_items[:limit - min_per_tribunal]
+            stj_take = stj_items[:min_per_tribunal]
+
+        results = stf_take + stj_take + other_items
+        results.sort(key=lambda r: r.get("data_julgamento") or "", reverse=True)
+        return results[:limit]
+    else:
+        return enriched[:limit]
 
 
 def check_topic_matches(
@@ -2451,6 +2746,41 @@ PERSONA_LABELS: dict[str, str] = {
 }
 
 
+def _claude_generate_text(
+    system_prompt: str,
+    user_content: str,
+    *,
+    model: str = "claude-sonnet-4-20250514",
+    temperature: float = 0.1,
+    max_tokens: int = 4096,
+) -> tuple[str, str]:
+    """Call Claude Messages API. Returns (text, finish_reason_upper)."""
+    client = get_anthropic_client()
+    response = client.messages.create(
+        model=model,
+        max_tokens=max_tokens,
+        temperature=temperature,
+        system=system_prompt,
+        messages=[{"role": "user", "content": user_content}],
+    )
+    text = "".join(b.text for b in response.content if hasattr(b, "text")).strip()
+    stop_reason = (response.stop_reason or "").upper()
+    finish = "MAX_TOKENS" if stop_reason == "MAX_TOKENS" else f"FINISHREASON.{stop_reason or 'STOP'}"
+    return text, finish
+
+
+def _resolve_claude_model(model_hint: str) -> str:
+    """Map Gemini model names or generic hints to a valid Claude model ID."""
+    hint = (model_hint or "").strip().lower()
+    if hint.startswith("claude-"):
+        return model_hint.strip()
+    if "pro" in hint or "sonnet" in hint:
+        return "claude-sonnet-4-20250514"
+    if "flash" in hint or "haiku" in hint:
+        return "claude-haiku-4-5-20251001"
+    return "claude-sonnet-4-20250514"
+
+
 def get_persona_prompt_defaults() -> dict[str, str]:
     defaults: dict[str, str] = {}
     for key in PERSONA_LABELS:
@@ -2468,6 +2798,7 @@ def generate_answer(
     generation_temperature: float = 0.1,
     generation_max_output_tokens: int = GENERATION_MAX_OUTPUT_TOKENS,
     generation_thinking_budget: int = GENERATION_THINKING_BUDGET,
+    generation_provider: str = "gemini",
     persona: str = "visao_geral",
     persona_prompt: Optional[str] = None,
     return_diagnostics: bool = False,
@@ -2691,6 +3022,35 @@ da prosa com conectivo de fechamento ("Em suma,...",
             return value, diagnostics
         return value
 
+    # --- Claude provider path ---
+    provider = (generation_provider or "gemini").strip().lower()
+    if provider == "claude" and has_anthropic_api_key():
+        claude_model = _resolve_claude_model(generation_model)
+        try:
+            text, finish_reason = _claude_generate_text(
+                system_prompt=system_prompt,
+                user_content=user_query_payload,
+                model=claude_model,
+                temperature=max(0.0, min(float(generation_temperature), 1.0)),
+                max_tokens=max(300, int(generation_max_output_tokens)),
+            )
+            hit_max = _record_attempt(claude_model, finish_reason, text)
+            diagnostics["primary_hit_max_tokens"] = bool(hit_max)
+            if text and not hit_max:
+                diagnostics["selected_model"] = claude_model
+                diagnostics["used_fallback"] = False
+                diagnostics["selected_hit_max_tokens"] = False
+                return _result(text)
+            if text:
+                diagnostics["selected_model"] = claude_model
+                diagnostics["used_fallback"] = False
+                diagnostics["selected_hit_max_tokens"] = True
+                return _result(text)
+        except Exception as exc:
+            print(f"Claude generation warning ({claude_model}): {exc}. Falling back to Gemini.", file=sys.stderr)
+            _record_attempt(claude_model, f"ERROR:{exc.__class__.__name__}", "")
+
+    # --- Gemini provider path (default / fallback) ---
     primary_model = _resolve_best_gemini_model(generation_model)
     fallback_model = (
         _resolve_best_gemini_model(generation_fallback_model)
@@ -3127,6 +3487,7 @@ def explain_answer(
     answer: str,
     docs: Optional[list[dict]] = None,
     model_name: str = EXPLAIN_MODEL,
+    generation_provider: str = "gemini",
 ) -> str:
     """Generate a didactic explanation of an existing answer for end users."""
     docs = docs or []
@@ -3171,6 +3532,24 @@ def explain_answer(
         "7) Nao invente fontes."
     )
 
+    # --- Claude provider path ---
+    provider = (generation_provider or "gemini").strip().lower()
+    if provider == "claude" and has_anthropic_api_key():
+        try:
+            claude_model = _resolve_claude_model(model_name)
+            text, _ = _claude_generate_text(
+                system_prompt=system_prompt,
+                user_content=user_prompt,
+                model=claude_model,
+                temperature=0.2,
+                max_tokens=800,
+            )
+            if text:
+                return text
+        except Exception as exc:
+            print(f"Claude explain warning: {exc}. Falling back to Gemini.", file=sys.stderr)
+
+    # --- Gemini provider path ---
     primary_model = _resolve_best_gemini_model(model_name)
     fallback_model = _resolve_best_gemini_model(GENERATION_FALLBACK_MODEL)
 
@@ -3320,6 +3699,7 @@ def run_query(
         generation_temperature=float(cfg["generation_temperature"]),
         generation_max_output_tokens=int(cfg["generation_max_output_tokens"]),
         generation_thinking_budget=int(cfg["generation_thinking_budget"]),
+        generation_provider=str(cfg.get("generation_provider", "gemini")),
         persona=persona,
         persona_prompt=persona_prompt,
         return_diagnostics=True,

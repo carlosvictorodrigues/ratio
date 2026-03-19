@@ -175,6 +175,13 @@ const state = {
     lastFetched: 0,
     filter: { tribunal: "", tipo: "" }
   },
+  informativo: {
+    open: false,
+    items: [],
+    lastFetched: 0,
+    filter: { tribunal: "" },
+    loading: false,
+  },
   speech: {
     activeTurnId: null,
     mode: "",
@@ -192,8 +199,26 @@ const state = {
     bufferedChunks: 0,
     playedChunks: 0,
     currentChunkIndex: 0
+  },
+  autoUpdate: {
+    available: false,
+    remoteVersion: "",
+    remoteBuild: 0,
+    localVersion: "",
+    localBuild: 0,
+    notes: "",
+    releasedAt: "",
+    filesCount: 0,
+    applying: false,
+    done: false,
+    error: "",
+    needsFullInstaller: false,
+    installerUrl: "",
+    restarting: false,
   }
 };
+
+const AUTO_UPDATE_DISMISSED_KEY = "jurisai_update_dismissed_v1";
 
 const audioPlayer = new Audio();
 audioPlayer.preload = "auto";
@@ -228,6 +253,14 @@ const apiBaseInput = $("apiBase");
 const rerankerBackend = $("rerankerBackend");
 const geminiRerankModelInput = $("geminiRerankModelInput");
 const preferRecent = $("preferRecent");
+const generationProvider = $("generationProvider");
+const geminiModelFields = $("geminiModelFields");
+const claudeModelFields = $("claudeModelFields");
+const claudeModelInput = $("claudeModelInput");
+const settingsClaudeKeyInput = $("settingsClaudeKeyInput");
+const settingsSaveClaudeKeyBtn = $("settingsSaveClaudeKeyBtn");
+const settingsClaudeKeyStatus = $("settingsClaudeKeyStatus");
+const settingsClaudePersistEnv = $("settingsClaudePersistEnv");
 const queryInput = $("queryInput");
 const askBtn = $("askBtn");
 const requestState = $("requestState");
@@ -256,6 +289,9 @@ const tipsBtn = $("tipsBtn");
 const tipsModal = $("tipsModal");
 const closeTipsModalBtn = $("closeTipsModalBtn");
 const tipsTabs = $("tipsTabs");
+const openInformativoBtn = $("openInformativoBtn");
+const openUpdateBtn = $("openUpdateBtn");
+const updateBadge = $("updateBadge");
 const openWatchTopicsBtn = $("openWatchTopicsBtn");
 const closeWatchTopicsBtn = $("closeWatchTopicsBtn");
 const watchTopicsPanel = $("watchTopicsPanel");
@@ -582,6 +618,7 @@ function loadStoredSession() {
     activeTurnId: null,
     answerFontScale: 1,
     rerankerBackend: "local",
+    generationProvider: "gemini",
     ttsProviderPreference: "legacy_google",
     preferRecent: true,
     preferUserSources: true,
@@ -614,6 +651,7 @@ function loadStoredSession() {
         ? Math.max(ANSWER_FONT_SCALE_MIN, Math.min(ANSWER_FONT_SCALE_MAX, Number(parsed.answerFontScale)))
         : 1,
       rerankerBackend: parsed?.rerankerBackend === "gemini" ? "gemini" : "local",
+      generationProvider: parsed?.generationProvider === "claude" ? "claude" : "gemini",
       ttsProviderPreference: normalizeTtsProviderValue(parsed?.ttsProviderPreference),
       preferRecent: typeof parsed?.preferRecent === "boolean" ? parsed.preferRecent : true,
       preferUserSources: typeof parsed?.preferUserSources === "boolean" ? parsed.preferUserSources : true,
@@ -650,6 +688,7 @@ function persistSession() {
       activeTurnId: state.activeTurnId || null,
       answerFontScale: state.answerFontScale,
       rerankerBackend: rerankerBackend?.value === "gemini" ? "gemini" : "local",
+      generationProvider: generationProvider?.value === "claude" ? "claude" : "gemini",
       ttsProviderPreference: normalizeTtsProviderValue(state.ttsProviderPreference),
       preferRecent: !!preferRecent?.checked,
       preferUserSources: userSourcePriorityToggle?.checked !== false,
@@ -664,6 +703,52 @@ function persistSession() {
     localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(payload));
   } catch (_) {
     // Ignore storage failures (private mode / quota / policies).
+  }
+}
+
+function syncProviderFields() {
+  const provider = generationProvider?.value || "gemini";
+  if (geminiModelFields) geminiModelFields.style.display = provider === "gemini" ? "" : "none";
+  if (claudeModelFields) claudeModelFields.style.display = provider === "claude" ? "" : "none";
+  state.generationProvider = provider;
+}
+
+async function saveClaudeKeyFromSettings() {
+  const keyEl = settingsClaudeKeyInput;
+  const statusEl = settingsClaudeKeyStatus;
+  if (!keyEl || !statusEl) return;
+  const key = keyEl.value.trim();
+  if (!key) {
+    statusEl.textContent = "Insira uma chave Claude valida.";
+    statusEl.classList.add("error");
+    return;
+  }
+  statusEl.textContent = "Validando chave Claude...";
+  statusEl.classList.remove("error");
+  try {
+    const resp = await fetch(`${state.apiBase}/api/anthropic/config`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        api_key: key,
+        validate: true,
+        persist_env: !!settingsClaudePersistEnv?.checked
+      })
+    });
+    const data = await resp.json();
+    if (!resp.ok) {
+      const msg = data?.detail?.message || data?.detail || "Erro ao validar chave.";
+      statusEl.textContent = String(msg);
+      statusEl.classList.add("error");
+      return;
+    }
+    statusEl.textContent = data.validated
+      ? `Chave Claude validada com sucesso (${data.test_model || "ok"}).`
+      : "Chave salva (validacao ignorada).";
+    statusEl.classList.remove("error");
+  } catch (err) {
+    statusEl.textContent = `Erro de conexao: ${err.message || err}`;
+    statusEl.classList.add("error");
   }
 }
 
@@ -855,6 +940,26 @@ function refreshRailButtons() {
   railSettingsButtons.forEach((button) => {
     button.classList.toggle("active", settingsOpen);
   });
+  openInformativoBtn?.classList.toggle("active", state.informativo.open);
+}
+
+function setInformativoOpen(open) {
+  state.informativo.open = !!open;
+  if (state.informativo.open) {
+    setTipsModalOpen(false);
+    state.about.open = false;
+    document.body.dataset.aboutOpen = "false";
+    document.body.dataset.onboardingOpen = "false";
+    document.body.dataset.settingsOpen = "false";
+    document.body.dataset.acervoOpen = "false";
+    state.library.open = false;
+    document.body.dataset.libraryOpen = "false";
+    setWatchTopicsOpen(false);
+    fetchInformativo().then(() => renderInformativoView());
+  } else {
+    renderThread({ autoscroll: false });
+  }
+  refreshRailButtons();
 }
 
 function setLibraryOpen(open) {
@@ -1611,11 +1716,14 @@ function renderRagControl(item) {
   const detail = safeText(item?.help, "");
   const more = safeText(item?.impact_more, "Aumenta o efeito desse parametro.");
   const less = safeText(item?.impact_less, "Reduz o efeito desse parametro.");
+  const tipText = safeText(item?.tip, "");
   const helpParts = [];
   if (detail) helpParts.push(detail);
+  if (tipText) helpParts.push(tipText);
   helpParts.push(`Mais: ${more}`);
   helpParts.push(`Menos: ${less}`);
   const helpTitle = helpParts.join("\n");
+  const tipHtml = tipText ? `<p class="rag-control-tip">${escapeHtml(tipText)}</p>` : "";
   const defaults = state.ragConfigDefaults || {};
   const fallbackValue = defaults[key];
   const currentValue = normalizeRagConfigValue(item, state.ragConfigValues?.[key], fallbackValue);
@@ -1638,13 +1746,20 @@ function renderRagControl(item) {
   }
 
   if (type === "string") {
+    const options = Array.isArray(item?.options) ? item.options : [];
+    const inputHtml = options.length
+      ? `<select class="rag-select" data-role="text">${options.map(
+          (o) => `<option value="${escapeAttr(o)}"${String(o) === String(currentValue) ? " selected" : ""}>${escapeHtml(o)}</option>`
+        ).join("")}</select>`
+      : `<input class="rag-text" data-role="text" type="text" value="${escapeAttr(currentValue)}" />`;
     return `
       <article class="rag-control ${changedClass}" data-rag-key="${escapeAttr(key)}" data-rag-type="${escapeAttr(type)}">
         <div class="rag-control-head">
           <span>${escapeHtml(label)}</span>
           <button class="rag-help" type="button" title="${escapeAttr(helpTitle)}">i</button>
         </div>
-        <input class="rag-text" data-role="text" type="text" value="${escapeAttr(currentValue)}" />
+        ${inputHtml}
+        ${tipHtml}
         <p class="rag-control-meta">Padrao: ${escapeHtml(defaultText)}</p>
       </article>
     `;
@@ -1843,6 +1958,11 @@ function apiPayload(query) {
   const personaPrompt = normalizePersonaPrompt(personaCfg.prompt);
   const personaModel = normalizePersonaModel(personaCfg.model);
   const ragConfigPayload = { ...(state.ragConfigValues || {}) };
+  const provider = generationProvider?.value || "gemini";
+  ragConfigPayload.generation_provider = provider;
+  if (provider === "claude" && claudeModelInput) {
+    ragConfigPayload.generation_model = claudeModelInput.value || "claude-sonnet-4-20250514";
+  }
   if (personaModel) {
     ragConfigPayload.generation_model = personaModel;
   }
@@ -3154,6 +3274,294 @@ async function _autoCheckWatchTopics() {
   }
 }
 
+// ── Informativo Juridico ──
+
+const _INFORMATIVO_CACHE_TTL = 600_000; // 10 min
+
+// ── Auto-update ──
+
+async function checkAutoUpdate() {
+  try {
+    const base = state.apiBase.replace(/\/$/, "");
+    const resp = await fetch(`${base}/api/auto-update/check`);
+    if (!resp.ok) return;
+    const data = await resp.json();
+    state.autoUpdate.localVersion = data.local_version || "";
+    state.autoUpdate.localBuild = data.local_build || 0;
+    if (!data.available) return;
+    state.autoUpdate.available = true;
+    state.autoUpdate.remoteVersion = data.remote_version || "";
+    state.autoUpdate.remoteBuild = data.remote_build || 0;
+    state.autoUpdate.notes = data.notes || "";
+    state.autoUpdate.releasedAt = data.released_at || "";
+    state.autoUpdate.filesCount = data.files_count || 0;
+    state.autoUpdate.needsFullInstaller = !!data.needs_full_installer;
+    state.autoUpdate.installerUrl = data.installer_url || "";
+    const dismissed = localStorage.getItem(AUTO_UPDATE_DISMISSED_KEY);
+    if (dismissed === String(data.remote_build)) return;
+    if (openUpdateBtn) { openUpdateBtn.hidden = false; }
+    if (updateBadge) { updateBadge.hidden = false; }
+  } catch (_) { /* silent — works offline */ }
+}
+
+function renderUpdateView() {
+  const u = state.autoUpdate;
+  let html = "";
+  if (u.restarting) {
+    html = `
+      <section class="informativo-view">
+        <div class="informativo-header">
+          <div class="informativo-title-row">
+            <i data-lucide="rotate-cw"></i>
+            <h3 class="informativo-title">Reiniciando...</h3>
+          </div>
+          <p class="informativo-subtitle">O Ratio esta reiniciando. Esta pagina sera atualizada automaticamente.</p>
+        </div>
+      </section>`;
+  } else if (u.done) {
+    html = `
+      <section class="informativo-view">
+        <div class="informativo-header">
+          <div class="informativo-title-row">
+            <i data-lucide="check-circle"></i>
+            <h3 class="informativo-title">Atualizado com sucesso</h3>
+          </div>
+          <p class="informativo-subtitle">O Ratio foi atualizado para a versao <strong>${escapeHtml(u.remoteVersion)}</strong>.</p>
+        </div>
+        <div class="update-actions-row">
+          <button class="informativo-search-btn" type="button" id="restartNowBtn">
+            <i data-lucide="rotate-cw"></i> Reiniciar agora
+          </button>
+          <button class="meta-btn" type="button" id="restartLaterBtn">Reiniciar depois</button>
+        </div>
+      </section>`;
+  } else if (u.applying) {
+    html = `
+      <section class="informativo-view">
+        <div class="informativo-header">
+          <div class="informativo-title-row">
+            <i data-lucide="loader"></i>
+            <h3 class="informativo-title">Atualizando...</h3>
+          </div>
+          <p class="informativo-subtitle">Baixando e aplicando atualizacao. Aguarde alguns segundos.</p>
+        </div>
+      </section>`;
+  } else if (u.available && u.needsFullInstaller) {
+    html = `
+      <section class="informativo-view">
+        <div class="informativo-header">
+          <div class="informativo-title-row">
+            <i data-lucide="hard-drive-download"></i>
+            <h3 class="informativo-title">Atualizacao importante disponivel</h3>
+          </div>
+          <p class="informativo-subtitle">Esta atualizacao requer o download do novo instalador.</p>
+        </div>
+        <div class="update-version-row">
+          <span class="update-version-tag">${escapeHtml(u.localVersion)}</span>
+          <span class="update-arrow">&rarr;</span>
+          <span class="update-version-tag update-version-new">${escapeHtml(u.remoteVersion)}</span>
+        </div>
+        <p class="update-notes-text">${escapeHtml(u.notes)}</p>
+        <div class="update-actions-row">
+          ${u.installerUrl ? `<a class="informativo-search-btn" href="${escapeHtml(u.installerUrl)}" target="_blank" rel="noopener"><i data-lucide="external-link"></i> Baixar instalador</a>` : `<p class="update-meta-text">Solicite o novo instalador ao administrador.</p>`}
+          <button class="meta-btn" type="button" id="dismissUpdateBtn">Lembrar depois</button>
+        </div>
+      </section>`;
+  } else if (u.available) {
+    const errorHtml = u.error ? `<p class="update-error">${escapeHtml(u.error)}</p>` : "";
+    html = `
+      <section class="informativo-view">
+        <div class="informativo-header">
+          <div class="informativo-title-row">
+            <i data-lucide="download"></i>
+            <h3 class="informativo-title">Atualizacao disponivel</h3>
+          </div>
+          <p class="informativo-subtitle">Uma nova versao do Ratio esta disponivel.</p>
+        </div>
+        <div class="update-version-row">
+          <span class="update-version-tag">${escapeHtml(u.localVersion)}</span>
+          <span class="update-arrow">&rarr;</span>
+          <span class="update-version-tag update-version-new">${escapeHtml(u.remoteVersion)}</span>
+        </div>
+        <p class="update-notes-text">${escapeHtml(u.notes)}</p>
+        <p class="update-meta-text">${u.filesCount} arquivo(s) · ${u.releasedAt ? escapeHtml(u.releasedAt.slice(0,10)) : ""}</p>
+        ${errorHtml}
+        <div class="update-actions-row">
+          <button class="informativo-search-btn" type="button" id="applyUpdateBtn">
+            <i data-lucide="download"></i> Atualizar agora
+          </button>
+          <button class="meta-btn" type="button" id="dismissUpdateBtn">Lembrar depois</button>
+        </div>
+      </section>`;
+  }
+  thread.innerHTML = html;
+  lucide.createIcons({ nodes: thread.querySelectorAll("[data-lucide]") });
+}
+
+async function applyAutoUpdate() {
+  state.autoUpdate.applying = true;
+  state.autoUpdate.error = "";
+  renderUpdateView();
+  try {
+    const base = state.apiBase.replace(/\/$/, "");
+    const resp = await fetch(`${base}/api/auto-update/apply`, { method: "POST" });
+    const data = await resp.json();
+    if (!resp.ok) throw new Error(data.detail || "Falha na atualizacao.");
+    state.autoUpdate.applying = false;
+    state.autoUpdate.done = true;
+    state.autoUpdate.available = false;
+    localStorage.removeItem(AUTO_UPDATE_DISMISSED_KEY);
+    if (updateBadge) updateBadge.hidden = true;
+  } catch (err) {
+    state.autoUpdate.applying = false;
+    state.autoUpdate.error = err.message || "Erro desconhecido.";
+  }
+  renderUpdateView();
+}
+
+async function restartApp() {
+  state.autoUpdate.restarting = true;
+  renderUpdateView();
+  try {
+    const base = state.apiBase.replace(/\/$/, "");
+    await fetch(`${base}/api/auto-update/restart`, { method: "POST" });
+  } catch (_) { /* expected — server is shutting down */ }
+  // Poll until the backend comes back up, then reload the page
+  const pollInterval = setInterval(async () => {
+    try {
+      const base = state.apiBase.replace(/\/$/, "");
+      const r = await fetch(`${base}/api/auto-update/version`, { signal: AbortSignal.timeout(2000) });
+      if (r.ok) {
+        clearInterval(pollInterval);
+        window.location.reload();
+      }
+    } catch (_) { /* still restarting */ }
+  }, 2000);
+}
+
+async function fetchInformativo() {
+  const now = Date.now();
+  if (state.informativo.lastFetched && now - state.informativo.lastFetched < _INFORMATIVO_CACHE_TTL) return;
+  state.informativo.loading = true;
+  try {
+    const base = state.apiBase.replace(/\/$/, "");
+    const resp = await fetch(`${base}/api/informativo?limit=60&days_back=90`);
+    if (!resp.ok) return;
+    const data = await resp.json();
+    state.informativo.items = data.items || [];
+    state.informativo.lastFetched = now;
+  } catch (_) {
+    // silently fail — informativo is optional
+  } finally {
+    state.informativo.loading = false;
+  }
+}
+
+const _MONTHS_PT = [
+  "Janeiro", "Fevereiro", "Marco", "Abril", "Maio", "Junho",
+  "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro",
+];
+
+function _informativoMonthLabel(key) {
+  const [y, m] = key.split("-");
+  return `${_MONTHS_PT[parseInt(m, 10) - 1] || m} de ${y}`;
+}
+
+function renderInformativoView() {
+  const items = state.informativo.items.filter(item => {
+    if (state.informativo.filter.tribunal && item.tribunal !== state.informativo.filter.tribunal) return false;
+    return true;
+  });
+
+  // Group by month (YYYY-MM)
+  const groups = new Map();
+  for (const item of items) {
+    const monthKey = (item.data_julgamento || item.data_publicacao || "").slice(0, 7);
+    if (!monthKey) continue;
+    if (!groups.has(monthKey)) groups.set(monthKey, []);
+    groups.get(monthKey).push(item);
+  }
+
+  // Filter chips
+  const tf = state.informativo.filter.tribunal;
+  const filterChips = ["", "STF", "STJ"].map(val => {
+    const label = val || "Todos";
+    const active = val === tf ? " active" : "";
+    return `<button class="timeline-chip${active}" type="button" data-informativo-filter-tribunal="${escapeHtml(val)}">${escapeHtml(label)}</button>`;
+  }).join("");
+
+  // Month sections
+  let stagger = 0;
+  const sectionsHtml = [...groups.entries()].map(([key, monthItems]) => {
+    const cardsHtml = monthItems.map(item => {
+      stagger++;
+      const searchQuery = `Explique detalhadamente a decisao: ${item.tipo_label || item.tipo} — ${item.processo} (${item.tribunal})`;
+      // Show real dates with clear labels: "Julgado em" for decision date, "Publicado em" for publication
+      const dateJulg = item.data_julgamento ? dateHuman(item.data_julgamento) : "";
+      const datePub = item.data_publicacao ? dateHuman(item.data_publicacao) : "";
+      let dateDisplay = "";
+      if (dateJulg) dateDisplay = `Julgado em ${dateJulg}`;
+      else if (datePub) dateDisplay = `Publicado em ${datePub}`;
+      // Secondary date line (show publication if different from judgment)
+      const dateSecondary = (dateJulg && datePub && datePub !== dateJulg)
+        ? `<span class="informativo-card-date-secondary">Publicado em ${escapeHtml(datePub)}</span>`
+        : "";
+      return `
+        <article class="informativo-card" data-tribunal="${escapeHtml(item.tribunal)}" style="animation-delay: ${40 + stagger * 30}ms">
+          <div class="informativo-card-head">
+            <span class="timeline-tribunal-tag" data-tribunal="${escapeHtml(item.tribunal)}">${escapeHtml(item.tribunal)}</span>
+            <span class="informativo-card-tipo">${escapeHtml(item.tipo_label || item.tipo)}</span>
+            <span class="informativo-card-date">${escapeHtml(dateDisplay)}</span>
+          </div>
+          ${dateSecondary}
+          <p class="informativo-card-processo">${escapeHtml(item.processo)}</p>
+          <p class="informativo-card-tese">${escapeHtml(item.tese_text)}</p>
+          <div class="informativo-card-meta">
+            <span>Rel. ${escapeHtml(item.relator)}</span>
+            <span>${escapeHtml(item.orgao_julgador)}</span>
+          </div>
+          <button class="informativo-search-btn" type="button" data-informativo-search="${escapeHtml(searchQuery)}">
+            <i data-lucide="search"></i> Pesquisar mais
+          </button>
+        </article>
+      `;
+    }).join("");
+
+    return `
+      <div class="informativo-month-group">
+        <h4 class="informativo-month-header">${escapeHtml(_informativoMonthLabel(key))}</h4>
+        <div class="informativo-month-cards">${cardsHtml}</div>
+      </div>
+    `;
+  }).join("");
+
+  const loadingHtml = state.informativo.loading
+    ? `<p class="informativo-status">Carregando informativo...</p>`
+    : "";
+  const emptyHtml = !state.informativo.loading && !items.length
+    ? `<p class="informativo-status">Nenhuma decisao de alta autoridade encontrada nos ultimos 90 dias.</p>`
+    : "";
+
+  thread.innerHTML = `
+    <section class="informativo-view">
+      <div class="informativo-header">
+        <div class="informativo-title-row">
+          <i data-lucide="newspaper"></i>
+          <h3 class="informativo-title">Informativo Juridico</h3>
+        </div>
+        <p class="informativo-subtitle">Decisoes recentes de alta autoridade — sumulas vinculantes, temas repetitivos e acordaos com repercussao geral.</p>
+      </div>
+      <div class="informativo-filters">
+        <div class="timeline-filter-group">${filterChips}</div>
+      </div>
+      ${loadingHtml}
+      ${emptyHtml}
+      ${sectionsHtml}
+    </section>
+  `;
+  lucide.createIcons({ nodes: thread.querySelectorAll("[data-lucide]") });
+}
+
 // ── Timeline ──
 
 const _TIMELINE_CACHE_TTL = 300_000; // 5 min
@@ -3248,6 +3656,7 @@ function renderTimeline() {
 }
 
 function renderEmptyThread() {
+  if (state.informativo.open) return;
   const cards = EXAMPLE_PROMPTS.map((p, i) => `
     <button class="example-prompt-card" type="button" data-example-query="${escapeHtml(p.query)}" style="animation-delay: ${80 + i * 60}ms">
       <span class="example-prompt-icon"><i data-lucide="${escapeHtml(p.icon)}"></i></span>
@@ -3529,6 +3938,7 @@ function focusDocReference(turnId, docIndex) {
 }
 
 function renderThread({ autoscroll = true } = {}) {
+  if (state.informativo.open) return;
   if (!hasAnyTurn()) {
     renderEmptyThread();
     renderLibraryPanel();
@@ -4034,7 +4444,8 @@ async function ensureExplanation(turn) {
   const result = await postJson("/api/explain", {
     query: turn.query,
     answer: turn.answer,
-    docs: docsForExplain(turn)
+    docs: docsForExplain(turn),
+    generation_provider: generationProvider?.value || "gemini"
   });
   turn.explanation = String(result?.explanation || "").trim();
   persistSession();
@@ -4217,6 +4628,11 @@ async function submitQuery() {
     return;
   }
 
+  if (state.informativo.open) {
+    state.informativo.open = false;
+    refreshRailButtons();
+  }
+
   const turn = makePendingTurn(query);
   const payload = apiPayload(query);
   state.turns.push(turn);
@@ -4272,6 +4688,22 @@ async function checkHealth() {
   const applyHealthDefaults = (data) => {
     state.personaPromptDefaults = normalizePersonaPromptDefaults(data?.defaults?.persona_prompt_defaults);
     renderPersonaConfigEditor();
+    // Detect new installation: if install_id changed, reset onboarding
+    if (data?.install_id) {
+      const prevId = localStorage.getItem("ratio_install_id");
+      if (prevId && prevId !== data.install_id) {
+        localStorage.removeItem(ONBOARDING_STORAGE_KEY);
+        state.onboardingSeen = false;
+      }
+      localStorage.setItem("ratio_install_id", data.install_id);
+    }
+    // Force onboarding if backend reports no API key configured
+    if (data?.has_gemini_api_key === false && state.onboardingSeen) {
+      state.onboardingSeen = false;
+      localStorage.removeItem(ONBOARDING_STORAGE_KEY);
+      setOnboardingOpen(true);
+      setRequestState("Guia inicial aberto. Configure GEMINI_API_KEY para comecar.");
+    }
   };
   try {
     const response = await fetch(`${base}/health`);
@@ -4336,6 +4768,11 @@ function bindEvents() {
   });
   tipsBtn?.addEventListener("click", () => setTipsModalOpen(true));
   closeTipsModalBtn?.addEventListener("click", () => setTipsModalOpen(false));
+  openInformativoBtn?.addEventListener("click", () => setInformativoOpen(!state.informativo.open));
+  openUpdateBtn?.addEventListener("click", () => {
+    setInformativoOpen(false);
+    renderUpdateView();
+  });
   openWatchTopicsBtn?.addEventListener("click", () => setWatchTopicsOpen(true));
   closeWatchTopicsBtn?.addEventListener("click", () => setWatchTopicsOpen(false));
   addWatchTopicBtn?.addEventListener("click", () => {
@@ -4440,6 +4877,50 @@ function bindEvents() {
     const target = e.target instanceof Element ? e.target : null;
     if (!target) return;
 
+    // Informativo tribunal filter chips
+    const infoFilter = target.closest("[data-informativo-filter-tribunal]");
+    if (infoFilter) {
+      state.informativo.filter.tribunal = infoFilter.getAttribute("data-informativo-filter-tribunal") || "";
+      renderInformativoView();
+      return;
+    }
+
+    // Informativo "Pesquisar mais" button
+    const searchBtn = target.closest("[data-informativo-search]");
+    if (searchBtn) {
+      const q = searchBtn.getAttribute("data-informativo-search") || "";
+      if (q && queryInput) {
+        queryInput.value = q;
+        state.informativo.open = false;
+        refreshRailButtons();
+        queryInput.focus();
+        queryInput.dispatchEvent(new Event("input", { bubbles: true }));
+        submitQuery();
+      }
+      return;
+    }
+
+    // Auto-update buttons (delegated)
+    if (target.closest("#applyUpdateBtn")) {
+      applyAutoUpdate();
+      return;
+    }
+    if (target.closest("#dismissUpdateBtn")) {
+      localStorage.setItem(AUTO_UPDATE_DISMISSED_KEY, String(state.autoUpdate.remoteBuild));
+      if (updateBadge) updateBadge.hidden = true;
+      if (openUpdateBtn) openUpdateBtn.hidden = true;
+      if (!state.activeTurnId) renderEmptyThread();
+      return;
+    }
+    if (target.closest("#restartNowBtn")) {
+      restartApp();
+      return;
+    }
+    if (target.closest("#restartLaterBtn")) {
+      if (!state.activeTurnId) renderEmptyThread();
+      return;
+    }
+
     // Timeline filter chips
     const filterBtn = target.closest("[data-timeline-filter]");
     if (filterBtn) {
@@ -4529,6 +5010,13 @@ function bindEvents() {
     refreshHeaderBadges();
     persistSession();
   });
+
+  generationProvider?.addEventListener("change", () => {
+    syncProviderFields();
+    persistSession();
+  });
+
+  settingsSaveClaudeKeyBtn?.addEventListener("click", saveClaudeKeyFromSettings);
 
   geminiRerankModelInput?.addEventListener("change", () => {
     syncGeminiRerankModelStateFromInput();
@@ -4757,6 +5245,10 @@ function init() {
 
   apiBaseInput.value = state.apiBase;
   rerankerBackend.value = stored.rerankerBackend || "local";
+  if (generationProvider) {
+    generationProvider.value = stored.generationProvider || "gemini";
+    syncProviderFields();
+  }
   preferRecent.checked = stored.preferRecent !== false;
   if (userSourcePriorityToggle) {
     userSourcePriorityToggle.checked = stored.preferUserSources !== false;
@@ -4805,6 +5297,7 @@ function init() {
     if (!state.activeTurnId) renderEmptyThread();
   }).catch(() => {});
   _autoCheckWatchTopics().catch(() => {});
+  checkAutoUpdate().catch(() => {});
   loadRagConfigMetadata();
   loadTtsProviderConfig();
   loadUserCorpusSources();

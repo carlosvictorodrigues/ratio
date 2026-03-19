@@ -193,9 +193,9 @@ def _to_iso_date(raw: str) -> str:
         return ""
     if re.match(r"^\d{4}-\d{2}-\d{2}$", value):
         return value
-    if re.match(r"^\d{2}/\d{2}/\d{4}$", value):
-        day, month, year = value.split("/")
-        return f"{year}-{month}-{day}"
+    m = re.match(r"^(\d{1,2})/(\d{1,2})/(\d{4})$", value)
+    if m:
+        return f"{m.group(3)}-{m.group(2).zfill(2)}-{m.group(1).zfill(2)}"
     return ""
 
 
@@ -1686,7 +1686,9 @@ def _collect_stj_documents(
         "missing_editions": [],
         "strict_completeness": bool(strict_completeness),
     }
-    data_dir = project_root / "data" / "stj_informativos"
+    _internal = project_root / "_internal"
+    data_base = _internal / "data" if (_internal / "data").is_dir() else project_root / "data"
+    data_dir = data_base / "stj_informativos"
     docs_dir = data_dir / "docs"
     db_path = data_dir / "stj_informativos.db"
     data_dir.mkdir(parents=True, exist_ok=True)
@@ -1786,6 +1788,25 @@ def _collect_stj_documents(
             )
 
         docs = _load_stj_docs_by_ids(conn, all_row_ids)
+
+        # ── Reconciliation: include orphan records (in SQLite but not in LanceDB) ──
+        # This handles cases where a previous run downloaded editions to SQLite
+        # but the embedding/upsert step failed (e.g., API quota, crash).
+        try:
+            all_sqlite_rows = conn.execute(
+                "SELECT id FROM stj_informativos ORDER BY id"
+            ).fetchall()
+            all_sqlite_ids = [int(r[0]) for r in all_sqlite_rows]
+            already_loaded = {int(d.doc_id.replace("stj-info-", "")) for d in docs if d.doc_id.startswith("stj-info-")}
+            orphan_ids = [rid for rid in all_sqlite_ids if rid not in already_loaded]
+            if orphan_ids:
+                orphan_docs = _load_stj_docs_by_ids(conn, orphan_ids)
+                docs.extend(orphan_docs)
+                _log(log_cb, "stj_reconcile", orphan_count=len(orphan_docs),
+                     hint=f"Reconciling {len(orphan_docs)} orphan STJ records from SQLite")
+        except Exception as exc:
+            _log(log_cb, "stj_reconcile_error", error=str(exc))
+
         summary["candidate_docs"] = int(len(docs))
         summary["latest_date"] = _max_date_str(latest_dates + [str(summary.get("latest_date") or "")])
     finally:
@@ -1795,7 +1816,8 @@ def _collect_stj_documents(
 
 
 def _lancedb_open_ratio_table(project_root: Path):
-    lance_dir = project_root / "lancedb_store"
+    _internal = project_root / "_internal"
+    lance_dir = _internal / "lancedb_store" if (_internal / "lancedb_store").is_dir() else project_root / "lancedb_store"
     db = lancedb.connect(str(lance_dir))
     return db.open_table(LANCE_TABLE_NAME)
 
