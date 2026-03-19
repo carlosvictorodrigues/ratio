@@ -11,6 +11,8 @@ import types
 from pathlib import Path
 
 import pytest
+
+pytest.importorskip("google.genai", reason="backend.main requires google-genai")
 from fastapi.testclient import TestClient
 
 

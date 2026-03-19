@@ -3,7 +3,8 @@ from __future__ import annotations
 import json
 import sqlite3
 
-from backend import juris_update
+import pytest
+juris_update = pytest.importorskip("backend.juris_update", reason="requires lancedb/google-genai")
 
 
 def test_stf_acordao_builds_rich_metadata_and_marks() -> None:

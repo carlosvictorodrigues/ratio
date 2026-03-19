@@ -1,6 +1,7 @@
 ﻿from types import SimpleNamespace
 
-import rag.query as query_mod
+import pytest
+query_mod = pytest.importorskip("rag.query", reason="rag.query requires lancedb/google-genai")
 
 
 class _FakeResponse:
