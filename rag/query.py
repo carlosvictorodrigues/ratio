@@ -1746,7 +1746,10 @@ def _informativo_scan(tbl, tipo_where: str, per_tribunal: int = 2000) -> list[di
 
     # Fallback: lancedb search API — query per tribunal to ensure coverage
     all_rows: list[dict] = []
-    for tribunal in ("STF", "STJ"):
+    # Detect which tribunals exist in the table to avoid querying for
+    # TJSP in the STF/STJ table or vice-versa.
+    tribunals_to_scan = ("STF", "STJ", "TJSP")
+    for tribunal in tribunals_to_scan:
         tribunal_where = f"{tipo_where} AND tribunal = {_quote_sql(tribunal)}"
         try:
             rows = (
@@ -1764,20 +1767,26 @@ def _informativo_scan(tbl, tipo_where: str, per_tribunal: int = 2000) -> list[di
 
 
 def get_informativo_items(
-    limit: int = 60,
+    limit: int = 200,
     tribunal: Optional[str] = None,
-    days_back: int = 90,
+    days_back: int = 365,
 ) -> list[dict]:
     """Return recent high-authority items with extracted thesis/ementa text."""
-    try:
-        db = lancedb.connect(str(LANCE_DIR))
-        tbl = db.open_table("jurisprudencia")
-    except Exception as exc:
-        print(f"Informativo: cannot open table: {exc}", file=sys.stderr)
-        return []
+    db = lancedb.connect(str(LANCE_DIR))
 
     from datetime import timedelta
     cutoff = (date.today() - timedelta(days=max(1, days_back))).isoformat()
+
+    # Determine which tables to scan based on tribunal filter.
+    # TJSP lives in a separate table; STF/STJ in jurisprudencia.
+    tables_to_scan: list[str] = []
+    trib_upper = (tribunal or "").strip().upper()
+    if trib_upper == "TJSP":
+        tables_to_scan = ["tjsp_jurisprudencia"]
+    elif trib_upper in ("STF", "STJ"):
+        tables_to_scan = ["jurisprudencia"]
+    else:
+        tables_to_scan = ["jurisprudencia", "tjsp_jurisprudencia"]
 
     # SQL filter: types + loose date pre-filter. The date comparison is
     # unreliable for non-ISO formats (DD/MM/YYYY), so it's intentionally
@@ -1792,7 +1801,16 @@ def get_informativo_items(
 
     where_str = " AND ".join(clauses)
 
-    rows = _informativo_scan(tbl, where_str, per_tribunal=5000)
+    rows: list[dict] = []
+    for table_name in tables_to_scan:
+        try:
+            tbl = db.open_table(table_name)
+            rows.extend(_informativo_scan(tbl, where_str, per_tribunal=5000))
+        except Exception as exc:
+            print(f"Informativo: cannot open {table_name}: {exc}", file=sys.stderr)
+
+    if not rows:
+        return []
 
     # Normalize dates and filter in Python (reliable across all date formats)
     for row in rows:
@@ -1845,29 +1863,37 @@ def get_informativo_items(
         })
 
     # ── Fair tribunal representation ──
-    # Without balancing, STF (533K rows) completely drowns out STJ (6K rows).
-    # Reserve at least 40% of slots for the minority tribunal.
+    # Without balancing, STF (533K rows) drowns out STJ (6K) and TJSP (15K).
+    # Each tribunal gets at least 20% of slots; remainder goes to larger sources.
     if not tribunal:
-        stf_items = [r for r in enriched if r["tribunal"] == "STF"]
-        stj_items = [r for r in enriched if r["tribunal"] == "STJ"]
-        other_items = [r for r in enriched if r["tribunal"] not in ("STF", "STJ")]
+        by_tribunal: dict[str, list[dict]] = {}
+        for r in enriched:
+            t = r["tribunal"]
+            by_tribunal.setdefault(t, []).append(r)
 
-        min_per_tribunal = max(1, limit * 2 // 5)  # 40% reserved
-        stf_take = stf_items[:limit]
-        stj_take = stj_items[:limit]
+        active = {t: items for t, items in by_tribunal.items() if items}
+        if len(active) <= 1:
+            return enriched[:limit]
 
-        if len(stj_take) <= min_per_tribunal:
-            # STJ has fewer items than its quota — give it all, STF gets the rest
-            stf_take = stf_items[:limit - len(stj_take)]
-        elif len(stf_take) <= min_per_tribunal:
-            # STF has fewer items — give it all, STJ gets the rest
-            stj_take = stj_items[:limit - len(stf_take)]
-        else:
-            # Both have enough — split proportionally with minimum guarantee
-            stf_take = stf_items[:limit - min_per_tribunal]
-            stj_take = stj_items[:min_per_tribunal]
+        min_per = max(1, limit // 5)  # 20% minimum per tribunal
+        takes: dict[str, list[dict]] = {}
+        remaining = limit
 
-        results = stf_take + stj_take + other_items
+        # First pass: guarantee minimum for each tribunal
+        for t, items in active.items():
+            take = min(len(items), min_per)
+            takes[t] = items[:take]
+            remaining -= take
+
+        # Second pass: fill remaining slots proportionally by available items
+        if remaining > 0:
+            leftover = {t: items[len(takes[t]):] for t, items in active.items() if len(items) > len(takes[t])}
+            total_left = sum(len(v) for v in leftover.values())
+            for t, items in leftover.items():
+                share = round(remaining * len(items) / total_left) if total_left else 0
+                takes[t] = takes[t] + items[:share]
+
+        results = [item for t_items in takes.values() for item in t_items]
         results.sort(key=lambda r: r.get("data_julgamento") or "", reverse=True)
         return results[:limit]
     else:

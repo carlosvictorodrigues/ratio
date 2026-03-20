@@ -3520,7 +3520,7 @@ async function fetchInformativo() {
   state.informativo.loading = true;
   try {
     const base = state.apiBase.replace(/\/$/, "");
-    const resp = await fetch(`${base}/api/informativo?limit=60&days_back=90`);
+    const resp = await fetch(`${base}/api/informativo?limit=200&days_back=365`);
     if (!resp.ok) return;
     const data = await resp.json();
     state.informativo.items = data.items || [];
@@ -3533,7 +3533,7 @@ async function fetchInformativo() {
 }
 
 const _MONTHS_PT = [
-  "Janeiro", "Fevereiro", "Marco", "Abril", "Maio", "Junho",
+  "Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho",
   "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro",
 ];
 
@@ -3593,7 +3593,7 @@ function renderInformativoView() {
 
   // Filter chips
   const tf = state.informativo.filter.tribunal;
-  const filterChips = ["", "STF", "STJ"].map(val => {
+  const filterChips = ["", "STF", "STJ", "TJSP"].map(val => {
     const label = val || "Todos";
     const active = val === tf ? " active" : "";
     return `<button class="timeline-chip${active}" type="button" data-informativo-filter-tribunal="${escapeHtml(val)}">${escapeHtml(label)}</button>`;
@@ -3605,11 +3605,15 @@ function renderInformativoView() {
 
   const sectionsHtml = [...groups.entries()].map(([key, monthItems]) => {
     const isOpen = openMonths.has(key);
-    const stfCount = monthItems.filter(it => it.tribunal === "STF").length;
-    const stjCount = monthItems.filter(it => it.tribunal === "STJ").length;
+    const countByTribunal = {};
+    for (const it of monthItems) {
+      const t = it.tribunal || "?";
+      countByTribunal[t] = (countByTribunal[t] || 0) + 1;
+    }
     const countParts = [];
-    if (stfCount) countParts.push(`${stfCount} STF`);
-    if (stjCount) countParts.push(`${stjCount} STJ`);
+    for (const t of ["STF", "STJ", "TJSP"]) {
+      if (countByTribunal[t]) countParts.push(`${countByTribunal[t]} ${t}`);
+    }
     const countLabel = countParts.join(" · ") || `${monthItems.length}`;
 
     const bodyHtml = isOpen
@@ -3632,7 +3636,7 @@ function renderInformativoView() {
     ? `<p class="informativo-status">Carregando informativo...</p>`
     : "";
   const emptyHtml = !state.informativo.loading && !items.length
-    ? `<p class="informativo-status">Nenhuma decisão de alta autoridade encontrada nos últimos 90 dias.</p>`
+    ? `<p class="informativo-status">Nenhuma decisão de alta autoridade encontrada no último ano.</p>`
     : "";
 
   thread.innerHTML = `

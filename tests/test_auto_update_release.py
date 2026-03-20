@@ -51,3 +51,17 @@ def test_generate_manifest_collects_runtime_paths_explicitly(tmp_path: Path) -> 
     assert "version.json" in paths
     assert "lancedb_store/tjsp_jurisprudencia.lance/data/chunk.lance" in paths
     assert "lancedb_store/tjsp_jurisprudencia.lance/_versions/1.manifest" in paths
+
+
+def test_generate_manifest_hashes_text_files_with_lf_normalization(tmp_path: Path) -> None:
+    sample = tmp_path / "frontend" / "app.js"
+    sample.parent.mkdir(parents=True, exist_ok=True)
+    sample.write_bytes(b"line1\r\nline2\r\n")
+
+    entry_list = generate_manifest.collect_files(tmp_path)
+    entry = next(item for item in entry_list if item["path"] == "frontend/app.js")
+
+    import hashlib
+
+    expected = hashlib.sha256(b"line1\nline2\n").hexdigest()
+    assert entry["sha256"] == expected

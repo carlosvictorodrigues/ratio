@@ -3640,13 +3640,13 @@ _INFORMATIVO_CACHE_TTL = 600  # 10 minutes
 @app.get("/api/informativo")
 def informativo_api(
     request: Request,
-    limit: int = 60,
+    limit: int = 200,
     tribunal: Optional[str] = None,
-    days_back: int = 90,
+    days_back: int = 365,
 ) -> dict[str, Any]:
     _enforce_rate_limit(request, bucket="informativo", limit=10, window_seconds=60)
-    limit = max(1, min(limit, 100))
-    days_back = max(1, min(days_back, 365))
+    limit = max(1, min(limit, 300))
+    days_back = max(1, min(days_back, 730))
     cache_key = f"{limit}:{tribunal or ''}:{days_back}"
     now = __import__("time").time()
     if _informativo_cache["key"] == cache_key and _informativo_cache["data"] is not None:

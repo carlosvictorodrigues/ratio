@@ -34,6 +34,7 @@ GITHUB_REPO = "carlosvictorodrigues/ratio"
 SCAN_DIRS = ["backend", "rag", "frontend"]
 SCAN_ROOT_FILES = ["version.json"]
 SCAN_EXTENSIONS = {".py", ".js", ".html", ".css", ".json"}
+CANONICAL_TEXT_EXTENSIONS = {".py", ".js", ".html", ".css", ".json", ".md", ".yml", ".yaml"}
 
 # Files/patterns to always exclude
 EXCLUDE_PATTERNS = {
@@ -53,6 +54,14 @@ def sha256(path: Path) -> str:
     return h.hexdigest()
 
 
+def sha256_canonical(path: Path) -> str:
+    if path.suffix.lower() not in CANONICAL_TEXT_EXTENSIONS:
+        return sha256(path)
+    raw = path.read_bytes()
+    normalized = raw.replace(b"\r\n", b"\n")
+    return hashlib.sha256(normalized).hexdigest()
+
+
 def should_include(path: Path) -> bool:
     parts = path.as_posix()
     for pattern in EXCLUDE_PATTERNS:
@@ -70,7 +79,7 @@ def _add_file_entry(files: list[dict], seen: set[str], project_root: Path, file_
     seen.add(rel)
     files.append({
         "path": rel,
-        "sha256": sha256(file_path),
+        "sha256": sha256_canonical(file_path),
         "size": file_path.stat().st_size,
     })
 
