@@ -3406,6 +3406,9 @@ function renderUpdateView() {
           </div>
           <p class="informativo-subtitle">Baixando e aplicando atualizacao. Aguarde alguns segundos.</p>
         </div>
+        <div class="update-actions-row" style="margin-top:12px">
+          <button class="meta-btn" type="button" id="skipUpdateBtn">Pular atualizacao</button>
+        </div>
       </section>`;
   } else if (u.available && u.needsFullInstaller) {
     html = `
@@ -3479,7 +3482,13 @@ async function applyAutoUpdate() {
   renderUpdateView();
   try {
     const base = state.apiBase.replace(/\/$/, "");
-    const resp = await fetch(`${base}/api/auto-update/apply`, { method: "POST" });
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 180000); // 3 min
+    const resp = await fetch(`${base}/api/auto-update/apply`, {
+      method: "POST",
+      signal: controller.signal,
+    });
+    clearTimeout(timeout);
     const data = await resp.json();
     if (!resp.ok) throw new Error(data.detail || "Falha na atualizacao.");
     state.autoUpdate.applying = false;
@@ -3489,7 +3498,10 @@ async function applyAutoUpdate() {
     if (updateBadge) updateBadge.hidden = true;
   } catch (err) {
     state.autoUpdate.applying = false;
-    state.autoUpdate.error = err.message || "Erro desconhecido.";
+    const msg = err.name === "AbortError"
+      ? "Atualizacao demorou demais. Verifique sua conexao e tente novamente."
+      : (err.message || "Erro desconhecido.");
+    state.autoUpdate.error = msg;
   }
   renderUpdateView();
 }
@@ -5128,6 +5140,12 @@ function bindEvents() {
     if (target.closest("#closeUpdateViewBtn")) {
       state.autoUpdate.viewing = false;
       renderThread({ autoscroll: false });
+      return;
+    }
+    if (target.closest("#skipUpdateBtn")) {
+      state.autoUpdate.applying = false;
+      state.autoUpdate.error = "Atualizacao pulada. Voce pode tentar novamente depois.";
+      renderUpdateView();
       return;
     }
 
