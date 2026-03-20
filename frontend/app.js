@@ -168,7 +168,7 @@ const state = {
   composerToolsOpen: false,
   acervo: {
     sources: [],
-    selectedSources: ["ratio"]
+    selectedSources: []
   },
   timeline: {
     items: [],
@@ -624,7 +624,7 @@ function loadStoredSession() {
     ttsProviderPreference: "legacy_google",
     preferRecent: true,
     preferUserSources: true,
-    sourceSelection: ["ratio"],
+    sourceSelection: [],
     evidenceOpen: null,
     libraryMode: LIBRARY_MODE_DEFAULT,
     ragConfigVersion: "",
@@ -659,7 +659,7 @@ function loadStoredSession() {
       preferUserSources: typeof parsed?.preferUserSources === "boolean" ? parsed.preferUserSources : true,
       sourceSelection: Array.isArray(parsed?.sourceSelection)
         ? parsed.sourceSelection.map((v) => String(v || "").trim()).filter(Boolean)
-        : ["ratio"],
+        : [],
       evidenceOpen: typeof parsed?.evidenceOpen === "boolean" ? parsed.evidenceOpen : null,
       libraryMode: normalizeLibraryMode(parsed?.libraryMode),
       ragConfigVersion: String(parsed?.ragConfigVersion || "").trim(),
@@ -694,7 +694,7 @@ function persistSession() {
       ttsProviderPreference: normalizeTtsProviderValue(state.ttsProviderPreference),
       preferRecent: !!preferRecent?.checked,
       preferUserSources: userSourcePriorityToggle?.checked !== false,
-      sourceSelection: Array.isArray(state.acervo.selectedSources) ? state.acervo.selectedSources : ["ratio"],
+      sourceSelection: Array.isArray(state.acervo.selectedSources) ? state.acervo.selectedSources : [],
       evidenceOpen: document.body.dataset.evidenceOpen === "true",
       libraryMode: normalizeLibraryMode(state.library.mode),
       ragConfigVersion: String(state.ragConfigVersion || ""),
@@ -1118,13 +1118,19 @@ function selectedSourceValues() {
   return selectedValues("source-checkbox");
 }
 
+function officialSourceValuesFromTribunais() {
+  const tribunais = selectedValues("tribunal-checkbox");
+  const official = [];
+  if (tribunais.includes("STF") || tribunais.includes("STJ")) official.push("ratio");
+  if (tribunais.includes("TJSP")) official.push("tjsp");
+  return official;
+}
+
 function normalizeSourceSelection(raw, availableIds) {
   const available = new Set(Array.isArray(availableIds) ? availableIds : []);
   const picked = Array.isArray(raw) ? raw.map((v) => String(v || "").trim()).filter(Boolean) : [];
   const next = picked.filter((id) => available.has(id));
-  if (next.length) return next;
-  if (available.has("ratio")) return ["ratio"];
-  return [];
+  return next;
 }
 
 function renderSourceFilters() {
@@ -1133,10 +1139,10 @@ function renderSourceFilters() {
   const visibleSources = sources.filter((src) => {
     const kind = String(src?.kind || "user").trim().toLowerCase();
     const deleted = !!src?.deleted;
-    return kind === "ratio" || !deleted;
+    return kind === "user" && !deleted;
   });
   if (!visibleSources.length) {
-    sourceFiltersList.innerHTML = `<p class="sources-empty">Nenhuma fonte disponivel para pesquisa.</p>`;
+    sourceFiltersList.innerHTML = `<p class="sources-empty">Nenhuma base pessoal disponivel para pesquisa.</p>`;
     return;
   }
 
@@ -1144,11 +1150,8 @@ function renderSourceFilters() {
   sourceFiltersList.innerHTML = visibleSources.map((src) => {
     const id = String(src?.id || "").trim();
     const label = safeText(src?.label || id, id);
-    const kind = String(src?.kind || "user").trim().toLowerCase();
     const checked = selected.has(id);
-    const stats = kind === "user"
-      ? `<span class="user-source-meta">${Number(src?.doc_count || 0)} doc(s) · ${Number(src?.chunk_count || 0)} chunk(s)</span>`
-      : `<span class="user-source-meta">Base oficial</span>`;
+    const stats = `<span class="user-source-meta">${Number(src?.doc_count || 0)} doc(s) · ${Number(src?.chunk_count || 0)} chunk(s)</span>`;
     return `
       <div class="user-source-row">
         <label>
@@ -1196,14 +1199,14 @@ async function loadUserCorpusSources() {
     if (!response.ok) throw new Error(String(response.status));
     const payload = await response.json();
     const sources = Array.isArray(payload?.sources) ? payload.sources : [];
-    const defaults = Array.isArray(payload?.default_selected)
-      ? payload.default_selected.map((v) => String(v || "").trim()).filter(Boolean)
-      : ["ratio"];
-    const availableIds = sources.map((src) => String(src?.id || "").trim()).filter(Boolean);
+    const availableIds = sources
+      .filter((src) => String(src?.kind || "").trim().toLowerCase() === "user")
+      .map((src) => String(src?.id || "").trim())
+      .filter(Boolean);
 
     state.acervo.sources = sources;
     state.acervo.selectedSources = normalizeSourceSelection(
-      state.acervo.selectedSources?.length ? state.acervo.selectedSources : defaults,
+      state.acervo.selectedSources?.length ? state.acervo.selectedSources : [],
       availableIds
     );
     renderSourceFilters();
@@ -1211,10 +1214,11 @@ async function loadUserCorpusSources() {
     persistSession();
     setUserCorpusStatus("Fontes carregadas.");
   } catch (_) {
-    state.acervo.sources = [
-      { id: "ratio", label: "Base Ratio (STF/STJ)", kind: "ratio", deleted: false }
-    ];
-    state.acervo.selectedSources = ["ratio"];
+    state.acervo.sources = [];
+    state.acervo.selectedSources = normalizeSourceSelection(
+      state.acervo.selectedSources?.length ? state.acervo.selectedSources : [],
+      []
+    );
     renderSourceFilters();
     renderUserCorpusSources();
     setUserCorpusStatus("Nao foi possivel carregar fontes do Meu Acervo.", true);
@@ -1981,7 +1985,9 @@ function apiPayload(query) {
   syncGeminiRerankModelStateFromInput();
   const tribunais = selectedValues("tribunal-checkbox");
   const tipos = selectedValues("tipo-checkbox");
-  const sources = selectedSourceValues();
+  const officialSources = officialSourceValuesFromTribunais();
+  const userSources = selectedSourceValues();
+  const sources = [...officialSources, ...userSources];
   const personaCfg = getActivePersonaConfig();
   const personaPrompt = normalizePersonaPrompt(personaCfg.prompt);
   const personaModel = normalizePersonaModel(personaCfg.model);
@@ -1994,12 +2000,12 @@ function apiPayload(query) {
   if (personaModel) {
     ragConfigPayload.generation_model = personaModel;
   }
-  state.acervo.selectedSources = sources.length ? sources : ["ratio"];
+  state.acervo.selectedSources = userSources;
   return {
     query,
     tribunais: tribunais.length ? tribunais : null,
     tipos: tipos.length ? tipos : null,
-    sources: state.acervo.selectedSources.length ? state.acervo.selectedSources : null,
+    sources,
     prefer_recent: !!preferRecent.checked,
     prefer_user_sources: userSourcePriorityToggle?.checked !== false,
     reranker_backend: rerankerBackend.value,
@@ -3774,6 +3780,7 @@ function _renderTimelineFilterChips() {
     { value: "", label: "Todos" },
     { value: "STF", label: "STF" },
     { value: "STJ", label: "STJ" },
+    { value: "TJSP", label: "TJSP" },
   ];
   const tipoChips = [
     { value: "", label: "Todos" },
@@ -5428,7 +5435,7 @@ function init() {
   state.personaConfigEditor = state.selectedPersona || PERSONA_DEFAULT;
   state.acervo.selectedSources = Array.isArray(stored.sourceSelection) && stored.sourceSelection.length
     ? stored.sourceSelection
-    : ["ratio"];
+    : [];
   applyAnswerFontScale();
   applyPersonaSelection(state.selectedPersona);
   setTipsModalOpen(false);

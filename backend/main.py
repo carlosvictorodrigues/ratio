@@ -2047,6 +2047,15 @@ def _list_available_sources_payload() -> dict[str, Any]:
             "doc_count": None,
             "chunk_count": None,
             "created_at": None,
+        },
+        {
+            "id": "tjsp",
+            "label": "TJSP Revistas",
+            "kind": "native",
+            "deleted": False,
+            "doc_count": None,
+            "chunk_count": None,
+            "created_at": None,
         }
     ]
 

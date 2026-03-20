@@ -382,6 +382,23 @@ JURIS_UPDATE_EMBED_FALLBACK_ON_QUOTA=1
 - `JURIS_UPDATE_STRICT_COMPLETENESS=1`: se detectar lacunas esperadas (ex.: edicoes STJ sem registro), o job falha em vez de marcar sucesso.
 - `JURIS_UPDATE_EMBED_FALLBACK_ON_QUOTA=1`: se a cota de embedding Gemini estourar, usa embedding hash local para nao deixar documentos de fora.
 
+## Regra de release e atualizacao para usuarios finais
+
+Daqui em diante, qualquer mudanca que precise chegar aos usuarios deve ser pensada a partir do mesmo caminho que eles usam no produto:
+
+1. o app em producao;
+2. o botao/fluxo de atualizacao no frontend;
+3. o mecanismo de delta-update do release.
+
+Regra operacional:
+
+- se a mudanca nao puder ser entregue pelo fluxo de atualizacao do frontend, ela nao deve ser considerada pronta para release aos usuarios;
+- nao assumir rebuild local de `Ratio.exe` como solucao para rollout normal;
+- o que funciona localmente para desenvolvimento precisa ser validado tambem no formato consumido por quem ja instalou o app;
+- mudancas em `lancedb_store/` ou outros artefatos de runtime so podem ir para release quando o manifesto de atualizacao incluir esses arquivos, ou quando a release for marcada explicitamente como exigindo instalacao completa.
+
+Em outras palavras: o padrao para distribuicao incremental e atualizar pelo frontend. Build completo/instalador fica como excecao, nao como caminho principal.
+
 ---
 
 ## Erros comuns e significado

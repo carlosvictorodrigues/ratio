@@ -360,6 +360,29 @@ def test_frontend_query_payload_includes_sources_and_user_priority():
     assert "source-checkbox" in js
 
 
+def test_frontend_native_sources_keep_tjsp_separate_from_ratio():
+    html = _read("frontend/index.html")
+    assert "Base Ratio (STF/STJ/TJSP)" not in html
+    assert 'value="TJSP"' in html
+
+
+def test_settings_sources_section_is_reserved_for_user_bases_and_tribunal_lists_tjsp():
+    html = _read("frontend/index.html")
+    settings_slice = html.split('<aside id="settingsPanel"', 1)[1].split('<aside id="acervoPanel"', 1)[0]
+
+    assert "As bases oficiais ficam no bloco Tribunal." in settings_slice
+    assert 'id="sourceFiltersList"' in settings_slice
+    assert 'value="TJSP"' in settings_slice
+
+
+def test_frontend_derives_official_sources_from_tribunal_selection():
+    js = _read("frontend/app.js")
+
+    assert "function officialSourceValuesFromTribunais()" in js
+    assert 'if (tribunais.includes("TJSP")) official.push("tjsp");' in js
+    assert 'if (tribunais.includes("STF") || tribunais.includes("STJ")) official.push("ratio");' in js
+
+
 def test_frontend_has_meu_acervo_delete_restore_actions():
     js = _read("frontend/app.js")
     assert "/api/meu-acervo/source/delete" in js

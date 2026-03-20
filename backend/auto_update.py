@@ -70,6 +70,17 @@ def _write_version_json(project_root: Path, version: str, build: int) -> None:
     log.info("version.json updated to %s (build %d)", version, build)
 
 
+def _rollback_swapped_files(swapped: list[tuple[Path, Path | None]]) -> None:
+    for target, backup in reversed(swapped):
+        try:
+            if target.exists():
+                target.unlink()
+            if backup is not None and backup.exists():
+                backup.rename(target)
+        except Exception:
+            pass
+
+
 # ── Public API ───────────────────────────────────────────────────────
 
 def load_local_version(project_root: Path) -> dict[str, Any]:
@@ -210,43 +221,35 @@ def apply_update(
                         )
 
         # Phase 2: Atomic swap with backup
-        swapped: list[tuple[Path, Path]] = []  # (target, backup)
+        swapped: list[tuple[Path, Path | None]] = []  # (target, backup)
         try:
             for entry in files:
                 rel_path = entry["path"]
                 src = tmp_dir / rel_path
                 target = _resolve_target(project_root, rel_path)
-                backup = target.with_suffix(target.suffix + ".bak")
+                backup: Path | None = target.with_suffix(target.suffix + ".bak") if target.exists() else None
 
                 target.parent.mkdir(parents=True, exist_ok=True)
 
                 if target.exists():
-                    if backup.exists():
+                    if backup is not None and backup.exists():
                         backup.unlink()
                     target.rename(backup)
                     swapped.append((target, backup))
                 else:
-                    swapped.append((target, Path("")))
+                    swapped.append((target, None))
 
                 src.rename(target)
                 _emit("applying", f"Aplicando {rel_path}...", file=rel_path)
 
         except Exception:
-            # Rollback
-            for target, backup in reversed(swapped):
-                try:
-                    if target.exists():
-                        target.unlink()
-                    if backup and backup.exists():
-                        backup.rename(target)
-                except Exception:
-                    pass
+            _rollback_swapped_files(swapped)
             raise
 
         # Phase 3: Cleanup
         for target, backup in swapped:
             try:
-                if backup and backup.exists():
+                if backup is not None and backup.exists():
                     backup.unlink()
             except Exception:
                 pass

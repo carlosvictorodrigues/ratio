@@ -136,6 +136,9 @@ def _load_backend_with_stub():
     def get_informativo_items(limit=20, tribunal=None, offset=0):
         return []
 
+    def summarize_informativo_items(items, model_name=None):
+        return {"items": items, "summary": "", "model": model_name or "stub-summary"}
+
     stub.run_query = run_query
     stub.get_reranker_warning = get_reranker_warning
     stub.get_recent_timeline_items = get_recent_timeline_items
@@ -155,6 +158,7 @@ def _load_backend_with_stub():
     stub.get_anthropic_client = get_anthropic_client
     stub.get_supported_claude_models = get_supported_claude_models
     stub.get_informativo_items = get_informativo_items
+    stub.summarize_informativo_items = summarize_informativo_items
 
     sys.modules["rag.query"] = stub
     sys.modules.pop("backend.main", None)
@@ -388,7 +392,15 @@ def test_meu_acervo_sources_contract():
     assert response.status_code == 200
     payload = response.json()
     assert "sources" in payload
-    assert any(str(item.get("id")) == "ratio" for item in payload.get("sources", []))
+    source_map = {
+        str(item.get("id")): item
+        for item in payload.get("sources", [])
+        if isinstance(item, dict)
+    }
+    assert "ratio" in source_map
+    assert "tjsp" in source_map
+    assert source_map["ratio"]["label"] == "Base Ratio (STF/STJ)"
+    assert source_map["tjsp"]["label"] == "TJSP Revistas"
     assert "default_selected" in payload
 
 

@@ -4,6 +4,13 @@
 Scans backend/, rag/, frontend/, and root-level config files, computes
 SHA-256 hashes, and produces a manifest that auto_update.py consumes.
 
+Important release policy:
+the delta manifest must reflect the real end-user update path used by the
+frontend auto-update flow. If a change depends on runtime assets outside the
+current scan set (for example, new LanceDB tables under lancedb_store/), the
+release is not safely deliverable to existing users until those assets are
+included here or the release is flagged as requiring a full installer.
+
 Usage:
     python installer/generate_manifest.py --tag v2026.03.18
 
@@ -54,8 +61,23 @@ def should_include(path: Path) -> bool:
     return path.suffix in SCAN_EXTENSIONS
 
 
-def collect_files(project_root: Path) -> list[dict]:
+def _add_file_entry(files: list[dict], seen: set[str], project_root: Path, file_path: Path) -> None:
+    if not file_path.is_file():
+        return
+    rel = file_path.relative_to(project_root).as_posix()
+    if rel in seen:
+        return
+    seen.add(rel)
+    files.append({
+        "path": rel,
+        "sha256": sha256(file_path),
+        "size": file_path.stat().st_size,
+    })
+
+
+def collect_files(project_root: Path, runtime_paths: list[str] | None = None) -> list[dict]:
     files = []
+    seen: set[str] = set()
 
     for dir_name in SCAN_DIRS:
         scan_dir = project_root / dir_name
@@ -66,21 +88,24 @@ def collect_files(project_root: Path) -> list[dict]:
                 continue
             if not should_include(file_path):
                 continue
-            rel = file_path.relative_to(project_root).as_posix()
-            files.append({
-                "path": rel,
-                "sha256": sha256(file_path),
-                "size": file_path.stat().st_size,
-            })
+            _add_file_entry(files, seen, project_root, file_path)
 
     for fname in SCAN_ROOT_FILES:
         fpath = project_root / fname
         if fpath.is_file():
-            files.append({
-                "path": fname,
-                "sha256": sha256(fpath),
-                "size": fpath.stat().st_size,
-            })
+            _add_file_entry(files, seen, project_root, fpath)
+
+    for rel_path in runtime_paths or []:
+        runtime_root = project_root / rel_path
+        if runtime_root.is_file():
+            _add_file_entry(files, seen, project_root, runtime_root)
+            continue
+        if not runtime_root.is_dir():
+            continue
+        for file_path in sorted(runtime_root.rglob("*")):
+            if not file_path.is_file():
+                continue
+            _add_file_entry(files, seen, project_root, file_path)
 
     return files
 
@@ -91,6 +116,7 @@ def build_manifest(
     needs_full_installer: bool = False,
     installer_url: str = "",
     notes: str = "",
+    runtime_paths: list[str] | None = None,
 ) -> dict:
     version_file = project_root / "version.json"
     if version_file.exists():
@@ -101,7 +127,7 @@ def build_manifest(
         version = "unknown"
         build = 0
 
-    files = collect_files(project_root)
+    files = collect_files(project_root, runtime_paths=runtime_paths)
 
     # Add download URLs pointing to GitHub Release assets
     base_url = f"https://github.com/{GITHUB_REPO}/releases/download/{tag}"
@@ -130,6 +156,12 @@ def main() -> int:
     parser.add_argument("--needs-full-installer", action="store_true",
                         help="Flag that this release requires the full installer")
     parser.add_argument("--installer-url", default="", help="URL to the full installer download")
+    parser.add_argument(
+        "--include-runtime-path",
+        action="append",
+        default=[],
+        help="Additional runtime path to ship in the delta release (file or directory). Repeat as needed.",
+    )
     parser.add_argument("--output", default="update-manifest.json", help="Output file path")
 
     args = parser.parse_args()
@@ -141,6 +173,7 @@ def main() -> int:
         needs_full_installer=args.needs_full_installer,
         installer_url=args.installer_url,
         notes=args.notes,
+        runtime_paths=[str(item).strip() for item in (args.include_runtime_path or []) if str(item).strip()],
     )
 
     output_path = Path(args.output)

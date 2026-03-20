@@ -254,6 +254,18 @@ LANCE_DIR = _INTERNAL_ROOT / "lancedb_store" if (_INTERNAL_ROOT / "lancedb_store
 USER_ACERVO_TABLE = os.getenv("USER_ACERVO_TABLE", "meu_acervo")
 USER_ACERVO_MANIFEST = PROJECT_ROOT / "logs" / "runtime" / "meu_acervo_manifest.json"
 EMBED_DIM = 768
+NATIVE_SOURCE_CONFIG: dict[str, dict[str, str]] = {
+    "ratio": {
+        "table_name": "jurisprudencia",
+        "label": "Base Ratio (STF/STJ)",
+        "kind": "ratio",
+    },
+    "tjsp": {
+        "table_name": "tjsp_jurisprudencia",
+        "label": "TJSP Revistas",
+        "kind": "native",
+    },
+}
 
 # Retrieval limits
 TOPK_HYBRID = int(os.getenv("TOPK_HYBRID", "80"))
@@ -1332,26 +1344,35 @@ def _active_user_source_ids() -> list[str]:
     return active
 
 
-def _resolve_query_sources(raw_sources: Optional[list[str]]) -> tuple[bool, list[str], list[str]]:
+def _resolve_query_sources(raw_sources: Optional[list[str]]) -> tuple[list[str], list[str], list[str]]:
+    if raw_sources is None:
+        active_user = _active_user_source_ids()
+        return ["ratio"], active_user, ["ratio", *active_user]
     values = [str(v or "").strip() for v in (raw_sources or []) if str(v or "").strip()]
     if not values:
-        active_user = _active_user_source_ids()
-        return True, active_user, ["ratio", *active_user]
+        return [], [], []
 
-    include_ratio = False
+    native_ids: list[str] = []
     user_ids: list[str] = []
-    seen: set[str] = set()
+    seen_native: set[str] = set()
+    seen_user: set[str] = set()
     for value in values:
-        if value == "ratio":
-            include_ratio = True
+        if value in NATIVE_SOURCE_CONFIG:
+            if value in seen_native:
+                continue
+            seen_native.add(value)
+            native_ids.append(value)
             continue
         if not value.startswith("user:"):
             continue
-        if value in seen:
+        if value in seen_user:
             continue
-        seen.add(value)
+        seen_user.add(value)
         user_ids.append(value)
-    return include_ratio, user_ids, values
+    if not native_ids and not user_ids:
+        native_ids = ["ratio"]
+    resolved = [*native_ids, *user_ids]
+    return native_ids, user_ids, resolved
 
 
 def _build_filter(
@@ -1468,37 +1489,40 @@ def search_lancedb(
     date_to: Optional[str] = None,
 ) -> list[dict]:
     db = lancedb.connect(str(LANCE_DIR))
-    include_ratio, user_ids, _resolved = _resolve_query_sources(sources)
+    native_ids, user_ids, _resolved = _resolve_query_sources(sources)
 
     merged_rows: list[dict] = []
 
-    if include_ratio:
+    native_where = _build_filter(
+        tribunais=tribunais,
+        tipos=tipos,
+        ramos=ramos,
+        orgaos=orgaos,
+        relator_contains=relator_contains,
+        date_from=date_from,
+        date_to=date_to,
+    )
+    for source_id in native_ids:
+        source_cfg = NATIVE_SOURCE_CONFIG.get(source_id)
+        if not source_cfg:
+            continue
         try:
-            ratio_tbl = db.open_table("jurisprudencia")
-            ratio_where = _build_filter(
-                tribunais=tribunais,
-                tipos=tipos,
-                ramos=ramos,
-                orgaos=orgaos,
-                relator_contains=relator_contains,
-                date_from=date_from,
-                date_to=date_to,
-            )
-            ratio_rows = _table_hybrid_rows(
-                ratio_tbl,
+            native_tbl = db.open_table(source_cfg["table_name"])
+            native_rows = _table_hybrid_rows(
+                native_tbl,
                 query=query,
                 query_vector=query_vector,
                 top_k=top_k,
                 hybrid_rrf_k=hybrid_rrf_k,
-                where_str=ratio_where,
+                where_str=native_where,
             )
-            for row in ratio_rows:
-                row.setdefault("source_id", "ratio")
-                row.setdefault("source_label", "Base Ratio (STF/STJ)")
-                row.setdefault("source_kind", "ratio")
-            merged_rows.extend(ratio_rows)
+            for row in native_rows:
+                row.setdefault("source_id", source_id)
+                row.setdefault("source_label", source_cfg["label"])
+                row.setdefault("source_kind", source_cfg["kind"])
+            merged_rows.extend(native_rows)
         except Exception as exc:
-            print(f"Ratio table warning: {exc}", file=sys.stderr)
+            print(f"Native table warning ({source_id}): {exc}", file=sys.stderr)
 
     if user_ids:
         try:
@@ -1547,18 +1571,26 @@ _TIMELINE_HIGH_AUTHORITY_TYPES = {
 }
 
 
+def _timeline_native_source_ids(tribunal: Optional[str]) -> list[str]:
+    selected = str(tribunal or "").strip().upper()
+    if selected == "TJSP":
+        return ["tjsp"]
+    if selected in {"STF", "STJ"}:
+        return ["ratio"]
+    return list(NATIVE_SOURCE_CONFIG.keys())
+
+
 def get_recent_timeline_items(
     limit: int = 20,
     tribunal: Optional[str] = None,
     tipos: Optional[list[str]] = None,
     days_back: int = 365,
 ) -> list[dict]:
-    """Return recent high-authority items from the ratio table (no vector search)."""
+    """Return recent high-authority items from native tables (no vector search)."""
     try:
         db = lancedb.connect(str(LANCE_DIR))
-        tbl = db.open_table("jurisprudencia")
     except Exception as exc:
-        print(f"Timeline: cannot open table: {exc}", file=sys.stderr)
+        print(f"Timeline: cannot connect to LanceDB: {exc}", file=sys.stderr)
         return []
 
     cutoff = (date.today().replace(year=date.today().year - 1)).isoformat()
@@ -1580,15 +1612,26 @@ def get_recent_timeline_items(
 
     where_str = " AND ".join(clauses)
 
-    try:
-        lance_ds = tbl.to_lance()
-        available_cols = set(lance_ds.schema.names)
-        select_cols = [c for c in _TIMELINE_COLUMNS if c in available_cols]
-        arrow_table = lance_ds.to_table(columns=select_cols, filter=where_str)
-        rows = arrow_table.to_pylist()
-    except Exception as exc:
-        print(f"Timeline: scan failed: {exc}", file=sys.stderr)
-        return []
+    rows: list[dict] = []
+    for source_id in _timeline_native_source_ids(tribunal):
+        source_cfg = NATIVE_SOURCE_CONFIG.get(source_id)
+        if not source_cfg:
+            continue
+        try:
+            tbl = db.open_table(source_cfg["table_name"])
+        except Exception as exc:
+            print(f"Timeline: cannot open table {source_cfg['table_name']}: {exc}", file=sys.stderr)
+            continue
+
+        try:
+            lance_ds = tbl.to_lance()
+            available_cols = set(lance_ds.schema.names)
+            select_cols = [c for c in _TIMELINE_COLUMNS if c in available_cols]
+            arrow_table = lance_ds.to_table(columns=select_cols, filter=where_str)
+            rows.extend(arrow_table.to_pylist())
+        except Exception as exc:
+            print(f"Timeline: scan failed for {source_cfg['table_name']}: {exc}", file=sys.stderr)
+            continue
 
     rows.sort(key=lambda r: r.get("data_julgamento") or "", reverse=True)
     rows = rows[:limit]
@@ -3714,14 +3757,14 @@ def run_query(
     if trace:
         print("=" * 30 + " TRACE ON " + "=" * 30, file=sys.stderr)
 
-    include_ratio, user_source_ids, resolved_sources = _resolve_query_sources(sources)
+    native_source_ids, user_source_ids, resolved_sources = _resolve_query_sources(sources)
     print(f"\nSearching: '{query}'")
     if any([tribunais, tipos, ramos, orgaos, relator_contains, date_from, date_to, resolved_sources]):
         print(
             "Filters -> "
             f"Tribunais: {tribunais} | Tipos: {tipos} | Ramos: {ramos} | "
             f"Orgaos: {orgaos} | Relator: {relator_contains} | Data: {date_from}..{date_to} | "
-            f"Sources: {resolved_sources} | IncludeRatio: {include_ratio} | UserSources: {user_source_ids}"
+            f"Sources: {resolved_sources} | NativeSources: {native_source_ids} | UserSources: {user_source_ids}"
         )
     else:
         print("Filters -> none (full database scope)")

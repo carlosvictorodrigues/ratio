@@ -610,25 +610,32 @@ LANCE_SCHEMA = pa.schema([
 ])
 
 TABLE_NAME = "jurisprudencia"
+TJSP_TABLE_NAME = "tjsp_jurisprudencia"
 
 
-def store_in_lancedb(records: List[dict], mode: str = "append") -> int:
+def table_name_for_source(source: str) -> str:
+    if str(source or "").strip().lower() == "tjsp":
+        return TJSP_TABLE_NAME
+    return TABLE_NAME
+
+
+def store_in_lancedb(records: List[dict], mode: str = "append", table_name: str = TABLE_NAME) -> int:
     """Store embedded records in LanceDB."""
     LANCE_DIR.mkdir(parents=True, exist_ok=True)
     db = lancedb.connect(str(LANCE_DIR))
 
     table_exists = False
     try:
-        db.open_table(TABLE_NAME)
+        db.open_table(table_name)
         table_exists = True
     except Exception:
         pass
 
     if mode == "overwrite" or not table_exists:
-        tbl = db.create_table(TABLE_NAME, data=records, schema=LANCE_SCHEMA, mode="overwrite")
-        print(f"  ✅ Created table '{TABLE_NAME}' with {len(records)} records")
+        tbl = db.create_table(table_name, data=records, schema=LANCE_SCHEMA, mode="overwrite")
+        print(f"  ✅ Created table '{table_name}' with {len(records)} records")
     else:
-        tbl = db.open_table(TABLE_NAME)
+        tbl = db.open_table(table_name)
         before = tbl.count_rows()
         # True upsert: update existing doc_id and insert new ones.
         (
@@ -659,6 +666,66 @@ def store_in_lancedb(records: List[dict], mode: str = "append") -> int:
 # Main pipeline
 # ---------------------------------------------------------------------------
 
+def read_tjsp_revistas() -> List[Document]:
+    """Read TJSP Revista de Jurisprudência decisions from SQLite."""
+    db = DATA_DIR / "tjsp_revistas" / "tjsp_revistas.db"
+    if not db.exists():
+        print(f"   ⚠️ TJSP database not found at {db}")
+        print(f"   Run: python scrapers/tjsp_revistas.py --all")
+        return []
+
+    conn = sqlite3.connect(str(db))
+    conn.row_factory = sqlite3.Row
+    rows = conn.execute("SELECT * FROM decisoes").fetchall()
+    conn.close()
+
+    docs = []
+    for r in rows:
+        ementa = clean_legal_text(r["ementa"] or "")
+        texto_integral = clean_legal_text(r["texto_integral"] or "")
+
+        # texto_busca: ementa is the most important for search
+        if ementa:
+            texto_busca = f"{ementa}\n\n{texto_integral[:4000]}"
+        else:
+            texto_busca = texto_integral[:8000]
+
+        processo = r["processo"] or ""
+        relator = r["relator"] or ""
+        camara = r["camara"] or ""
+        volume = r["volume"]
+        periodo = r["periodo"] or ""
+
+        # Build URL to TJSP search (best-effort if processo is available)
+        url = ""
+        if processo:
+            url = f"https://esaj.tjsp.jus.br/cjsg/resultadoCompleta.do?nuProcOrigem={processo}"
+
+        docs.append(Document(
+            doc_id=f"tjsp-rev-{volume}-{r['id']}",
+            tribunal="TJSP",
+            tipo="acordao",
+            processo=processo,
+            relator=relator,
+            ramo_direito=r["ramo_direito"] or "",
+            data_julgamento=r["data_julgamento"] or "",
+            orgao_julgador=camara,
+            texto_busca=texto_busca[:8000],
+            texto_integral=texto_integral[:30000],
+            url=url,
+            metadata_extra=json.dumps({
+                "volume": volume,
+                "periodo": periodo,
+                "tipo_recurso": r["tipo_recurso"] or "",
+                "comarca": r["comarca"] or "",
+                "legislacao_citada": r["legislacao_citada"] or "",
+                "jurisprudencia_citada": r["jurisprudencia_citada"] or "",
+                "source": "tjsp_revista_jurisprudencia",
+            }, ensure_ascii=False),
+        ))
+    return docs
+
+
 SOURCE_MAP = {
     "sumulas": ("Súmulas STF", read_sumulas),
     "sumulas_vinculantes": ("Súmulas Vinculantes STF", read_sumulas_vinculantes),
@@ -668,6 +735,7 @@ SOURCE_MAP = {
     "informativos": ("STF Informativos", read_stf_informativos),
     "acordaos": ("STF Acórdãos", read_acordaos),
     "monocraticas": ("STF Decisões Monocráticas", read_monocraticas),
+    "tjsp": ("TJSP Revistas de Jurisprudência", read_tjsp_revistas),
 }
 
 
@@ -684,7 +752,7 @@ def run_pipeline(
     print(f"   Sources: {', '.join(sources)}")
     print()
 
-    first = True
+    initialized_tables: set[str] = set()
     for source in sources:
         if source not in SOURCE_MAP:
             print(f"⚠️ Unknown source: {source}. Skipping.")
@@ -710,9 +778,10 @@ def run_pipeline(
         records = embed_documents(docs)
 
         print(f"💾 Storing in LanceDB...")
-        current_mode = mode if first else "append"
-        total = store_in_lancedb(records, mode=current_mode)
-        first = False
+        table_name = table_name_for_source(source)
+        current_mode = mode if table_name not in initialized_tables else "append"
+        total = store_in_lancedb(records, mode=current_mode, table_name=table_name)
+        initialized_tables.add(table_name)
 
         print(f"   Total records in DB: {total}")
         print()
@@ -735,6 +804,7 @@ def parse_args() -> argparse.Namespace:
             "informativos",
             "acordaos",
             "monocraticas",
+            "tjsp",
             "all",
         ],
         help="Data source to ingest",
