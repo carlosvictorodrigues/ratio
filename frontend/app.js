@@ -3433,7 +3433,7 @@ function renderUpdateView() {
         <div class="informativo-header">
           <div class="informativo-title-row">
             <i data-lucide="check-circle"></i>
-            <h3 class="informativo-title">Voce esta na versao mais recente</h3>
+            <h3 class="informativo-title">Você está na versão mais recente</h3>
           </div>
           <p class="informativo-subtitle">Ratio v${escapeHtml(u.localVersion || "desconhecida")}${u.localBuild ? ` (build ${u.localBuild})` : ""}</p>
         </div>
@@ -3515,6 +3515,40 @@ function _informativoMonthLabel(key) {
   return `${_MONTHS_PT[parseInt(m, 10) - 1] || m} de ${y}`;
 }
 
+function _renderInformativoCards(monthItems) {
+  return monthItems.map((item, i) => {
+    const searchQuery = `Explique detalhadamente a decisão: ${item.tipo_label || item.tipo} — ${item.processo} (${item.tribunal})`;
+    const dateJulg = item.data_julgamento ? dateHuman(item.data_julgamento) : "";
+    const datePub = item.data_publicacao ? dateHuman(item.data_publicacao) : "";
+    let dateDisplay = "";
+    if (dateJulg) dateDisplay = `Julgado em ${dateJulg}`;
+    else if (datePub) dateDisplay = `Publicado em ${datePub}`;
+    const dateSecondary = (dateJulg && datePub && datePub !== dateJulg)
+      ? `<span class="informativo-card-date-secondary">Publicado em ${escapeHtml(datePub)}</span>`
+      : "";
+    return `
+      <article class="informativo-card" data-tribunal="${escapeHtml(item.tribunal)}" style="animation-delay: ${40 + i * 30}ms">
+        <div class="informativo-card-head">
+          <span class="timeline-tribunal-tag" data-tribunal="${escapeHtml(item.tribunal)}">${escapeHtml(item.tribunal)}</span>
+          <span class="informativo-card-tipo">${escapeHtml(item.tipo_label || item.tipo)}</span>
+          <span class="informativo-card-date">${escapeHtml(dateDisplay)}</span>
+        </div>
+        ${dateSecondary}
+        <p class="informativo-card-processo">${escapeHtml(item.processo)}</p>
+        <p class="informativo-card-tese" data-doc-id="${escapeHtml(item.doc_id)}">${escapeHtml(item.resumo || item.tese_text)}</p>
+        ${item.resumo ? `<button class="informativo-toggle-original" type="button" data-toggle-original="${escapeHtml(item.doc_id)}">Ver texto original</button>` : ""}
+        <div class="informativo-card-meta">
+          <span>Rel. ${escapeHtml(item.relator)}</span>
+          <span>${escapeHtml(item.orgao_julgador)}</span>
+        </div>
+        <button class="informativo-search-btn" type="button" data-informativo-search="${escapeHtml(searchQuery)}">
+          <i data-lucide="search"></i> Pesquisar mais
+        </button>
+      </article>
+    `;
+  }).join("");
+}
+
 function renderInformativoView() {
   const items = state.informativo.items.filter(item => {
     if (state.informativo.filter.tribunal && item.tribunal !== state.informativo.filter.tribunal) return false;
@@ -3538,48 +3572,31 @@ function renderInformativoView() {
     return `<button class="timeline-chip${active}" type="button" data-informativo-filter-tribunal="${escapeHtml(val)}">${escapeHtml(label)}</button>`;
   }).join("");
 
-  // Month sections
-  let stagger = 0;
+  // Collapsible month sections
+  const openMonths = state.informativo._openMonths || new Set();
+  state.informativo._openMonths = openMonths;
+
   const sectionsHtml = [...groups.entries()].map(([key, monthItems]) => {
-    const cardsHtml = monthItems.map(item => {
-      stagger++;
-      const searchQuery = `Explique detalhadamente a decisao: ${item.tipo_label || item.tipo} — ${item.processo} (${item.tribunal})`;
-      // Show real dates with clear labels: "Julgado em" for decision date, "Publicado em" for publication
-      const dateJulg = item.data_julgamento ? dateHuman(item.data_julgamento) : "";
-      const datePub = item.data_publicacao ? dateHuman(item.data_publicacao) : "";
-      let dateDisplay = "";
-      if (dateJulg) dateDisplay = `Julgado em ${dateJulg}`;
-      else if (datePub) dateDisplay = `Publicado em ${datePub}`;
-      // Secondary date line (show publication if different from judgment)
-      const dateSecondary = (dateJulg && datePub && datePub !== dateJulg)
-        ? `<span class="informativo-card-date-secondary">Publicado em ${escapeHtml(datePub)}</span>`
-        : "";
-      return `
-        <article class="informativo-card" data-tribunal="${escapeHtml(item.tribunal)}" style="animation-delay: ${40 + stagger * 30}ms">
-          <div class="informativo-card-head">
-            <span class="timeline-tribunal-tag" data-tribunal="${escapeHtml(item.tribunal)}">${escapeHtml(item.tribunal)}</span>
-            <span class="informativo-card-tipo">${escapeHtml(item.tipo_label || item.tipo)}</span>
-            <span class="informativo-card-date">${escapeHtml(dateDisplay)}</span>
-          </div>
-          ${dateSecondary}
-          <p class="informativo-card-processo">${escapeHtml(item.processo)}</p>
-          <p class="informativo-card-tese" data-doc-id="${escapeHtml(item.doc_id)}">${escapeHtml(item.resumo || item.tese_text)}</p>
-          ${item.resumo ? `<button class="informativo-toggle-original" type="button" data-toggle-original="${escapeHtml(item.doc_id)}">Ver texto original</button>` : ""}
-          <div class="informativo-card-meta">
-            <span>Rel. ${escapeHtml(item.relator)}</span>
-            <span>${escapeHtml(item.orgao_julgador)}</span>
-          </div>
-          <button class="informativo-search-btn" type="button" data-informativo-search="${escapeHtml(searchQuery)}">
-            <i data-lucide="search"></i> Pesquisar mais
-          </button>
-        </article>
-      `;
-    }).join("");
+    const isOpen = openMonths.has(key);
+    const stfCount = monthItems.filter(it => it.tribunal === "STF").length;
+    const stjCount = monthItems.filter(it => it.tribunal === "STJ").length;
+    const countParts = [];
+    if (stfCount) countParts.push(`${stfCount} STF`);
+    if (stjCount) countParts.push(`${stjCount} STJ`);
+    const countLabel = countParts.join(" · ") || `${monthItems.length}`;
+
+    const bodyHtml = isOpen
+      ? `<div class="informativo-month-cards">${_renderInformativoCards(monthItems)}</div>`
+      : "";
 
     return `
-      <div class="informativo-month-group">
-        <h4 class="informativo-month-header">${escapeHtml(_informativoMonthLabel(key))}</h4>
-        <div class="informativo-month-cards">${cardsHtml}</div>
+      <div class="informativo-month-group${isOpen ? " open" : ""}">
+        <button class="informativo-month-header" type="button" data-informativo-month="${escapeHtml(key)}">
+          <i data-lucide="${isOpen ? "chevron-down" : "chevron-right"}"></i>
+          <span class="informativo-month-label">${escapeHtml(_informativoMonthLabel(key))}</span>
+          <span class="informativo-month-count">${escapeHtml(countLabel)}</span>
+        </button>
+        <div class="informativo-month-body" id="informativo-month-${escapeHtml(key)}">${bodyHtml}</div>
       </div>
     `;
   }).join("");
@@ -3588,7 +3605,7 @@ function renderInformativoView() {
     ? `<p class="informativo-status">Carregando informativo...</p>`
     : "";
   const emptyHtml = !state.informativo.loading && !items.length
-    ? `<p class="informativo-status">Nenhuma decisao de alta autoridade encontrada nos ultimos 90 dias.</p>`
+    ? `<p class="informativo-status">Nenhuma decisão de alta autoridade encontrada nos últimos 90 dias.</p>`
     : "";
 
   thread.innerHTML = `
@@ -3596,9 +3613,10 @@ function renderInformativoView() {
       <div class="informativo-header">
         <div class="informativo-title-row">
           <i data-lucide="newspaper"></i>
-          <h3 class="informativo-title">Informativo Juridico</h3>
+          <h3 class="informativo-title">Informativo Jurídico</h3>
         </div>
-        <p class="informativo-subtitle">Decisoes recentes de alta autoridade — sumulas vinculantes, temas repetitivos e acordaos com repercussao geral.</p>
+        <p class="informativo-subtitle">Decisões recentes de alta autoridade — súmulas vinculantes, temas repetitivos e acórdãos com repercussão geral.</p>
+        <p class="informativo-ai-note"><i data-lucide="sparkles"></i> Resumos gerados por Gemini 2.5 Flash Lite · Clique em <i data-lucide="search"></i> para pesquisar o tema em profundidade</p>
       </div>
       <div class="informativo-filters">
         <div class="timeline-filter-group">${filterChips}</div>
@@ -3609,12 +3627,6 @@ function renderInformativoView() {
     </section>
   `;
   lucide.createIcons({ nodes: thread.querySelectorAll("[data-lucide]") });
-
-  // Fetch AI summaries for items that don't have one yet
-  const unsummarized = items.filter(it => !it.resumo && it.tese_text);
-  if (unsummarized.length) {
-    _fetchInformativoSummaries(unsummarized);
-  }
 }
 
 async function _fetchInformativoSummaries(items) {
@@ -3629,38 +3641,101 @@ async function _fetchInformativoSummaries(items) {
     if (!resp.ok) return;
     const data = await resp.json();
     const summaries = data.summaries || {};
-    let updated = false;
     for (const item of state.informativo.items) {
       if (summaries[item.doc_id]) {
         item.resumo = summaries[item.doc_id];
-        updated = true;
       }
     }
-    // Re-render cards with summaries
-    if (updated && state.view === "informativo") {
-      renderInformativoView();
-    }
-  } catch (_) { /* silent */ }
+    return summaries;
+  } catch (_) { return {}; }
 }
 
-// ── Toggle original text in informativo ──
+async function _toggleInformativoMonth(monthKey) {
+  const openMonths = state.informativo._openMonths || new Set();
+  state.informativo._openMonths = openMonths;
+
+  if (openMonths.has(monthKey)) {
+    openMonths.delete(monthKey);
+    renderInformativoView();
+    return;
+  }
+
+  openMonths.add(monthKey);
+
+  // Show loading state in the month body
+  const bodyEl = document.getElementById(`informativo-month-${monthKey}`);
+  const groupEl = bodyEl?.closest(".informativo-month-group");
+  if (groupEl) groupEl.classList.add("open");
+  if (bodyEl) {
+    bodyEl.innerHTML = `
+      <div class="informativo-month-loading">
+        <span class="informativo-loading-dot"></span>
+        <span class="informativo-loading-dot"></span>
+        <span class="informativo-loading-dot"></span>
+        <span class="informativo-loading-text">Consultando jurisprudência</span>
+      </div>`;
+  }
+
+  // Update chevron
+  const headerBtn = document.querySelector(`[data-informativo-month="${monthKey}"]`);
+  if (headerBtn) {
+    const icon = headerBtn.querySelector("[data-lucide]");
+    if (icon) { icon.setAttribute("data-lucide", "chevron-down"); lucide.createIcons({ nodes: [icon] }); }
+  }
+
+  // Get items for this month
+  const tf = state.informativo.filter.tribunal;
+  const monthItems = state.informativo.items.filter(item => {
+    if (tf && item.tribunal !== tf) return false;
+    const mk = (item.data_julgamento || item.data_publicacao || "").slice(0, 7);
+    return mk === monthKey;
+  });
+
+  // Fetch summaries for unsummarized items in this month
+  const unsummarized = monthItems.filter(it => !it.resumo && it.tese_text);
+  if (unsummarized.length) {
+    await _fetchInformativoSummaries(unsummarized);
+  }
+
+  // Small delay for the loading animation to feel intentional
+  await new Promise(r => setTimeout(r, 350));
+
+  // Render cards
+  if (bodyEl) {
+    bodyEl.innerHTML = `<div class="informativo-month-cards">${_renderInformativoCards(monthItems)}</div>`;
+    lucide.createIcons({ nodes: bodyEl.querySelectorAll("[data-lucide]") });
+  }
+}
+
+// ── Informativo delegated events ──
 document.addEventListener("click", (e) => {
-  const btn = e.target instanceof Element ? e.target.closest("[data-toggle-original]") : null;
-  if (!btn) return;
-  const docId = btn.getAttribute("data-toggle-original");
-  const item = state.informativo.items.find(it => it.doc_id === docId);
-  if (!item) return;
-  const teseEl = btn.previousElementSibling;
-  if (!teseEl) return;
-  const showingOriginal = btn.getAttribute("data-showing") === "true";
-  if (showingOriginal) {
-    teseEl.textContent = item.resumo || item.tese_text;
-    btn.textContent = "Ver texto original";
-    btn.setAttribute("data-showing", "false");
-  } else {
-    teseEl.textContent = item.tese_text;
-    btn.textContent = "Ver resumo";
-    btn.setAttribute("data-showing", "true");
+  // Toggle original text
+  const toggleBtn = e.target instanceof Element ? e.target.closest("[data-toggle-original]") : null;
+  if (toggleBtn) {
+    const docId = toggleBtn.getAttribute("data-toggle-original");
+    const item = state.informativo.items.find(it => it.doc_id === docId);
+    if (!item) return;
+    const teseEl = toggleBtn.previousElementSibling;
+    if (!teseEl) return;
+    const showingOriginal = toggleBtn.getAttribute("data-showing") === "true";
+    if (showingOriginal) {
+      teseEl.textContent = item.resumo || item.tese_text;
+      toggleBtn.textContent = "Ver texto original";
+      toggleBtn.setAttribute("data-showing", "false");
+    } else {
+      teseEl.textContent = item.tese_text;
+      toggleBtn.textContent = "Ver resumo";
+      toggleBtn.setAttribute("data-showing", "true");
+    }
+    return;
+  }
+
+  // Month accordion toggle
+  const monthBtn = e.target instanceof Element ? e.target.closest("[data-informativo-month]") : null;
+  if (monthBtn) {
+    const monthKey = monthBtn.getAttribute("data-informativo-month");
+    if (monthKey) _toggleInformativoMonth(monthKey);
+    return;
   }
 });
 
@@ -4987,6 +5062,7 @@ function bindEvents() {
     const infoFilter = target.closest("[data-informativo-filter-tribunal]");
     if (infoFilter) {
       state.informativo.filter.tribunal = infoFilter.getAttribute("data-informativo-filter-tribunal") || "";
+      if (state.informativo._openMonths) state.informativo._openMonths.clear();
       renderInformativoView();
       return;
     }
