@@ -216,6 +216,7 @@ const state = {
     needsFullInstaller: false,
     installerUrl: "",
     restarting: false,
+    viewing: false,
   }
 };
 
@@ -3333,7 +3334,6 @@ async function checkAutoUpdate() {
     state.autoUpdate.installerUrl = data.installer_url || "";
     const dismissed = localStorage.getItem(AUTO_UPDATE_DISMISSED_KEY);
     if (dismissed === String(data.remote_build)) return;
-    if (openUpdateBtn) { openUpdateBtn.hidden = false; }
     if (updateBadge) { updateBadge.hidden = false; }
   } catch (_) { /* silent — works offline */ }
 }
@@ -3425,6 +3425,20 @@ function renderUpdateView() {
             <i data-lucide="download"></i> Atualizar agora
           </button>
           <button class="meta-btn" type="button" id="dismissUpdateBtn">Lembrar depois</button>
+        </div>
+      </section>`;
+  } else {
+    html = `
+      <section class="informativo-view">
+        <div class="informativo-header">
+          <div class="informativo-title-row">
+            <i data-lucide="check-circle"></i>
+            <h3 class="informativo-title">Voce esta na versao mais recente</h3>
+          </div>
+          <p class="informativo-subtitle">Ratio v${escapeHtml(u.localVersion || "desconhecida")}${u.localBuild ? ` (build ${u.localBuild})` : ""}</p>
+        </div>
+        <div class="update-actions-row">
+          <button class="meta-btn" type="button" id="closeUpdateViewBtn">Voltar</button>
         </div>
       </section>`;
   }
@@ -3745,6 +3759,7 @@ function renderTimeline() {
 
 function renderEmptyThread() {
   if (state.informativo.open) return;
+  if (state.autoUpdate.viewing) return;
   const cards = EXAMPLE_PROMPTS.map((p, i) => `
     <button class="example-prompt-card" type="button" data-example-query="${escapeHtml(p.query)}" style="animation-delay: ${80 + i * 60}ms">
       <span class="example-prompt-icon"><i data-lucide="${escapeHtml(p.icon)}"></i></span>
@@ -4027,6 +4042,7 @@ function focusDocReference(turnId, docIndex) {
 
 function renderThread({ autoscroll = true } = {}) {
   if (state.informativo.open) return;
+  if (state.autoUpdate.viewing) return;
   if (!hasAnyTurn()) {
     renderEmptyThread();
     renderLibraryPanel();
@@ -4859,7 +4875,8 @@ function bindEvents() {
   closeTipsModalBtn?.addEventListener("click", () => setTipsModalOpen(false));
   openInformativoBtn?.addEventListener("click", () => setInformativoOpen(!state.informativo.open));
   openUpdateBtn?.addEventListener("click", () => {
-    setInformativoOpen(false);
+    state.informativo.open = false;
+    state.autoUpdate.viewing = true;
     renderUpdateView();
   });
   openWatchTopicsBtn?.addEventListener("click", () => setWatchTopicsOpen(true));
@@ -4998,7 +5015,8 @@ function bindEvents() {
       localStorage.setItem(AUTO_UPDATE_DISMISSED_KEY, String(state.autoUpdate.remoteBuild));
       if (updateBadge) updateBadge.hidden = true;
       if (openUpdateBtn) openUpdateBtn.hidden = true;
-      if (!state.activeTurnId) renderEmptyThread();
+      state.autoUpdate.viewing = false;
+      renderThread({ autoscroll: false });
       return;
     }
     if (target.closest("#restartNowBtn")) {
@@ -5006,7 +5024,13 @@ function bindEvents() {
       return;
     }
     if (target.closest("#restartLaterBtn")) {
-      if (!state.activeTurnId) renderEmptyThread();
+      state.autoUpdate.viewing = false;
+      renderThread({ autoscroll: false });
+      return;
+    }
+    if (target.closest("#closeUpdateViewBtn")) {
+      state.autoUpdate.viewing = false;
+      renderThread({ autoscroll: false });
       return;
     }
 
