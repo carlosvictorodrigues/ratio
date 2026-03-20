@@ -409,10 +409,30 @@ def test_composer_moves_secondary_actions_into_collapsible_more_panel():
 
     assert 'id="toggleComposerToolsBtn"' in composer_slice
     assert 'id="composerToolsPanel"' in composer_slice
-    assert 'class="composer-contact"' in composer_slice
     assert "Mais opções" in composer_slice
-    assert "Contato" in composer_slice
-    assert 'href="mailto:contato@ratiojuris.me"' in composer_slice
+
+
+def test_composer_status_strip_shows_only_api_and_version_slots():
+    html = _read("frontend/index.html")
+    js = _read("frontend/app.js")
+    composer_slice = html.split('<footer class="composer panel-shell">', 1)[1].split("</footer>", 1)[0]
+
+    assert 'id="composerStatusStrip"' in composer_slice
+    assert 'id="composerApiStatus"' in composer_slice
+    assert 'id="appVersionLabel"' in composer_slice
+    assert "Contato" not in composer_slice
+    assert "updateComposerHealthStatus" in js
+    assert "API Gemini ativa" in js
+    assert "API Gemini inativa" in js
+
+
+def test_health_check_no_longer_pushes_technical_stack_text_to_request_state():
+    js = _read("frontend/app.js")
+
+    assert "API online. Reranker local:" not in js
+    assert "URL ajustada automaticamente. Reranker local:" not in js
+    assert "maxSsmlChars=" not in js
+    assert "updateComposerHealthStatus(data)" in js
 
 
 def test_persona_tips_use_modal_instead_of_overlaying_popover():

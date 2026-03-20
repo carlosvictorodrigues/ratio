@@ -3795,10 +3795,13 @@ def _install_id() -> str:
 @app.get("/health")
 def health() -> dict[str, Any]:
     rw = get_reranker_warning()
+    version_info = load_local_version(PROJECT_ROOT)
     return {
         "status": "ok",
         "has_gemini_api_key": has_gemini_api_key(),
         "install_id": _install_id(),
+        "version": str(version_info.get("version", "")),
+        "build": int(version_info.get("build", 0) or 0),
         "reranker_warning": rw if rw else None,
         "defaults": {
             "reranker_backend": RERANKER_BACKEND,

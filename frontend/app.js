@@ -340,6 +340,8 @@ const runJurisUpdateBtn = $("runJurisUpdateBtn");
 const jurisUpdateStatus = $("jurisUpdateStatus");
 const jurisUpdateStages = $("jurisUpdateStages");
 const jurisUpdateSummary = $("jurisUpdateSummary");
+const composerApiStatus = $("composerApiStatus");
+const appVersionLabel = $("appVersionLabel");
 
 marked.setOptions({ gfm: true, breaks: false });
 
@@ -871,6 +873,25 @@ function setTipsModalOpen(open) {
 function setRequestState(text, isError = false) {
   requestState.textContent = text || "";
   requestState.className = isError ? "request-state error" : "request-state";
+}
+
+function updateComposerHealthStatus(data) {
+  if (composerApiStatus) {
+    const apiActive = !!data?.has_gemini_api_key;
+    composerApiStatus.textContent = apiActive ? "API Gemini ativa" : "API Gemini inativa";
+    composerApiStatus.dataset.status = apiActive ? "active" : "inactive";
+  }
+  if (appVersionLabel) {
+    const version = String(data?.version || "").trim();
+    const build = Number(data?.build || 0);
+    if (version) {
+      appVersionLabel.textContent = build > 0 ? `v${version}-b${build}` : `v${version}`;
+      appVersionLabel.hidden = false;
+    } else {
+      appVersionLabel.hidden = true;
+      appVersionLabel.textContent = "";
+    }
+  }
 }
 
 function applyAnswerFontScale() {
@@ -4874,6 +4895,7 @@ async function checkHealth() {
   const applyHealthDefaults = (data) => {
     state.personaPromptDefaults = normalizePersonaPromptDefaults(data?.defaults?.persona_prompt_defaults);
     renderPersonaConfigEditor();
+    updateComposerHealthStatus(data);
     // Detect new installation: if install_id changed, reset onboarding
     if (data?.install_id) {
       const prevId = localStorage.getItem("ratio_install_id");
@@ -4896,16 +4918,6 @@ async function checkHealth() {
     if (!response.ok) throw new Error(`${response.status}`);
     const data = await response.json();
     applyHealthDefaults(data);
-    const model = safeText(data?.defaults?.reranker_model, "-");
-    const tts = safeText(data?.defaults?.tts_voice, "charon");
-    const ttsRate = safeText(String(data?.defaults?.tts_rate ?? "1.2"), "1.2");
-    const ttsPitch = safeText(String(data?.defaults?.tts_pitch_semitones ?? "-4.5"), "-4.5");
-    const breakAlt = safeText(String(data?.defaults?.tts_break_alt_ms ?? "450"), "450");
-    const breakArt = safeText(String(data?.defaults?.tts_break_art_ms ?? "900"), "900");
-    const maxSsml = safeText(String(data?.defaults?.tts_max_ssml_chars ?? "5000"), "5000");
-    setRequestState(
-      `API online. Reranker local: ${model}. TTS: ${tts} | rate=${ttsRate}, pitch=${ttsPitch}, breakAltMs=${breakAlt}, breakArtMs=${breakArt}, maxSsmlChars=${maxSsml}.`
-    );
   } catch (_) {
     if (base !== fallbackBase) {
       try {
@@ -4917,16 +4929,14 @@ async function checkHealth() {
           localStorage.setItem("jurisai_api_base", state.apiBase);
           if (apiBaseInput) apiBaseInput.value = state.apiBase;
           loadRagConfigMetadata();
-
-          const model = safeText(data?.defaults?.reranker_model, "-");
-          const tts = safeText(data?.defaults?.tts_voice, "charon");
-          setRequestState(`API online em ${fallbackBase}. URL ajustada automaticamente. Reranker local: ${model}. TTS: ${tts}.`);
+          setRequestState(`API online em ${fallbackBase}. URL ajustada automaticamente.`);
           return;
         }
       } catch (_) {
         // fallback failed; show generic unavailable status below
       }
     }
+    updateComposerHealthStatus({ has_gemini_api_key: false, version: "", build: 0 });
     setRequestState("API indisponivel. Confirme backend em /health.", true);
   }
 }

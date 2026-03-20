@@ -2977,7 +2977,7 @@ select {
   color: #9a948f;
 }
 
-.composer-contact {
+.composer-status-strip {
   border-top: 1px solid #f3f0ed;
   padding: 8px 12px 10px;
   display: flex;
@@ -2986,38 +2986,37 @@ select {
   flex-wrap: wrap;
 }
 
-.composer-contact-label {
+.composer-status-badge {
+  display: inline-flex;
+  align-items: center;
+  min-height: 26px;
+  padding: 0 10px;
+  border-radius: 999px;
+  border: 1px solid #e8e2db;
+  background: #faf8f6;
+  color: #8e8882;
   font-family: var(--mono);
   font-size: 10px;
+  letter-spacing: 0.08em;
   text-transform: uppercase;
-  letter-spacing: 0.14em;
-  color: #a29b95;
 }
 
-.composer-contact-link {
-  text-decoration: none;
-  font-size: 12px;
-  color: #5e5751;
-  border-bottom: 1px solid rgba(94, 87, 81, 0.22);
-  transition: color 140ms ease, border-color 140ms ease;
+.composer-status-badge[data-status="active"] {
+  border-color: rgba(77, 124, 15, 0.22);
+  background: rgba(77, 124, 15, 0.08);
+  color: #4d7c0f;
 }
 
-.composer-contact-link:hover {
-  color: #1f1b18;
-  border-bottom-color: rgba(31, 27, 24, 0.45);
+.composer-status-badge[data-status="inactive"] {
+  border-color: rgba(180, 35, 24, 0.2);
+  background: rgba(180, 35, 24, 0.06);
+  color: #b42318;
 }
 
-.app-version-label {
-  margin-left: auto;
-  font-family: var(--mono);
-  font-size: 9.5px;
-  letter-spacing: 0.06em;
-  color: #c4bfba;
-  opacity: 0.7;
-  transition: opacity 180ms ease;
+.composer-status-badge-version {
+  color: #7f7872;
   user-select: text;
 }
-.app-version-label:hover { opacity: 1; }
 
 .meta-btn {
   border: 0;
@@ -4126,10 +4125,11 @@ body[data-theme="dark"] .persona-aux-btn { background: #1c1917; border-color: #2
 body[data-theme="dark"] .persona-aux-btn:hover { background: #232019; border-color: #3a3633; }
 body[data-theme="dark"] .composer-tools-panel { background: rgba(28,25,23,0.96); border-top-color: #2e2a27; }
 body[data-theme="dark"] .composer-meta { background: rgba(20,18,16,0.7); color: #6b6662; }
-body[data-theme="dark"] .composer-contact { border-top-color: #2e2a27; }
-body[data-theme="dark"] .composer-contact-link { color: #9a948f; border-bottom-color: rgba(154,148,143,0.2); }
-body[data-theme="dark"] .composer-contact-link:hover { color: #e8e5e2; }
-body[data-theme="dark"] .app-version-label { color: #4a4541; }
+body[data-theme="dark"] .composer-status-strip { border-top-color: #2e2a27; }
+body[data-theme="dark"] .composer-status-badge { background: #1c1917; border-color: #2e2a27; color: #8c857f; }
+body[data-theme="dark"] .composer-status-badge[data-status="active"] { border-color: rgba(132, 204, 22, 0.25); background: rgba(132, 204, 22, 0.08); color: #a3e635; }
+body[data-theme="dark"] .composer-status-badge[data-status="inactive"] { border-color: rgba(224, 90, 79, 0.22); background: rgba(224, 90, 79, 0.08); color: #f87171; }
+body[data-theme="dark"] .composer-status-badge-version { color: #6b6662; }
 body[data-theme="dark"] .request-state { color: #6b6662; }
 body[data-theme="dark"] .request-state.error { color: #e05a4f; }
 

@@ -175,6 +175,9 @@ def test_health_contract():
 
     payload = response.json()
     assert payload["status"] == "ok"
+    assert "version" in payload
+    assert "build" in payload
+    assert "has_gemini_api_key" in payload
     assert payload["defaults"]["reranker_backend"] == "local"
     assert payload["defaults"]["generation_model"] == "stub-generation"
     assert payload["defaults"]["persona_prompt_defaults"]["parecer"] == "Prompt padrao de parecer."

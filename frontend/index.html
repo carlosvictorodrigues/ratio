@@ -550,13 +550,11 @@
                 <i data-lucide="folder-plus"></i>
                 Meu Acervo
               </button>
-              <span>STF e STJ selecionados</span>
             </div>
-            <div class="composer-contact" aria-label="Contato institucional">
-              <span class="composer-contact-label">Contato</span>
-              <a class="composer-contact-link" href="mailto:contato@ratiojuris.me">contato@ratiojuris.me</a>
-              <span id="appVersionLabel" class="app-version-label" hidden></span>
-            </div>
+          </div>
+          <div id="composerStatusStrip" class="composer-status-strip" aria-live="polite">
+            <span id="composerApiStatus" class="composer-status-badge" data-status="unknown">API Gemini inativa</span>
+            <span id="appVersionLabel" class="composer-status-badge composer-status-badge-version" hidden></span>
           </div>
           <p id="requestState" class="request-state"></p>
         </footer>
