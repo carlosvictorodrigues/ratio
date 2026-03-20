@@ -4051,6 +4051,8 @@ body[data-theme="dark"] .onboarding-steps pre { background: #141210; border-colo
 body[data-theme="dark"] .cost-card { background: #1c1917; border-color: #2e2a27; }
 body[data-theme="dark"] .cost-card h3 { color: #e8e5e2; }
 body[data-theme="dark"] .cost-card p { color: #9a948f; }
+body[data-theme="dark"] .onboarding-key-setup { background: #1c1917; border-color: #2e2a27; }
+body[data-theme="dark"] .onboarding-key-status { color: #9a948f; }
 
 /* About modal */
 body[data-theme="dark"] .about-modal { background: #232019; border-color: #2e2a27; box-shadow: 0 30px 56px rgba(0,0,0,0.4); }
