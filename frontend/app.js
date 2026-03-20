@@ -3144,6 +3144,7 @@ function addWatchTopic(label) {
   });
   _saveWatchTopics(data);
   renderWatchTopicsPanel();
+  checkWatchTopics();
 }
 
 function removeWatchTopic(id) {
@@ -3168,7 +3169,7 @@ async function checkWatchTopics() {
   const now = new Date().toISOString();
   const topics = data.topics.map(t => ({
     query: t.query,
-    since_date: t.lastChecked || _daysAgoISO(30),
+    since_date: t.lastChecked || _daysAgoISO(90),
   }));
 
   try {
@@ -3548,7 +3549,8 @@ function renderInformativoView() {
           </div>
           ${dateSecondary}
           <p class="informativo-card-processo">${escapeHtml(item.processo)}</p>
-          <p class="informativo-card-tese">${escapeHtml(item.tese_text)}</p>
+          <p class="informativo-card-tese" data-doc-id="${escapeHtml(item.doc_id)}">${escapeHtml(item.resumo || item.tese_text)}</p>
+          ${item.resumo ? `<button class="informativo-toggle-original" type="button" data-toggle-original="${escapeHtml(item.doc_id)}">Ver texto original</button>` : ""}
           <div class="informativo-card-meta">
             <span>Rel. ${escapeHtml(item.relator)}</span>
             <span>${escapeHtml(item.orgao_julgador)}</span>
@@ -3593,7 +3595,60 @@ function renderInformativoView() {
     </section>
   `;
   lucide.createIcons({ nodes: thread.querySelectorAll("[data-lucide]") });
+
+  // Fetch AI summaries for items that don't have one yet
+  const unsummarized = items.filter(it => !it.resumo && it.tese_text);
+  if (unsummarized.length) {
+    _fetchInformativoSummaries(unsummarized);
+  }
 }
+
+async function _fetchInformativoSummaries(items) {
+  try {
+    const base = state.apiBase.replace(/\/$/, "");
+    const payload = items.map(it => ({ doc_id: it.doc_id, tese_text: it.tese_text }));
+    const resp = await fetch(`${base}/api/informativo/summarize`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ items: payload }),
+    });
+    if (!resp.ok) return;
+    const data = await resp.json();
+    const summaries = data.summaries || {};
+    let updated = false;
+    for (const item of state.informativo.items) {
+      if (summaries[item.doc_id]) {
+        item.resumo = summaries[item.doc_id];
+        updated = true;
+      }
+    }
+    // Re-render cards with summaries
+    if (updated && state.view === "informativo") {
+      renderInformativoView();
+    }
+  } catch (_) { /* silent */ }
+}
+
+// ── Toggle original text in informativo ──
+document.addEventListener("click", (e) => {
+  const btn = e.target instanceof Element ? e.target.closest("[data-toggle-original]") : null;
+  if (!btn) return;
+  const docId = btn.getAttribute("data-toggle-original");
+  const item = state.informativo.items.find(it => it.doc_id === docId);
+  if (!item) return;
+  const teseEl = btn.previousElementSibling;
+  if (!teseEl) return;
+  const showingOriginal = btn.getAttribute("data-showing") === "true";
+  if (showingOriginal) {
+    teseEl.textContent = item.resumo || item.tese_text;
+    btn.textContent = "Ver texto original";
+    btn.setAttribute("data-showing", "false");
+  } else {
+    teseEl.textContent = item.tese_text;
+    btn.textContent = "Ver resumo";
+    btn.setAttribute("data-showing", "true");
+  }
+});
 
 // ── Timeline ──
 

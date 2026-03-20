@@ -92,6 +92,7 @@ from rag.query import (  # noqa: E402
     get_rag_tuning_schema,
     check_topic_matches,
     get_informativo_items,
+    summarize_informativo_items,
     get_recent_timeline_items,
     get_reranker_warning,
     has_anthropic_api_key,
@@ -3660,6 +3661,20 @@ def informativo_api(
     _informativo_cache["key"] = cache_key
     _informativo_cache["ts"] = now
     return result
+
+
+class InformativoSummarizeRequest(BaseModel):
+    items: list[dict[str, str]] = Field(..., max_length=80)
+
+
+@app.post("/api/informativo/summarize")
+def informativo_summarize_api(
+    request: Request,
+    body: InformativoSummarizeRequest,
+) -> dict[str, Any]:
+    _enforce_rate_limit(request, bucket="informativo_summarize", limit=6, window_seconds=60)
+    summaries = summarize_informativo_items(body.items)
+    return {"summaries": summaries}
 
 
 # ── Auto-update endpoints ──

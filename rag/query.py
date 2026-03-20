@@ -90,10 +90,11 @@ SUPPORTED_GENERATION_MODELS: tuple[str, ...] = (
     "gemini-3.1-pro-preview",
     "gemini-3-flash-preview",
     "gemini-3-flash",
+    "gemini-3.1-flash-lite-preview",
     "gemini-2.5-pro",
     "gemini-2.5-pro-preview-05-06",
     "gemini-2.5-flash",
-    "gemini-2.0-flash",
+    "gemini-2.5-flash-lite",
 )
 GEMINI_KEY_VALIDATION_MODEL = os.getenv("GEMINI_KEY_VALIDATION_MODEL", "gemini-2.5-flash")
 GEMINI_KEY_VALIDATION_TIMEOUT_MS = int(os.getenv("GEMINI_KEY_VALIDATION_TIMEOUT_MS", "12000"))
@@ -1830,6 +1831,104 @@ def get_informativo_items(
         return enriched[:limit]
 
 
+# ── Informativo summarization ──
+
+INFORMATIVO_SUMMARY_MODEL = os.getenv("INFORMATIVO_SUMMARY_MODEL", "gemini-2.5-flash-lite")
+_SUMMARY_CACHE_PATH = PROJECT_ROOT / "logs" / "runtime" / "informativo_summaries.json"
+_SUMMARY_BATCH_SIZE = 8
+
+
+def _load_summary_cache() -> dict[str, str]:
+    try:
+        if _SUMMARY_CACHE_PATH.exists():
+            return json.loads(_SUMMARY_CACHE_PATH.read_text(encoding="utf-8"))
+    except Exception:
+        pass
+    return {}
+
+
+def _save_summary_cache(cache: dict[str, str]) -> None:
+    try:
+        _SUMMARY_CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
+        _SUMMARY_CACHE_PATH.write_text(
+            json.dumps(cache, ensure_ascii=False, indent=None),
+            encoding="utf-8",
+        )
+    except Exception as exc:
+        print(f"Summary cache write failed: {exc}", file=sys.stderr)
+
+
+def summarize_informativo_items(items: list[dict]) -> dict[str, str]:
+    """Summarize informativo tese_text items using Gemini Flash.
+
+    Returns mapping of doc_id -> resumo.  Uses persistent file cache.
+    """
+    if not items:
+        return {}
+
+    cache = _load_summary_cache()
+    result: dict[str, str] = {}
+    to_summarize: list[dict] = []
+
+    for item in items:
+        doc_id = item.get("doc_id", "")
+        if not doc_id:
+            continue
+        if doc_id in cache:
+            result[doc_id] = cache[doc_id]
+        else:
+            to_summarize.append(item)
+
+    if not to_summarize:
+        return result
+
+    try:
+        client = get_gemini_client()
+    except Exception:
+        return result
+
+    # Process in batches
+    for i in range(0, len(to_summarize), _SUMMARY_BATCH_SIZE):
+        batch = to_summarize[i:i + _SUMMARY_BATCH_SIZE]
+        numbered = "\n".join(
+            f"{j+1}. [{it['doc_id']}] {(it.get('tese_text') or '')[:450]}"
+            for j, it in enumerate(batch)
+        )
+        prompt = (
+            "Voce e um assistente juridico. Resuma cada trecho abaixo em 1-2 frases "
+            "claras e acessiveis, mantendo a essencia juridica. Cada resumo deve ser "
+            "compreensivel por um advogado sem precisar ler o texto original.\n\n"
+            f"{numbered}\n\n"
+            "Responda APENAS com um JSON array de objetos, um por item, na mesma ordem:\n"
+            '[{"id": "<doc_id>", "resumo": "<texto resumido>"}]\n'
+            "Sem explicacoes adicionais."
+        )
+        try:
+            response = client.models.generate_content(
+                model=INFORMATIVO_SUMMARY_MODEL,
+                contents=prompt,
+                config=types.GenerateContentConfig(temperature=0.2),
+            )
+            text = (response.text or "").strip()
+            # Extract JSON from response (handle markdown code blocks)
+            if "```" in text:
+                m = re.search(r"```(?:json)?\s*\n?(.*?)```", text, re.DOTALL)
+                if m:
+                    text = m.group(1).strip()
+            parsed = json.loads(text)
+            for entry in parsed:
+                doc_id = entry.get("id", "")
+                resumo = entry.get("resumo", "")
+                if doc_id and resumo:
+                    result[doc_id] = resumo
+                    cache[doc_id] = resumo
+        except Exception as exc:
+            print(f"Informativo summary batch failed: {exc}", file=sys.stderr)
+
+    _save_summary_cache(cache)
+    return result
+
+
 def check_topic_matches(
     topics: list[dict],
     top_k: int = 5,
@@ -1940,10 +2039,11 @@ def _resolve_best_gemini_model(requested: str) -> str:
         "gemini-3.1-pro-preview",
         "gemini-3-flash-preview",
         "gemini-3-flash",
+        "gemini-3.1-flash-lite-preview",
         "gemini-2.5-pro",
         "gemini-2.5-pro-preview-05-06",
         "gemini-2.5-flash",
-        "gemini-2.0-flash",
+        "gemini-2.5-flash-lite",
     ]
 
     def available_models() -> set[str]:

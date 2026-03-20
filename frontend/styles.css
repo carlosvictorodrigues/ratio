@@ -2164,6 +2164,22 @@ body[data-library-open="true"] #libraryPanel {
   margin-bottom: 10px;
 }
 
+.informativo-toggle-original {
+  display: inline-block;
+  margin-bottom: 8px;
+  padding: 0;
+  border: 0;
+  background: none;
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--stone-400);
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  transition: color 140ms ease;
+}
+.informativo-toggle-original:hover { color: var(--stone-600); }
+
 .informativo-search-btn {
   display: inline-flex;
   align-items: center;
@@ -4126,6 +4142,11 @@ body[data-theme="dark"] .library-action { background: #1c1917; border-color: #2e
 body[data-theme="dark"] .library-action.active { background: #2e2a27; border-color: #3a3633; color: #e8e5e2; }
 
 /* Watch topics */
+body[data-theme="dark"] .watch-topics-panel { background: #232019; border-color: #2e2a27; box-shadow: 10px 0 32px rgba(0,0,0,0.3); }
+body[data-theme="dark"] .watch-topic-input { background: #1c1917; color: #e8e5e2; border-color: #2e2a27; }
+body[data-theme="dark"] .watch-topic-input::placeholder { color: #6b6662; }
+body[data-theme="dark"] .watch-topic-check-btn { background: #1c1917; color: #9a948f; border-color: #2e2a27; }
+body[data-theme="dark"] .watch-topic-check-btn:hover { border-color: #3a3633; color: #e8e5e2; }
 body[data-theme="dark"] .watch-topic-item { background: #1c1917; border-color: #2e2a27; }
 body[data-theme="dark"] .watch-topic-header { border-bottom-color: #2e2a27; }
 body[data-theme="dark"] .watch-topic-remove:hover { background: rgba(255,255,255,0.06); }
@@ -4147,6 +4168,8 @@ body[data-theme="dark"] .informativo-card[data-tribunal="STF"] { border-left-col
 body[data-theme="dark"] .informativo-card[data-tribunal="STJ"] { border-left-color: rgba(212,135,74,0.3); }
 body[data-theme="dark"] .informativo-card[data-tribunal="STF"]:hover { border-left-color: #9a948f; }
 body[data-theme="dark"] .informativo-card[data-tribunal="STJ"]:hover { border-left-color: #d4874a; }
+body[data-theme="dark"] .informativo-search-btn { border-color: #2e2a27; color: #9a948f; }
+body[data-theme="dark"] .informativo-search-btn:hover { border-color: #3a3633; color: #e8e5e2; background: #1c1917; }
 
 /* Pipeline steps */
 body[data-theme="dark"] .pipeline-steps-card { background: #232019; border-color: #2e2a27; }
