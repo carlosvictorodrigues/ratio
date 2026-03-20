@@ -3315,6 +3315,12 @@ async function checkAutoUpdate() {
     const data = await resp.json();
     state.autoUpdate.localVersion = data.local_version || "";
     state.autoUpdate.localBuild = data.local_build || 0;
+    // Show version label in composer footer
+    const vLabel = document.getElementById("appVersionLabel");
+    if (vLabel && state.autoUpdate.localVersion) {
+      vLabel.textContent = `v${state.autoUpdate.localVersion}`;
+      vLabel.hidden = false;
+    }
     if (!data.available) return;
     state.autoUpdate.available = true;
     state.autoUpdate.remoteVersion = data.remote_version || "";

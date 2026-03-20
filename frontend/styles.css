@@ -2914,6 +2914,18 @@ select {
   border-bottom-color: rgba(31, 27, 24, 0.45);
 }
 
+.app-version-label {
+  margin-left: auto;
+  font-family: var(--mono);
+  font-size: 9.5px;
+  letter-spacing: 0.06em;
+  color: #c4bfba;
+  opacity: 0.7;
+  transition: opacity 180ms ease;
+  user-select: text;
+}
+.app-version-label:hover { opacity: 1; }
+
 .meta-btn {
   border: 0;
   background: transparent;
@@ -4024,6 +4036,7 @@ body[data-theme="dark"] .composer-meta { background: rgba(20,18,16,0.7); color: 
 body[data-theme="dark"] .composer-contact { border-top-color: #2e2a27; }
 body[data-theme="dark"] .composer-contact-link { color: #9a948f; border-bottom-color: rgba(154,148,143,0.2); }
 body[data-theme="dark"] .composer-contact-link:hover { color: #e8e5e2; }
+body[data-theme="dark"] .app-version-label { color: #4a4541; }
 body[data-theme="dark"] .request-state { color: #6b6662; }
 body[data-theme="dark"] .request-state.error { color: #e05a4f; }
 
