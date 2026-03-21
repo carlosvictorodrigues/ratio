@@ -329,6 +329,7 @@ const ttsProviderSelect = $("ttsProviderSelect");
 const ttsProviderStatus = $("ttsProviderStatus");
 const userCorpusNameInput = $("userCorpusNameInput");
 const userCorpusFilesInput = $("userCorpusFilesInput");
+const userCorpusFolderInput = $("userCorpusFolderInput");
 const userCorpusOcrMissingOnly = $("userCorpusOcrMissingOnly");
 const userSourcePriorityToggle = $("userSourcePriorityToggle");
 const indexUserCorpusBtn = $("indexUserCorpusBtn");
@@ -2518,7 +2519,11 @@ function saveRagConfigNow() {
 
 async function indexUserCorpusNow() {
   resetUserCorpusStages();
-  const files = Array.from(userCorpusFilesInput?.files || []);
+  // Merge files from both inputs (file picker + folder picker), filter PDFs only
+  const pickedFiles = Array.from(userCorpusFilesInput?.files || []);
+  const folderFiles = Array.from(userCorpusFolderInput?.files || [])
+    .filter(f => f.name.toLowerCase().endsWith(".pdf"));
+  const files = pickedFiles.length ? pickedFiles : folderFiles;
   if (!files.length) {
     setUserCorpusStage("ready", { errored: true });
     setUserCorpusStatus("Selecione ao menos 1 PDF para indexar.", true);
@@ -2562,6 +2567,7 @@ async function indexUserCorpusNow() {
         `Indexacao concluida: ${indexedDocs} doc(s), ${duplicates} duplicado(s), ${skipped} ignorado(s).`
       );
       if (userCorpusFilesInput) userCorpusFilesInput.value = "";
+      if (userCorpusFolderInput) userCorpusFolderInput.value = "";
       await loadUserCorpusSources();
       return;
     }
@@ -2574,6 +2580,7 @@ async function indexUserCorpusNow() {
     const finalJob = await pollUserCorpusJobUntilDone(jobId, pollEveryMs);
     applyUserCorpusJobSnapshot(finalJob);
     if (userCorpusFilesInput) userCorpusFilesInput.value = "";
+      if (userCorpusFolderInput) userCorpusFolderInput.value = "";
     await loadUserCorpusSources();
   } catch (err) {
     const activeNode = userCorpusStages?.querySelector("[data-index-stage].active");
@@ -5259,6 +5266,13 @@ function bindEvents() {
     persistSession();
   });
   indexUserCorpusBtn?.addEventListener("click", indexUserCorpusNow);
+  userCorpusFolderInput?.addEventListener("change", () => {
+    const pdfs = Array.from(userCorpusFolderInput.files || []).filter(f => f.name.toLowerCase().endsWith(".pdf"));
+    if (pdfs.length) {
+      setUserCorpusStatus(`${pdfs.length} PDF(s) encontrado(s) na pasta selecionada.`);
+      if (userCorpusFilesInput) userCorpusFilesInput.value = "";
+    }
+  });
   runJurisUpdateBtn?.addEventListener("click", runJurisUpdateNow);
   sourceFiltersList?.addEventListener("change", (event) => {
     const target = event.target instanceof Element ? event.target : null;
