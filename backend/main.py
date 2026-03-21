@@ -582,7 +582,7 @@ USER_ACERVO_MANIFEST = _runtime_logs_dir() / "meu_acervo_manifest.json"
 USER_ACERVO_UPLOAD_DIR = _runtime_logs_dir() / "meu_acervo_uploads"
 USER_ACERVO_LANCE_DIR = _resolve_data_dir("lancedb_store")
 USER_ACERVO_CHUNK_CHARS = max(500, min(int(os.getenv("USER_ACERVO_CHUNK_CHARS", "1400")), 4000))
-USER_ACERVO_MAX_FILES_PER_REQUEST = max(1, min(int(os.getenv("USER_ACERVO_MAX_FILES_PER_REQUEST", "24")), 100))
+USER_ACERVO_MAX_FILES_PER_REQUEST = max(1, min(int(os.getenv("USER_ACERVO_MAX_FILES_PER_REQUEST", "500")), 5000))
 USER_ACERVO_MAX_FILE_SIZE_MB = max(1, min(int(os.getenv("USER_ACERVO_MAX_FILE_SIZE_MB", "1024")), 10240))
 USER_ACERVO_MAX_REQUEST_SIZE_MB = max(
     USER_ACERVO_MAX_FILE_SIZE_MB,
@@ -3425,6 +3425,8 @@ def _embed_user_chunks(chunks: list[str]) -> list[list[float]]:
             ),
         )
         vectors.extend([list(e.values) for e in (result.embeddings or [])])
+        if start + batch_size < len(chunks):
+            time.sleep(0.3)  # avoid 429 on large uploads
     if len(vectors) != len(chunks):
         raise RuntimeError("Falha ao gerar embeddings de todos os chunks do Meu Acervo.")
     return vectors
