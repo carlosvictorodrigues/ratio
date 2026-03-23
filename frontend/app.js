@@ -166,6 +166,7 @@ const state = {
   personaConfigs: JSON.parse(JSON.stringify(PERSONA_CONFIG_DEFAULTS)),
   personaConfigEditor: PERSONA_DEFAULT,
   composerToolsOpen: false,
+  composerCollapsed: false,
   acervo: {
     sources: [],
     selectedSources: []
@@ -305,6 +306,9 @@ const watchTopicsStatus = $("watchTopicsStatus");
 const watchBadge = $("watchBadge");
 const toggleComposerToolsBtn = $("toggleComposerToolsBtn");
 const composerToolsPanel = $("composerToolsPanel");
+const composerCollapseBtn = $("composerCollapseBtn");
+const composerPeek = $("composerPeek");
+const composerEl = document.querySelector(".composer");
 const personaConfigSelect = $("personaConfigSelect");
 const personaModelInput = $("personaModelInput");
 const personaPromptInput = $("personaPromptInput");
@@ -861,6 +865,24 @@ function setComposerToolsOpen(open) {
   }
   if (toggleComposerToolsBtn) {
     toggleComposerToolsBtn.setAttribute("aria-expanded", String(state.composerToolsOpen));
+  }
+}
+
+function setComposerCollapsed(collapsed) {
+  state.composerCollapsed = !!collapsed;
+  if (!composerEl) return;
+  composerEl.classList.toggle("composer--collapsed", state.composerCollapsed);
+  if (composerCollapseBtn) {
+    composerCollapseBtn.setAttribute("aria-label", state.composerCollapsed ? "Expandir compositor" : "Recolher compositor");
+  }
+  // Adjust thread bottom padding for more reading space
+  const threadEl = document.querySelector(".thread");
+  if (threadEl) {
+    threadEl.style.paddingBottom = state.composerCollapsed ? "80px" : "";
+  }
+  // If expanding, focus the textarea
+  if (!state.composerCollapsed && queryInput) {
+    setTimeout(() => queryInput.focus(), 380);
   }
 }
 
@@ -4844,6 +4866,7 @@ function clearChatHistory() {
   if (queryInput) queryInput.value = "";
 
   persistSession();
+  setComposerCollapsed(false);
   renderThread({ autoscroll: false });
   renderEvidence();
   refreshHeaderBadges();
@@ -4870,6 +4893,7 @@ async function submitQuery() {
   queryInput.value = "";
   persistSession();
   setComposerToolsOpen(false);
+  setComposerCollapsed(true);
   setSettingsOpen(false);
   setAcervoOpen(false);
   renderThread();
@@ -5032,6 +5056,12 @@ function bindEvents() {
   });
   toggleComposerToolsBtn?.addEventListener("click", () => {
     setComposerToolsOpen(!state.composerToolsOpen);
+  });
+  composerCollapseBtn?.addEventListener("click", () => {
+    setComposerCollapsed(!state.composerCollapsed);
+  });
+  composerPeek?.addEventListener("click", () => {
+    setComposerCollapsed(false);
   });
   personaConfigSelect?.addEventListener("change", () => {
     const key = String(personaConfigSelect.value || "").trim();

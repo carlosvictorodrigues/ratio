@@ -516,47 +516,58 @@
         <section id="thread" class="thread"></section>
 
         <footer class="composer panel-shell">
-          <label for="queryInput" class="composer-label">Pergunta jurídica</label>
-          <div class="composer-row">
-            <textarea id="queryInput" rows="2" placeholder=""></textarea>
-            <button id="askBtn" type="button">
-              <i data-lucide="send"></i>
-              Enviar
-            </button>
+          <button id="composerCollapseBtn" class="composer-collapse-btn" type="button" aria-label="Recolher compositor" title="Recolher / expandir">
+            <i data-lucide="chevron-down" style="width:16px;height:16px"></i>
+          </button>
+          <div class="composer-peek" id="composerPeek">
+            <span class="composer-peek-label">Nova consulta</span>
+            <span class="composer-peek-icon"><i data-lucide="chevron-up" style="width:16px;height:16px"></i></span>
           </div>
-          <div class="persona-row">
-            <button class="persona-chip persona-chip--active" type="button" data-persona="visao_geral">Visão Geral</button>
-            <button class="persona-chip" type="button" data-persona="parecer">Parecer Jurídico</button>
-            <button class="persona-chip" type="button" data-persona="estudos">Estudos</button>
-            <button class="persona-chip" type="button" data-persona="peticao">Petição</button>
-            <div class="persona-row-actions">
-              <button id="tipsBtn" class="persona-aux-btn" type="button" title="Abrir dicas de pergunta">
-                <i data-lucide="lightbulb" style="width:14px;height:14px"></i>
-                Dicas
-              </button>
-              <button id="toggleComposerToolsBtn" class="persona-aux-btn" type="button" aria-expanded="false" aria-controls="composerToolsPanel">
-                <i data-lucide="panel-bottom-open" style="width:14px;height:14px"></i>
-                Mais opções
-              </button>
+          <div class="composer-collapsible">
+            <div>
+              <label for="queryInput" class="composer-label">Pergunta jurídica</label>
+              <div class="composer-row">
+                <textarea id="queryInput" rows="2" placeholder=""></textarea>
+                <button id="askBtn" type="button">
+                  <i data-lucide="send"></i>
+                  Enviar
+                </button>
+              </div>
+              <div class="persona-row">
+                <button class="persona-chip persona-chip--active" type="button" data-persona="visao_geral">Visão Geral</button>
+                <button class="persona-chip" type="button" data-persona="parecer">Parecer Jurídico</button>
+                <button class="persona-chip" type="button" data-persona="estudos">Estudos</button>
+                <button class="persona-chip" type="button" data-persona="peticao">Petição</button>
+                <div class="persona-row-actions">
+                  <button id="tipsBtn" class="persona-aux-btn" type="button" title="Abrir dicas de pergunta">
+                    <i data-lucide="lightbulb" style="width:14px;height:14px"></i>
+                    Dicas
+                  </button>
+                  <button id="toggleComposerToolsBtn" class="persona-aux-btn" type="button" aria-expanded="false" aria-controls="composerToolsPanel">
+                    <i data-lucide="panel-bottom-open" style="width:14px;height:14px"></i>
+                    Mais opções
+                  </button>
+                </div>
+              </div>
+              <div id="composerToolsPanel" class="composer-tools-panel" hidden>
+                <div class="composer-meta">
+                  <button class="meta-btn" type="button" data-open-settings>
+                    <i data-lucide="sliders-horizontal"></i>
+                    Parâmetros
+                  </button>
+                  <button class="meta-btn" type="button" data-open-acervo>
+                    <i data-lucide="folder-plus"></i>
+                    Meu Acervo
+                  </button>
+                </div>
+              </div>
+              <div id="composerStatusStrip" class="composer-status-strip" aria-live="polite">
+                <span id="composerApiStatus" class="composer-status-badge" data-status="unknown">API Gemini inativa</span>
+                <span id="appVersionLabel" class="composer-status-badge composer-status-badge-version" hidden></span>
+              </div>
+              <p id="requestState" class="request-state"></p>
             </div>
           </div>
-          <div id="composerToolsPanel" class="composer-tools-panel" hidden>
-            <div class="composer-meta">
-              <button class="meta-btn" type="button" data-open-settings>
-                <i data-lucide="sliders-horizontal"></i>
-                Parâmetros
-              </button>
-              <button class="meta-btn" type="button" data-open-acervo>
-                <i data-lucide="folder-plus"></i>
-                Meu Acervo
-              </button>
-            </div>
-          </div>
-          <div id="composerStatusStrip" class="composer-status-strip" aria-live="polite">
-            <span id="composerApiStatus" class="composer-status-badge" data-status="unknown">API Gemini inativa</span>
-            <span id="appVersionLabel" class="composer-status-badge composer-status-badge-version" hidden></span>
-          </div>
-          <p id="requestState" class="request-state"></p>
         </footer>
       </main>
 

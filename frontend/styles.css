@@ -2878,6 +2878,106 @@ body[data-library-open="true"] #libraryPanel {
   box-shadow: 0 12px 34px rgba(28, 25, 23, 0.11);
   overflow: hidden;
   z-index: 2;
+  transition: box-shadow 320ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* ── Collapse toggle button ── */
+.composer-collapse-btn {
+  position: absolute;
+  top: -1px;
+  left: 50%;
+  transform: translateX(-50%) translateY(-100%);
+  width: 44px;
+  height: 20px;
+  border: 1px solid #d9d2c9;
+  border-bottom: 0;
+  border-radius: 8px 8px 0 0;
+  background: linear-gradient(180deg, #faf8f6 0%, #ffffff 100%);
+  color: #9a948f;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 3;
+  opacity: 0;
+  transition: opacity 220ms ease, color 180ms ease, background 180ms ease;
+}
+.composer:hover .composer-collapse-btn,
+.composer-collapse-btn:focus-visible,
+.composer--collapsed .composer-collapse-btn {
+  opacity: 1;
+}
+.composer-collapse-btn:hover {
+  color: var(--stone-700);
+  background: #f1efec;
+}
+.composer-collapse-btn svg {
+  transition: transform 320ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+.composer--collapsed .composer-collapse-btn svg {
+  transform: rotate(180deg);
+}
+
+/* ── Collapsible inner wrapper ── */
+.composer-collapsible {
+  display: grid;
+  grid-template-rows: 1fr;
+  transition: grid-template-rows 360ms cubic-bezier(0.4, 0, 0.2, 1),
+              opacity 280ms cubic-bezier(0.4, 0, 0.2, 1);
+  opacity: 1;
+}
+.composer-collapsible > * {
+  overflow: hidden;
+}
+.composer--collapsed .composer-collapsible {
+  grid-template-rows: 0fr;
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* ── Collapsed peek bar ── */
+.composer-peek {
+  display: none;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 16px;
+  cursor: pointer;
+  transition: background 180ms ease;
+  user-select: none;
+}
+.composer-peek:hover {
+  background: rgba(250, 248, 246, 0.6);
+}
+.composer--collapsed .composer-peek {
+  display: flex;
+}
+.composer-peek-label {
+  font-family: "Cormorant Garamond", "Merriweather", serif;
+  font-size: 16px;
+  font-weight: 600;
+  color: #8a95a8;
+  letter-spacing: 0.01em;
+  flex: 1;
+}
+.composer-peek-icon {
+  color: #9a948f;
+  display: flex;
+  align-items: center;
+  transition: transform 260ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+.composer-peek:hover .composer-peek-icon {
+  transform: translateY(-1px);
+}
+
+/* ── Collapsed state adjustments ── */
+.composer--collapsed {
+  box-shadow: 0 6px 20px rgba(28, 25, 23, 0.07);
+}
+
+/* Reduce fade gradient when composer is collapsed */
+.chat-main:has(.composer--collapsed)::after {
+  height: 60px;
+  transition: height 360ms cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .composer-label {
@@ -4134,6 +4234,11 @@ body[data-theme="dark"] .composer-status-badge[data-status="inactive"] { border-
 body[data-theme="dark"] .composer-status-badge-version { color: #6b6662; }
 body[data-theme="dark"] .request-state { color: #6b6662; }
 body[data-theme="dark"] .request-state.error { color: #e05a4f; }
+body[data-theme="dark"] .composer-collapse-btn { background: linear-gradient(180deg, #1c1917 0%, #232019 100%); border-color: #3a3633; color: #6b6662; }
+body[data-theme="dark"] .composer-collapse-btn:hover { background: #2e2a27; color: #9a948f; }
+body[data-theme="dark"] .composer-peek:hover { background: rgba(35,32,25,0.6); }
+body[data-theme="dark"] .composer-peek-label { color: #4a4643; }
+body[data-theme="dark"] .composer-peek-icon { color: #6b6662; }
 
 /* Evidence panel */
 body[data-theme="dark"] #evidencePanel,
