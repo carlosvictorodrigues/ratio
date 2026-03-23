@@ -1815,7 +1815,8 @@ def get_informativo_items(
     # Normalize dates and filter in Python (reliable across all date formats)
     for row in rows:
         row["_date_norm"] = _parse_date_loose(row.get("data_julgamento") or "")
-    rows = [r for r in rows if r["_date_norm"] and r["_date_norm"] >= cutoff]
+    today = date.today().isoformat()
+    rows = [r for r in rows if r["_date_norm"] and r["_date_norm"] >= cutoff and r["_date_norm"] <= today]
     rows.sort(key=lambda r: r["_date_norm"], reverse=True)
 
     # Build enriched items from rows
