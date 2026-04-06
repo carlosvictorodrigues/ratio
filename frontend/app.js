@@ -433,6 +433,34 @@ function buildSourceDocumentText(doc) {
   return parts.join("\n");
 }
 
+function buildSourceEmentaCopyText(doc) {
+  const tribunal = safeText(doc?.tribunal, "-");
+  const tipo = safeText(doc?.tipo_label || doc?.tipo, "Documento");
+  const processo = safeText(doc?.processo, "-");
+  const date = dateHuman(doc?.data_julgamento);
+  const relator = safeText(doc?.relator, "-");
+  const orgao = safeText(doc?.orgao_julgador, "-");
+  const header = `EMENTA - ${tribunal} - ${tipo}: ${processo} - ${date}`;
+  const parts = [header, `Relator(a): ${relator}`, `Orgao julgador: ${orgao}`, ""];
+  const normative = String(doc?.normative_statement || "").trim();
+  const textoBusca = String(doc?.texto_busca || "").trim();
+  const body = normative || textoBusca;
+  if (!body) return "";
+  parts.push(body);
+  return parts.join("\n");
+}
+
+function buildBatchCopyText(docs) {
+  const total = docs.length;
+  return docs.map((doc, i) => {
+    const header = `[${i + 1}/${total}] ${safeText(doc?.tribunal, "-")} - ${safeText(doc?.tipo_label || doc?.tipo, "Documento")}: ${safeText(doc?.processo, "-")} - ${dateHuman(doc?.data_julgamento)}`;
+    const relator = `Relator(a): ${safeText(doc?.relator, "-")}`;
+    const orgao = `Orgao julgador: ${safeText(doc?.orgao_julgador, "-")}`;
+    const body = String(doc?.normative_statement || doc?.texto_busca || "").trim();
+    return `========================================\n${header}\n${relator}\n${orgao}\n\n${body}`;
+  }).join("\n\n");
+}
+
 function openSourceDocumentByIndex(docIndex) {
   const turn = getTurn(state.activeTurnId);
   const doc = findDocByIndex(turn, docIndex);
@@ -1444,20 +1472,24 @@ function applyUserCorpusJobSnapshot(job) {
 
   if (status === "done") {
     setUserCorpusStage("done");
+    const decisions = Math.max(0, Number(progress.extracted_decisions || 0));
+    const decSuffix = decisions > 0 ? `, ${decisions} decisao(oes) de JSON` : "";
     setUserCorpusStatus(
-      `Indexacao concluida: ${indexedDocs} doc(s), ${duplicates} duplicado(s), ${skipped} ignorado(s).`
+      `Indexacao concluida: ${indexedDocs} doc(s)${decSuffix}, ${duplicates} duplicado(s), ${skipped} ignorado(s).`
     );
     return;
   }
 
   setUserCorpusStage(stage);
+  const decisions = Math.max(0, Number(progress.extracted_decisions || 0));
+  const decSuffix = decisions > 0 ? ` | ${decisions} decisao(oes)` : "";
   const etaSuffix = eta ? ` | ETA ${eta}` : "";
   const fileSuffix = currentFile ? ` | arquivo: ${currentFile}` : "";
   const progressLine = total > 0
     ? `${processed}/${total} arquivo(s) processados`
     : "Aguardando processamento do lote";
   const lead = stageMessage || "Indexando Meu Acervo";
-  setUserCorpusStatus(`${lead} (${progressLine}${etaSuffix}${fileSuffix})`);
+  setUserCorpusStatus(`${lead} (${progressLine}${decSuffix}${etaSuffix}${fileSuffix})`);
 }
 
 function sleepMs(ms) {
@@ -2544,18 +2576,18 @@ async function indexUserCorpusNow() {
   // Merge files from both inputs (file picker + folder picker), filter PDFs only
   const pickedFiles = Array.from(userCorpusFilesInput?.files || []);
   const folderFiles = Array.from(userCorpusFolderInput?.files || [])
-    .filter(f => f.name.toLowerCase().endsWith(".pdf"));
+    .filter(f => { const n = f.name.toLowerCase(); return n.endsWith(".pdf") || n.endsWith(".json"); });
   const files = pickedFiles.length ? pickedFiles : folderFiles;
   if (!files.length) {
     setUserCorpusStage("ready", { errored: true });
-    setUserCorpusStatus("Selecione ao menos 1 PDF para indexar.", true);
+    setUserCorpusStatus("Selecione ao menos 1 PDF ou JSON para indexar.", true);
     return;
   }
   const sourceName = String(userCorpusNameInput?.value || "").trim() || "Banco 1";
   const ocrMissingOnly = userCorpusOcrMissingOnly?.checked !== false;
   const confirmText = [
     `Indexar ${files.length} arquivo(s) em "${sourceName}"?`,
-    "A indexacao vai consumir cota da API Gemini (OCR/limpeza/embeddings).",
+    "A indexacao vai consumir cota da API Gemini (embeddings e, para PDFs, OCR/limpeza).",
     "Esta acao exige confirmacao manual."
   ].join("\n");
   if (!window.confirm(confirmText)) {
@@ -4326,7 +4358,10 @@ function renderSources(turn) {
       <article class="source-card source-card-actionable" data-doc-index="${escapeHtml(docIndex)}" data-tribunal="${escapeHtml((d.tribunal || '').toUpperCase())}" data-open-doc="1" tabindex="0" role="button" aria-label="Abrir DOC ${escapeHtml(docIndex)}">
         <div class="source-top">
           <span class="source-doc-tag" data-tribunal="${escapeHtml((d.tribunal || '').toUpperCase())}">${escapeHtml((d.tribunal || '').toUpperCase())} · DOC ${escapeHtml(docIndex)}</span>
-          <span class="source-date">${escapeHtml(date)}</span>
+          <div class="source-top-actions">
+            <span class="source-date">${escapeHtml(date)}</span>
+            <button class="source-copy-btn" type="button" data-doc-index="${escapeHtml(docIndex)}" data-source-action="copy-ementa" title="Copiar ementa" aria-label="Copiar ementa DOC ${escapeHtml(docIndex)}"><i data-lucide="copy"></i></button>
+          </div>
         </div>
         <p class="source-title">${escapeHtml(title)}</p>
         <p class="source-orgao">${escapeHtml(orgao)}</p>
@@ -4341,6 +4376,9 @@ function renderSources(turn) {
       </article>
     `;
   }).join("");
+  const batchCopySourcesBtn = document.getElementById("batchCopySourcesBtn");
+  if (batchCopySourcesBtn) batchCopySourcesBtn.hidden = !docs.length;
+  refreshIcons();
 }
 
 function renderEvidence() {
@@ -5229,7 +5267,82 @@ function bindEvents() {
     }
   });
 
+  // ── Batch copy modal ──
+  const batchCopyModal = document.getElementById("batchCopyModal");
+  const closeBatchCopyBtn = document.getElementById("closeBatchCopyBtn");
+  const batchCopySelectAll = document.getElementById("batchCopySelectAll");
+  const batchCopyCount = document.getElementById("batchCopyCount");
+  const batchCopyList = document.getElementById("batchCopyList");
+  const batchCopyExecuteBtn = document.getElementById("batchCopyExecuteBtn");
+  const batchCopySourcesBtn = document.getElementById("batchCopySourcesBtn");
+
+  function setBatchCopyOpen(open) {
+    document.body.dataset.batchCopyOpen = open ? "true" : "false";
+    if (batchCopyModal) batchCopyModal.hidden = !open;
+  }
+  function updateBatchCopyCount() {
+    if (!batchCopyList || !batchCopyCount) return;
+    const all = batchCopyList.querySelectorAll(".batch-copy-check");
+    const sel = batchCopyList.querySelectorAll(".batch-copy-check:checked");
+    batchCopyCount.textContent = `${sel.length} selecionada(s)`;
+    if (batchCopySelectAll) {
+      batchCopySelectAll.checked = sel.length === all.length;
+      batchCopySelectAll.indeterminate = sel.length > 0 && sel.length < all.length;
+    }
+  }
+  function renderBatchCopyList(docs) {
+    if (!batchCopyList) return;
+    batchCopyList.innerHTML = docs.map((d, i) => {
+      const tribunal = safeText(d.tribunal, "-");
+      const processo = safeText(d.processo, "-");
+      const date = dateHuman(d.data_julgamento);
+      const preview = String(d.normative_statement || d.texto_busca || "").trim().slice(0, 120);
+      return `<li class="batch-copy-item"><label><input type="checkbox" class="batch-copy-check" data-doc-index="${escapeHtml(String(d.index ?? i))}" checked /><div class="batch-copy-item-info"><strong>${escapeHtml(tribunal)} - ${escapeHtml(processo)}</strong><span class="batch-copy-item-date">${escapeHtml(date)}</span><p class="batch-copy-item-preview">${escapeHtml(preview)}${preview.length >= 120 ? "..." : ""}</p></div></label></li>`;
+    }).join("");
+    updateBatchCopyCount();
+    refreshIcons();
+  }
+  function openBatchCopyModal() {
+    const turn = getTurn(state.activeTurnId);
+    const docs = turn?.docs || [];
+    if (!docs.length) return;
+    renderBatchCopyList(docs);
+    setBatchCopyOpen(true);
+  }
+  function closeBatchCopyModal() { setBatchCopyOpen(false); }
+
+  batchCopySourcesBtn?.addEventListener("click", () => openBatchCopyModal());
+  closeBatchCopyBtn?.addEventListener("click", () => closeBatchCopyModal());
+  batchCopySelectAll?.addEventListener("change", () => {
+    const checked = batchCopySelectAll.checked;
+    batchCopyList?.querySelectorAll(".batch-copy-check").forEach(cb => { cb.checked = checked; });
+    updateBatchCopyCount();
+  });
+  batchCopyList?.addEventListener("change", () => updateBatchCopyCount());
+  batchCopyExecuteBtn?.addEventListener("click", async () => {
+    const turn = getTurn(state.activeTurnId);
+    const docs = turn?.docs || [];
+    const selectedIndices = new Set();
+    batchCopyList?.querySelectorAll(".batch-copy-check:checked").forEach(cb => {
+      selectedIndices.add(cb.getAttribute("data-doc-index"));
+    });
+    const selectedDocs = docs.filter((d, i) => selectedIndices.has(String(d.index ?? i)));
+    if (!selectedDocs.length) { setRequestState("Nenhuma ementa selecionada.", true); return; }
+    const text = buildBatchCopyText(selectedDocs);
+    try {
+      await navigator.clipboard.writeText(text);
+      setRequestState(`${selectedDocs.length} ementa(s) copiada(s).`);
+      closeBatchCopyModal();
+    } catch (_) {
+      setRequestState("Nao foi possivel copiar automaticamente.", true);
+    }
+  });
+
   overlay?.addEventListener("click", () => {
+    if (document.body.dataset.batchCopyOpen === "true") {
+      closeBatchCopyModal();
+      return;
+    }
     if (document.body.dataset.supportOpen === "true") {
       dismissSupport();
       return;
@@ -5297,9 +5410,9 @@ function bindEvents() {
   });
   indexUserCorpusBtn?.addEventListener("click", indexUserCorpusNow);
   userCorpusFolderInput?.addEventListener("change", () => {
-    const pdfs = Array.from(userCorpusFolderInput.files || []).filter(f => f.name.toLowerCase().endsWith(".pdf"));
-    if (pdfs.length) {
-      setUserCorpusStatus(`${pdfs.length} PDF(s) encontrado(s) na pasta selecionada.`);
+    const accepted = Array.from(userCorpusFolderInput.files || []).filter(f => { const n = f.name.toLowerCase(); return n.endsWith(".pdf") || n.endsWith(".json"); });
+    if (accepted.length) {
+      setUserCorpusStatus(`${accepted.length} arquivo(s) PDF/JSON encontrado(s) na pasta selecionada.`);
       if (userCorpusFilesInput) userCorpusFilesInput.value = "";
     }
   });
@@ -5410,7 +5523,7 @@ function bindEvents() {
     await handleTurnAction(action, turnId, audioMode);
   });
 
-  sourcesBox?.addEventListener("click", (event) => {
+  sourcesBox?.addEventListener("click", async (event) => {
     const target = event.target instanceof Element ? event.target : null;
     if (!target) return;
     if (target.closest(".source-thesis")) return;
@@ -5419,6 +5532,28 @@ function bindEvents() {
     if (sourceAction) {
       const action = sourceAction.getAttribute("data-source-action") || "";
       const docIndex = sourceAction.getAttribute("data-doc-index") || "";
+      if (action === "copy-ementa") {
+        event.preventDefault();
+        event.stopPropagation();
+        const turn = getTurn(state.activeTurnId);
+        const doc = findDocByIndex(turn, docIndex);
+        if (!doc) { setRequestState("Fonte nao encontrada para copiar.", true); return; }
+        const text = buildSourceEmentaCopyText(doc);
+        if (!text) { setRequestState("Esta fonte nao possui ementa disponivel para copia.", true); return; }
+        try {
+          await navigator.clipboard.writeText(text);
+          const icon = sourceAction.querySelector("[data-lucide]");
+          if (icon) {
+            icon.setAttribute("data-lucide", "check");
+            refreshIcons();
+            setTimeout(() => { icon.setAttribute("data-lucide", "copy"); refreshIcons(); }, 1800);
+          }
+          setRequestState("Ementa copiada.");
+        } catch (_) {
+          setRequestState("Nao foi possivel copiar automaticamente.", true);
+        }
+        return;
+      }
       if (action === "open-inline") {
         event.preventDefault();
         openSourceDocumentByIndex(docIndex);
@@ -5434,9 +5569,11 @@ function bindEvents() {
   sourcesBox?.addEventListener("keydown", (event) => {
     const target = event.target instanceof Element ? event.target : null;
     if (!target) return;
+    if (event.key !== "Enter" && event.key !== " ") return;
+    const actionEl = target.closest("[data-source-action]");
+    if (actionEl) { event.preventDefault(); actionEl.click(); return; }
     const card = target.closest(".source-card[data-open-doc='1']");
     if (!card) return;
-    if (event.key !== "Enter" && event.key !== " ") return;
     event.preventDefault();
     openSourceDocumentByIndex(card.getAttribute("data-doc-index") || "");
   });
@@ -5463,6 +5600,10 @@ function bindEvents() {
 
   window.addEventListener("keydown", (event) => {
     if (event.key !== "Escape") return;
+    if (document.body.dataset.batchCopyOpen === "true") {
+      closeBatchCopyModal();
+      return;
+    }
     if (document.body.dataset.supportOpen === "true") {
       dismissSupport();
       return;

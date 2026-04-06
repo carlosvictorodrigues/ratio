@@ -396,6 +396,36 @@ def test_frontend_meu_acervo_uses_async_job_status_polling():
     assert "eta_seconds" in js
 
 
+def test_meu_acervo_accepts_json_in_file_picker():
+    html = _read("frontend/index.html")
+    assert ".json" in html
+    assert "PDF ou JSON" in html
+
+
+def test_meu_acervo_folder_flow_accepts_json():
+    js = _read("frontend/app.js")
+    assert '".json"' in js or "'.json'" in js
+    assert '.filter(f => f.name.toLowerCase().endsWith(".pdf"));' not in js
+
+
+def test_frontend_has_copy_ementa_action():
+    js = _read("frontend/app.js")
+    assert "copy-ementa" in js
+    assert "buildSourceEmentaCopyText" in js
+
+
+def test_frontend_has_batch_copy_modal_markup():
+    html = _read("frontend/index.html")
+    assert 'id="batchCopyModal"' in html
+    assert 'id="batchCopyExecuteBtn"' in html
+    assert 'id="batchCopySourcesBtn"' in html
+
+
+def test_frontend_batch_copy_follows_modal_pattern():
+    js = _read("frontend/app.js")
+    assert "batchCopyOpen" in js
+
+
 def test_frontend_query_stream_has_timeout_and_uses_real_pipeline_runtime():
     js = _read("frontend/app.js")
     assert "QUERY_STREAM_TIMEOUT_MS" in js

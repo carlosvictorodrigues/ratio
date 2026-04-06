@@ -576,10 +576,30 @@
         <ul id="metricsBox" class="metrics-list"></ul>
         <div class="evidence-head">
           <h3>Anexos</h3>
-          <span id="docCountTag" class="tag">0</span>
+          <div class="evidence-head-actions">
+            <button id="batchCopySourcesBtn" class="icon-btn batch-copy-trigger" type="button" title="Copiar ementas em lote" aria-label="Copiar ementas em lote" hidden>
+              <i data-lucide="copy-plus"></i>
+            </button>
+            <span id="docCountTag" class="tag">0</span>
+          </div>
         </div>
         <div id="sourcesBox" class="sources-box"></div>
       </aside>
+    </div>
+  </section>
+
+  <section id="batchCopyModal" class="batch-copy-modal panel-shell" role="dialog" aria-label="Copiar ementas em lote" hidden>
+    <div class="panel-head">
+      <h2>Copiar ementas em lote</h2>
+      <button id="closeBatchCopyBtn" class="icon-btn" type="button" aria-label="Fechar"><i data-lucide="x"></i></button>
+    </div>
+    <div class="batch-copy-controls">
+      <label class="batch-copy-select-all"><input id="batchCopySelectAll" type="checkbox" checked /><span>Selecionar todas</span></label>
+      <span id="batchCopyCount" class="batch-copy-count">0 selecionada(s)</span>
+    </div>
+    <ul id="batchCopyList" class="batch-copy-list"></ul>
+    <div class="batch-copy-actions">
+      <button id="batchCopyExecuteBtn" class="meta-btn" type="button"><i data-lucide="copy"></i> Copiar selecionadas</button>
     </div>
   </section>
 
@@ -850,15 +870,15 @@
       <summary>Indexacao de documentos</summary>
       <div class="disclosure-body">
         <p class="rag-panel-note">
-          Upload em lote de PDFs para indexacao no acervo pessoal. Suporta multiplos arquivos por envio.
+          Upload em lote de PDFs ou JSONs (DataJud) para indexacao no acervo pessoal. Suporta multiplos arquivos por envio.
         </p>
         <label class="field">
           <span>Nome da base do usuario</span>
           <input id="userCorpusNameInput" type="text" placeholder="Banco 1" />
         </label>
         <label class="field">
-          <span>Arquivos PDF</span>
-          <input id="userCorpusFilesInput" type="file" accept="application/pdf" multiple />
+          <span>Arquivos PDF ou JSON</span>
+          <input id="userCorpusFilesInput" type="file" accept="application/pdf,application/json,.json,.pdf" multiple />
         </label>
         <div class="field">
           <span>Ou selecione uma pasta inteira (inclui subpastas)</span>

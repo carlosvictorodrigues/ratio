@@ -2176,6 +2176,173 @@ def _ensure_pdf_magic_bytes(temp_path: Path, filename: str) -> None:
         )
 
 
+def _ensure_json_magic_bytes(temp_path: Path, filename: str) -> None:
+    try:
+        with temp_path.open("rb") as handle:
+            raw = handle.read(256)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "code": "invalid_json_signature",
+                "message": f"Nao foi possivel validar o arquivo '{filename}' como JSON.",
+                "hint": "Reenvie um JSON valido.",
+            },
+        ) from exc
+    stripped = raw.lstrip(b" \t\n\r\xef\xbb\xbf")
+    if not stripped or stripped[0:1] not in (b"[", b"{"):
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "code": "invalid_json_signature",
+                "message": f"Arquivo '{filename}' nao possui assinatura JSON valida.",
+                "hint": "Envie um arquivo JSON valido (deve iniciar com [ ou {).",
+            },
+        )
+
+
+def _deep_get(obj: Any, *keys: str) -> Any:
+    current = obj
+    for key in keys:
+        if not isinstance(current, dict):
+            return None
+        current = current.get(key)
+    return current
+
+
+def _extract_ramo_direito(d: dict[str, Any]) -> str:
+    area = str(d.get("area") or "").strip()
+    assuntos = d.get("assuntos")
+    nomes: list[str] = []
+    if isinstance(assuntos, list):
+        for item in assuntos:
+            if isinstance(item, dict):
+                nome = str(item.get("nome") or "").strip()
+                if nome:
+                    nomes.append(nome)
+    parts = [area] if area else []
+    if nomes:
+        parts.append(" | ".join(nomes))
+    return " - ".join(parts)
+
+
+_DATAJUD_KNOWN_FIELDS = frozenset({
+    "ementatextopuro", "ementatextopurohighlight", "numeroprocesso",
+    "classe", "origem", "orgaojulgador", "orgaojulgadorcolegiado",
+    "datajulgamento", "textopuro", "textooriginal",
+    "ementaTextoPuro", "numeroProcesso", "orgaoJulgador",
+    "orgaoJulgadorColegiado", "dataJulgamento", "textoPuro",
+    "textoOriginal",
+})
+
+
+def _normalize_datajud_decision(d: dict[str, Any]) -> dict[str, str]:
+    texto_busca = str(
+        d.get("ementatextopuro") or d.get("ementaTextoPuro") or ""
+    ).strip()
+    texto_integral = str(
+        d.get("textopuro") or d.get("textoOriginal")
+        or d.get("textoPuro") or d.get("textooriginal") or ""
+    ).strip()
+    if not texto_busca:
+        texto_busca = texto_integral[:8000]
+    if not texto_integral:
+        texto_integral = texto_busca
+    return {
+        "tribunal": str(d.get("origem") or "").strip(),
+        "tipo": str(
+            _deep_get(d, "classe", "nome") or ""
+        ).strip(),
+        "processo": str(
+            d.get("numeroprocesso") or d.get("numeroProcesso") or ""
+        ).strip(),
+        "relator": str(
+            _deep_get(d, "orgaojulgador", "nome")
+            or _deep_get(d, "orgaoJulgador", "nome") or ""
+        ).strip(),
+        "orgao_julgador": str(
+            _deep_get(d, "orgaojulgadorcolegiado", "nome")
+            or _deep_get(d, "orgaoJulgadorColegiado", "nome") or ""
+        ).strip(),
+        "ramo_direito": _extract_ramo_direito(d),
+        "data_julgamento": _clean_iso_date(
+            d.get("datajulgamento") or d.get("dataJulgamento") or ""
+        ),
+        "texto_busca": texto_busca[:8000],
+        "texto_integral": texto_integral,
+    }
+
+
+def _find_decision_list(data: Any) -> list[dict[str, Any]]:
+    if isinstance(data, list):
+        dicts = [item for item in data if isinstance(item, dict)]
+        if dicts:
+            return dicts
+    if isinstance(data, dict):
+        has_known = any(k in _DATAJUD_KNOWN_FIELDS for k in data)
+        if has_known:
+            return [data]
+        best: list[dict[str, Any]] = []
+        for value in data.values():
+            if isinstance(value, list):
+                dicts = [item for item in value if isinstance(item, dict)]
+                if len(dicts) > len(best):
+                    best = dicts
+        if best:
+            return best
+    return []
+
+
+def _extract_decisions_from_json_file(
+    temp_path: Path, filename: str,
+) -> list[dict[str, str]]:
+    try:
+        raw_bytes = temp_path.read_bytes()
+    except Exception as exc:
+        raise _UserAcervoValidationError(
+            code="json_read_error",
+            message=f"Nao foi possivel ler o arquivo '{filename}'.",
+            hint=str(exc)[:200],
+        ) from exc
+
+    text = ""
+    for encoding in ("utf-8", "latin-1"):
+        try:
+            text = raw_bytes.decode(encoding)
+            break
+        except (UnicodeDecodeError, ValueError):
+            continue
+    if not text:
+        raise _UserAcervoValidationError(
+            code="json_encoding_error",
+            message=f"Arquivo '{filename}' possui encoding nao suportado.",
+            hint="Tente converter para UTF-8.",
+        )
+
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError as exc:
+        raise _UserAcervoValidationError(
+            code="invalid_json_content",
+            message=f"Arquivo '{filename}' nao e um JSON sintaticamente valido.",
+            hint=str(exc)[:200],
+        ) from exc
+
+    raw_decisions = _find_decision_list(data)
+    if not raw_decisions:
+        return []
+
+    results: list[dict[str, str]] = []
+    for d in raw_decisions:
+        normalized = _normalize_datajud_decision(d)
+        tb = normalized.get("texto_busca") or ""
+        ti = normalized.get("texto_integral") or ""
+        if len(tb) < 20 and len(ti) < 20:
+            continue
+        results.append(normalized)
+    return results
+
+
 def _user_lance_schema() -> Any:
     _require_user_acervo_runtime()
     return pa.schema(
@@ -2702,6 +2869,7 @@ def _new_user_acervo_job(
             "skipped_files": int(max(skipped_files, 0)),
             "pages_text": 0,
             "pages_ocr": 0,
+            "extracted_decisions": 0,
             "running_files": 0,
             "current_file": "",
             "last_error": "",
@@ -2887,6 +3055,65 @@ def _build_user_acervo_record_batch(
     return records_batch
 
 
+def _build_user_acervo_record_batch_json(
+    *,
+    cleaned_batch: list[str],
+    vectors: list[list[float]],
+    batch_start: int,
+    total_chunks: int,
+    source_id: str,
+    source_label: str,
+    filename: str,
+    digest: str,
+    decision_index: int,
+    decision_total: int,
+    decision_meta: dict[str, str],
+) -> list[dict[str, Any]]:
+    records_batch: list[dict[str, Any]] = []
+    for local_idx, (chunk_text, vector) in enumerate(zip(cleaned_batch, vectors), start=1):
+        chunk_index = batch_start + local_idx
+        metadata_extra = json.dumps(
+            {
+                "source_kind": "user",
+                "source_id": source_id,
+                "source_label": source_label,
+                "file_name": filename,
+                "doc_sha256": digest,
+                "file_kind": "json",
+                "decision_index": decision_index,
+                "decision_total": decision_total,
+                "chunk_index": chunk_index,
+                "chunk_total": total_chunks,
+            },
+            ensure_ascii=False,
+        )
+        records_batch.append(
+            {
+                "vector": vector,
+                "doc_id": f"{source_id}:{digest[:16]}:dec{decision_index}:chunk{chunk_index}",
+                "tribunal": decision_meta.get("tribunal") or "MEU_ACERVO",
+                "tipo": decision_meta.get("tipo") or "acervo_json",
+                "processo": decision_meta.get("processo") or filename,
+                "relator": decision_meta.get("relator") or "-",
+                "ramo_direito": decision_meta.get("ramo_direito") or "",
+                "data_julgamento": decision_meta.get("data_julgamento") or "",
+                "orgao_julgador": decision_meta.get("orgao_julgador") or "Meu Acervo",
+                "texto_busca": chunk_text[:8000],
+                "texto_integral": chunk_text,
+                "url": "",
+                "metadata_extra": metadata_extra,
+                "source_id": source_id,
+                "source_label": source_label,
+                "source_kind": "user",
+                "doc_sha256": digest,
+                "file_name": filename,
+                "chunk_index": chunk_index,
+                "chunk_total": total_chunks,
+            }
+        )
+    return records_batch
+
+
 def _index_single_user_acervo_file(
     *,
     job_id: str,
@@ -2903,6 +3130,8 @@ def _index_single_user_acervo_file(
     temp_path = Path(str(file_payload.get("temp_path") or "")).expanduser()
     started = time.perf_counter()
 
+    file_kind = str(file_payload.get("file_kind") or "pdf").strip().lower()
+
     summary: dict[str, Any] = {
         "indexed_docs": 0,
         "indexed_chunks": 0,
@@ -2911,6 +3140,7 @@ def _index_single_user_acervo_file(
         "skipped_files": 0,
         "pages_text": 0,
         "pages_ocr": 0,
+        "extracted_decisions": 0,
         "error": "",
     }
 
@@ -2936,73 +3166,166 @@ def _index_single_user_acervo_file(
             file_name=filename,
             doc_sha256=digest[:16],
         )
-        _update_user_acervo_job(
-            job_id,
-            stage="extract",
-            message=f"Extraindo texto: {filename}",
-            progress_set={"current_file": filename},
-        )
-        extracted_text, page_stats = _extract_pdf_text_with_optional_ocr(temp_path, bool(ocr_missing_only))
-        summary["pages_text"] = int(page_stats.get("pages_with_text") or 0)
-        summary["pages_ocr"] = int(page_stats.get("pages_with_ocr") or 0)
 
-        if not extracted_text:
-            summary["skipped_files"] = 1
-            return summary
-
-        chunks = _split_user_text_chunks(extracted_text, max_chars=USER_ACERVO_CHUNK_CHARS)
-        if not chunks:
-            summary["skipped_files"] = 1
-            return summary
-
-        total_chunks = len(chunks)
-        batch_size = 32
-        file_inserted_rows = 0
-        for batch_start in range(0, total_chunks, batch_size):
-            raw_batch = chunks[batch_start : batch_start + batch_size]
+        if file_kind == "json":
+            # ── JSON path: extract structured decisions ──
             _update_user_acervo_job(
                 job_id,
-                stage="clean",
-                message=f"Limpando ruido juridico: {filename}",
+                stage="extract",
+                message=f"Extraindo decisoes JSON: {filename}",
                 progress_set={"current_file": filename},
             )
-            cleaned_batch = [_clean_user_chunk_with_flash(chunk) for chunk in raw_batch]
+            try:
+                decisions = _extract_decisions_from_json_file(temp_path, filename)
+            except _UserAcervoValidationError as ve:
+                _acervo_log_event(
+                    "acervo_file_error", job_id=job_id,
+                    file_name=filename, error=ve.message,
+                    duration_ms=int((time.perf_counter() - started) * 1000),
+                )
+                summary["skipped_files"] = 1
+                summary["error"] = _short(ve.message, max_chars=400)
+                return summary
+
+            if not decisions:
+                summary["skipped_files"] = 1
+                return summary
+
+            decision_total = len(decisions)
+            file_inserted_rows = 0
+            file_total_chunks = 0
+            batch_size = 32
+
+            for dec_idx, dec_meta in enumerate(decisions):
+                dec_text_parts: list[str] = []
+                tb = dec_meta.get("texto_busca") or ""
+                ti = dec_meta.get("texto_integral") or ""
+                if tb:
+                    dec_text_parts.append(tb)
+                if ti and ti != tb:
+                    dec_text_parts.append(ti)
+                dec_text = "\n\n".join(dec_text_parts)
+
+                chunks = _split_user_text_chunks(dec_text, max_chars=USER_ACERVO_CHUNK_CHARS)
+                if not chunks:
+                    continue
+
+                total_chunks = len(chunks)
+                file_total_chunks += total_chunks
+
+                for batch_start in range(0, total_chunks, batch_size):
+                    raw_batch = chunks[batch_start : batch_start + batch_size]
+                    cleaned_batch = [_clean_user_chunk_heuristic(chunk) for chunk in raw_batch]
+                    _update_user_acervo_job(
+                        job_id,
+                        stage="embed",
+                        message=f"Embeddings JSON: {filename} (decisao {dec_idx + 1}/{decision_total})",
+                        progress_set={"current_file": filename},
+                    )
+                    vectors = _embed_user_chunks(cleaned_batch)
+                    records_batch = _build_user_acervo_record_batch_json(
+                        cleaned_batch=cleaned_batch,
+                        vectors=vectors,
+                        batch_start=batch_start,
+                        total_chunks=total_chunks,
+                        source_id=source_id,
+                        source_label=source_label,
+                        filename=filename,
+                        digest=digest,
+                        decision_index=dec_idx,
+                        decision_total=decision_total,
+                        decision_meta=dec_meta,
+                    )
+                    if records_batch:
+                        with _USER_ACERVO_WRITE_LOCK:
+                            file_inserted_rows += _upsert_user_records(records_batch)
+
+            summary["indexed_docs"] = 1
+            summary["indexed_chunks"] = int(file_total_chunks)
+            summary["inserted_rows"] = int(file_inserted_rows)
+            summary["extracted_decisions"] = int(decision_total)
+            _acervo_log_event(
+                "acervo_file_done",
+                job_id=job_id,
+                file_name=filename,
+                indexed_chunks=summary["indexed_chunks"],
+                inserted_rows=summary["inserted_rows"],
+                extracted_decisions=decision_total,
+                duration_ms=int((time.perf_counter() - started) * 1000),
+            )
+            if digest:
+                with hash_lock:
+                    existing_hashes.add(digest)
+
+        else:
+            # ── PDF path: existing pipeline ──
             _update_user_acervo_job(
                 job_id,
-                stage="embed",
-                message=f"Gerando embeddings e gravando: {filename}",
+                stage="extract",
+                message=f"Extraindo texto: {filename}",
                 progress_set={"current_file": filename},
             )
-            vectors = _embed_user_chunks(cleaned_batch)
-            records_batch = _build_user_acervo_record_batch(
-                cleaned_batch=cleaned_batch,
-                vectors=vectors,
-                batch_start=batch_start,
-                total_chunks=total_chunks,
-                source_id=source_id,
-                source_label=source_label,
-                filename=filename,
-                digest=digest,
-                ocr_missing_only=bool(ocr_missing_only),
-            )
-            if records_batch:
-                with _USER_ACERVO_WRITE_LOCK:
-                    file_inserted_rows += _upsert_user_records(records_batch)
+            extracted_text, page_stats = _extract_pdf_text_with_optional_ocr(temp_path, bool(ocr_missing_only))
+            summary["pages_text"] = int(page_stats.get("pages_with_text") or 0)
+            summary["pages_ocr"] = int(page_stats.get("pages_with_ocr") or 0)
 
-        summary["indexed_docs"] = 1
-        summary["indexed_chunks"] = int(total_chunks)
-        summary["inserted_rows"] = int(file_inserted_rows)
-        _acervo_log_event(
-            "acervo_file_done",
-            job_id=job_id,
-            file_name=filename,
-            indexed_chunks=summary["indexed_chunks"],
-            inserted_rows=summary["inserted_rows"],
-            duration_ms=int((time.perf_counter() - started) * 1000),
-        )
-        if digest:
-            with hash_lock:
-                existing_hashes.add(digest)
+            if not extracted_text:
+                summary["skipped_files"] = 1
+                return summary
+
+            chunks = _split_user_text_chunks(extracted_text, max_chars=USER_ACERVO_CHUNK_CHARS)
+            if not chunks:
+                summary["skipped_files"] = 1
+                return summary
+
+            total_chunks = len(chunks)
+            batch_size = 32
+            file_inserted_rows = 0
+            for batch_start in range(0, total_chunks, batch_size):
+                raw_batch = chunks[batch_start : batch_start + batch_size]
+                _update_user_acervo_job(
+                    job_id,
+                    stage="clean",
+                    message=f"Limpando ruido juridico: {filename}",
+                    progress_set={"current_file": filename},
+                )
+                cleaned_batch = [_clean_user_chunk_with_flash(chunk) for chunk in raw_batch]
+                _update_user_acervo_job(
+                    job_id,
+                    stage="embed",
+                    message=f"Gerando embeddings e gravando: {filename}",
+                    progress_set={"current_file": filename},
+                )
+                vectors = _embed_user_chunks(cleaned_batch)
+                records_batch = _build_user_acervo_record_batch(
+                    cleaned_batch=cleaned_batch,
+                    vectors=vectors,
+                    batch_start=batch_start,
+                    total_chunks=total_chunks,
+                    source_id=source_id,
+                    source_label=source_label,
+                    filename=filename,
+                    digest=digest,
+                    ocr_missing_only=bool(ocr_missing_only),
+                )
+                if records_batch:
+                    with _USER_ACERVO_WRITE_LOCK:
+                        file_inserted_rows += _upsert_user_records(records_batch)
+
+            summary["indexed_docs"] = 1
+            summary["indexed_chunks"] = int(total_chunks)
+            summary["inserted_rows"] = int(file_inserted_rows)
+            _acervo_log_event(
+                "acervo_file_done",
+                job_id=job_id,
+                file_name=filename,
+                indexed_chunks=summary["indexed_chunks"],
+                inserted_rows=summary["inserted_rows"],
+                duration_ms=int((time.perf_counter() - started) * 1000),
+            )
+            if digest:
+                with hash_lock:
+                    existing_hashes.add(digest)
     except Exception as exc:
         summary["skipped_files"] = 1
         summary["error"] = _short(str(exc), max_chars=400)
@@ -3096,6 +3419,7 @@ def _run_user_acervo_index_job(
                         "skipped_files": 1,
                         "pages_text": 0,
                         "pages_ocr": 0,
+                        "extracted_decisions": 0,
                         "error": _short(str(exc), max_chars=400),
                     }
                 processed_files += 1
@@ -3113,6 +3437,7 @@ def _run_user_acervo_index_job(
                         "skipped_files": int(summary.get("skipped_files") or 0),
                         "pages_text": int(summary.get("pages_text") or 0),
                         "pages_ocr": int(summary.get("pages_ocr") or 0),
+                        "extracted_decisions": int(summary.get("extracted_decisions") or 0),
                     },
                     progress_set={
                         "running_files": max(0, total_files - processed_files),
@@ -3131,6 +3456,7 @@ def _run_user_acervo_index_job(
         skipped_files = int(progress.get("skipped_files") or 0)
         pages_text = int(progress.get("pages_text") or 0)
         pages_ocr = int(progress.get("pages_ocr") or 0)
+        extracted_decisions = int(progress.get("extracted_decisions") or 0)
 
         manifest = _load_user_sources_manifest()
         sources: list[dict[str, Any]] = list(manifest.get("sources", []))
@@ -3151,6 +3477,7 @@ def _run_user_acervo_index_job(
             "skipped_files": skipped_files,
             "pages_text": pages_text,
             "pages_ocr": pages_ocr,
+            "extracted_decisions": extracted_decisions,
         }
         if errors and indexed_docs <= 0:
             _update_user_acervo_job(
@@ -3167,8 +3494,9 @@ def _run_user_acervo_index_job(
                 progress_set={"running_files": 0, "current_file": ""},
             )
         else:
+            dec_suffix = f", {extracted_decisions} decisao(oes) de JSON" if extracted_decisions > 0 else ""
             done_message = (
-                f"Indexacao concluida: {indexed_docs} doc(s), {duplicate_files} duplicado(s), "
+                f"Indexacao concluida: {indexed_docs} doc(s){dec_suffix}, {duplicate_files} duplicado(s), "
                 f"{skipped_files} ignorado(s)."
             )
             if errors:
@@ -4056,8 +4384,8 @@ def meu_acervo_index_api(
             status_code=400,
             detail={
                 "code": "missing_files",
-                "message": "Nenhum arquivo PDF enviado para indexacao.",
-                "hint": "Selecione ao menos 1 PDF.",
+                "message": "Nenhum arquivo PDF ou JSON enviado para indexacao.",
+                "hint": "Selecione ao menos 1 PDF ou JSON.",
             },
         )
     if len(files) > USER_ACERVO_MAX_FILES_PER_REQUEST:
@@ -4075,18 +4403,26 @@ def meu_acervo_index_api(
     source_label = str(source.get("name") or source_id).strip() or source_id
 
     stored_files: list[dict[str, Any]] = []
-    skipped_non_pdf = 0
+    skipped_unsupported = 0
     request_total_bytes = 0
 
     for upload in files:
         filename = (upload.filename or "documento.pdf").strip() or "documento.pdf"
         try:
-            if not filename.lower().endswith(".pdf"):
-                skipped_non_pdf += 1
+            lower_name = filename.lower()
+            if lower_name.endswith(".pdf"):
+                file_kind = "pdf"
+            elif lower_name.endswith(".json"):
+                file_kind = "json"
+            else:
+                skipped_unsupported += 1
                 continue
 
             temp_path, digest, file_bytes = _store_upload_file(upload, filename)
-            _ensure_pdf_magic_bytes(temp_path, filename)
+            if file_kind == "pdf":
+                _ensure_pdf_magic_bytes(temp_path, filename)
+            else:
+                _ensure_json_magic_bytes(temp_path, filename)
             request_total_bytes += int(file_bytes)
             if request_total_bytes > USER_ACERVO_MAX_REQUEST_SIZE_BYTES:
                 _raise_user_acervo_validation_error(
@@ -4103,6 +4439,7 @@ def meu_acervo_index_api(
                     "digest": digest,
                     "file_bytes": int(file_bytes),
                     "temp_path": str(temp_path),
+                    "file_kind": file_kind,
                 }
             )
         except _UserAcervoValidationError as exc:
@@ -4141,8 +4478,8 @@ def meu_acervo_index_api(
     if not stored_files:
         _raise_user_acervo_validation_error(
             code="missing_files",
-            message="Nenhum arquivo PDF valido enviado para indexacao.",
-            hint="Selecione ao menos 1 PDF valido.",
+            message="Nenhum arquivo PDF ou JSON valido enviado para indexacao.",
+            hint="Selecione ao menos 1 PDF ou JSON valido.",
         )
 
     try:
@@ -4151,7 +4488,7 @@ def meu_acervo_index_api(
             source_label=source_label,
             ocr_missing_only=bool(ocr_missing_only),
             stored_files=stored_files,
-            pre_skipped_files=int(skipped_non_pdf),
+            pre_skipped_files=int(skipped_unsupported),
         )
     except Exception as exc:
         for item in stored_files:
@@ -4169,7 +4506,7 @@ def meu_acervo_index_api(
         "source_id": source_id,
         "source_label": source_label,
         "accepted_files": len(stored_files),
-        "skipped_files": int(skipped_non_pdf),
+        "skipped_files": int(skipped_unsupported),
         "poll_after_ms": USER_ACERVO_INDEX_JOB_POLL_MS,
     }
 

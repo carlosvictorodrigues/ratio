@@ -529,6 +529,110 @@ def test_meu_acervo_index_starts_async_job_and_exposes_job_status():
     assert isinstance(job.get("progress"), dict)
 
 
+def test_meu_acervo_index_accepts_json_file():
+    backend_main = _load_backend_with_stub()
+    client = TestClient(backend_main.app)
+
+    backend_main._start_user_acervo_index_job = lambda **_kwargs: "job-json-001"
+
+    fake_json = io.BytesIO(b'[{"ementatextopuro":"Ementa de teste com texto suficiente para validacao.","numeroprocesso":"1234567-00.2025.8.14.0000","origem":"TJPA","classe":{"nome":"Apelacao"}}]')
+    response = client.post(
+        "/api/meu-acervo/index",
+        data={
+            "confirm_index": "true",
+            "source_name": "Banco JSON",
+            "ocr_missing_only": "true",
+        },
+        files={"files": ("decisoes.json", fake_json, "application/json")},
+    )
+    assert response.status_code == 202
+    payload = response.json()
+    assert payload.get("status") == "accepted"
+    assert payload.get("accepted_files") == 1
+
+
+def test_meu_acervo_index_rejects_json_without_valid_signature():
+    backend_main = _load_backend_with_stub()
+    backend_main.USER_ACERVO_MAX_FILE_SIZE_BYTES = 1024
+    backend_main.USER_ACERVO_MAX_REQUEST_SIZE_BYTES = 1024
+    client = TestClient(backend_main.app)
+
+    fake_non_json = io.BytesIO(b"NOT-A-JSON-FILE-CONTENT")
+    response = client.post(
+        "/api/meu-acervo/index",
+        data={
+            "confirm_index": "true",
+            "source_name": "Banco 1",
+            "ocr_missing_only": "true",
+        },
+        files={"files": ("falso.json", fake_non_json, "application/json")},
+    )
+    assert response.status_code == 422
+    detail = response.json().get("detail", {})
+    assert str(detail.get("code")) == "invalid_json_signature"
+
+
+def test_extract_decisions_from_json_file():
+    import tempfile
+    backend_main = _load_backend_with_stub()
+    json_content = json.dumps([
+        {
+            "ementatextopuro": "Ementa completa de teste numero um para validacao da extracao de decisoes.",
+            "numeroprocesso": "0001234-56.2025.8.14.0000",
+            "origem": "Tribunal de Justica do Estado do Para",
+            "classe": {"nome": "Apelacao Civel"},
+            "orgaojulgador": {"nome": "Des. Fulano de Tal"},
+            "orgaojulgadorcolegiado": {"nome": "1a Turma de Direito Privado"},
+            "datajulgamento": "2025-03-15",
+            "area": "Civel",
+        },
+        {
+            "ementatextopuro": "Segunda ementa de teste para validacao com texto suficiente para nao ser ignorada.",
+            "numeroprocesso": "0009876-54.2025.8.14.0000",
+            "origem": "TJPA",
+            "classe": {"nome": "Agravo"},
+            "datajulgamento": "2025-04-01",
+        },
+    ]).encode("utf-8")
+
+    with tempfile.NamedTemporaryFile(suffix=".json", delete=False) as tmp:
+        tmp.write(json_content)
+        tmp_path = Path(tmp.name)
+
+    try:
+        results = backend_main._extract_decisions_from_json_file(tmp_path, "test.json")
+        assert len(results) == 2
+        assert results[0]["tribunal"] == "Tribunal de Justica do Estado do Para"
+        assert results[0]["tipo"] == "Apelacao Civel"
+        assert results[0]["processo"] == "0001234-56.2025.8.14.0000"
+        assert results[0]["data_julgamento"] == "2025-03-15"
+        assert results[1]["tribunal"] == "TJPA"
+        for r in results:
+            for field in ("tribunal", "tipo", "processo", "relator", "orgao_julgador", "ramo_direito", "data_julgamento", "texto_busca", "texto_integral"):
+                assert field in r
+    finally:
+        tmp_path.unlink(missing_ok=True)
+
+
+def test_extract_decisions_skips_empty_ementa():
+    import tempfile
+    backend_main = _load_backend_with_stub()
+    json_content = json.dumps([
+        {"ementatextopuro": "", "textopuro": "", "numeroprocesso": "123", "origem": "TJPA"},
+        {"ementatextopuro": "curto", "textopuro": "", "numeroprocesso": "456", "origem": "TJPA"},
+    ]).encode("utf-8")
+
+    with tempfile.NamedTemporaryFile(suffix=".json", delete=False) as tmp:
+        tmp.write(json_content)
+        tmp_path = Path(tmp.name)
+
+    try:
+        results = backend_main._extract_decisions_from_json_file(tmp_path, "empty.json")
+        assert len(results) == 0
+    finally:
+        tmp_path.unlink(missing_ok=True)
+
+
 def test_meu_acervo_index_job_status_returns_404_for_unknown_job():
     backend_main = _load_backend_with_stub()
     client = TestClient(backend_main.app)
