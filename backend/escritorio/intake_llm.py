@@ -6,10 +6,20 @@ import anyio
 
 from backend.escritorio.config import DEFAULT_PESQUISADOR_MODEL
 from backend.escritorio.models import RatioEscritorioState
+from backend.escritorio.pii_guard import maybe_mask
 
 
 def build_intake_prompt(state: RatioEscritorioState) -> str:
-    facts = (state.fatos_brutos or "").strip() or "Sem fatos informados."
+    raw_facts = (state.fatos_brutos or "").strip() or "Sem fatos informados."
+    # Mask PII before sending to any LLM provider (no-op when RATIO_PII_GUARD_ENABLED != "1")
+    facts, guard = maybe_mask(raw_facts)
+    if guard.has_pii:
+        import sys
+        print(
+            f"[intake] Guard Brasil mascarou {guard.masked_count} itens PII "
+            f"({', '.join(guard.patterns)}) — risco LGPD: {guard.lgpd_risk}",
+            file=sys.stderr,
+        )
     return (
         "Voce e um advogado assistente em intake juridico.\n"
         "Estruture o caso abaixo e retorne SOMENTE um objeto JSON com os campos: "
@@ -35,19 +45,19 @@ async def generate_intake_with_gemini(
     configured_model = (model or DEFAULT_PESQUISADOR_MODEL).strip()
 
     def _invoke() -> dict:
-        active_client = client
-        if active_client is None:
-            from rag.query import get_gemini_client
+        if client is not None:
+            # Explicit client injected (e.g. in tests) — use it directly.
+            response = client.models.generate_content(
+                model=configured_model,
+                contents=prompt,
+            )
+            text = getattr(response, "text", None)
+            if not text:
+                raise ValueError("Resposta vazia no intake.")
+            return parse_intake_payload(text)
 
-            active_client = get_gemini_client()
+        from backend.escritorio.llm_provider import generate_text  # noqa: PLC0415
 
-        response = active_client.models.generate_content(
-            model=configured_model,
-            contents=prompt,
-        )
-        text = getattr(response, "text", None)
-        if not text:
-            raise ValueError("Resposta vazia no intake.")
-        return parse_intake_payload(text)
+        return parse_intake_payload(generate_text(prompt, configured_model))
 
     return await anyio.to_thread.run_sync(_invoke)

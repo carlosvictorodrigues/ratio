@@ -70,3 +70,4 @@ packages/
 *.rar
 *.tar
 *.gz
+test_cases/

@@ -6,11 +6,14 @@ import anyio
 
 from backend.escritorio.config import DEFAULT_REASONING_MODEL
 from backend.escritorio.models import RatioEscritorioState
+from backend.escritorio.pii_guard import maybe_mask
 from backend.escritorio.verifier import CitationCandidate, canonicalize_candidate, extract_citation_candidates
 
 
 def build_redaction_prompt(state: RatioEscritorioState) -> str:
-    facts = (state.fatos_brutos or "").strip() or "Sem fatos informados."
+    raw_facts = (state.fatos_brutos or "").strip() or "Sem fatos informados."
+    # Mask PII before sending to any LLM provider (no-op when RATIO_PII_GUARD_ENABLED != "1")
+    facts, _guard = maybe_mask(raw_facts)
     teses = [f"- {tese.descricao}" for tese in state.teses] or ["- Sem teses estruturadas"]
     jurisprudencia = [
         f"- {row.get('processo') or row.get('doc_id') or 'Documento sem id'}"
@@ -129,20 +132,19 @@ async def generate_sections_with_gemini(
     configured_model = (model or DEFAULT_REASONING_MODEL).strip()
 
     def _invoke() -> dict[str, str]:
-        active_client = client
-        if active_client is None:
-            from rag.query import get_gemini_client
+        if client is not None:
+            response = client.models.generate_content(
+                model=configured_model,
+                contents=prompt,
+            )
+            text = getattr(response, "text", None)
+            if not text:
+                raise ValueError("Resposta vazia na redacao de secoes.")
+            return parse_sections_payload(text)
 
-            active_client = get_gemini_client()
+        from backend.escritorio.llm_provider import generate_text  # noqa: PLC0415
 
-        response = active_client.models.generate_content(
-            model=configured_model,
-            contents=prompt,
-        )
-        text = getattr(response, "text", None)
-        if not text:
-            raise ValueError("Resposta vazia na redacao de secoes.")
-        return parse_sections_payload(text)
+        return parse_sections_payload(generate_text(prompt, configured_model))
 
     return await anyio.to_thread.run_sync(_invoke)
 
@@ -157,19 +159,18 @@ async def generate_revision_with_gemini(
     configured_model = (model or DEFAULT_REASONING_MODEL).strip()
 
     def _invoke() -> dict[str, str]:
-        active_client = client
-        if active_client is None:
-            from rag.query import get_gemini_client
+        if client is not None:
+            response = client.models.generate_content(
+                model=configured_model,
+                contents=prompt,
+            )
+            text = getattr(response, "text", None)
+            if not text:
+                raise ValueError("Resposta vazia na revisao de secoes.")
+            return parse_sections_payload(text)
 
-            active_client = get_gemini_client()
+        from backend.escritorio.llm_provider import generate_text  # noqa: PLC0415
 
-        response = active_client.models.generate_content(
-            model=configured_model,
-            contents=prompt,
-        )
-        text = getattr(response, "text", None)
-        if not text:
-            raise ValueError("Resposta vazia na revisao de secoes.")
-        return parse_sections_payload(text)
+        return parse_sections_payload(generate_text(prompt, configured_model))
 
     return await anyio.to_thread.run_sync(_invoke)
