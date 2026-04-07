@@ -168,7 +168,7 @@ def _call_openrouter(prompt: str, model: str) -> str:
             "Authorization": f"Bearer {api_key}",
             "Content-Type": "application/json",
             "HTTP-Referer": "https://github.com/carlosvictorodrigues/ratio",
-            "X-Title": "Ratio Escritório",
+            "X-Title": "Ratio Escritorio",
         },
         json={
             "model": model,
@@ -234,6 +234,36 @@ def _call_alibaba(prompt: str, model: str) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+def _strip_code_fence(text: str) -> str:
+    """Strip markdown code fences from LLM responses.
+
+    Some models (non-Gemini) wrap JSON in ```json ... ``` even when the
+    prompt explicitly requests raw JSON. This normalises the output so all
+    callers receive clean text regardless of provider.
+
+    Examples::
+
+        ```json\\n{...}\\n```  →  {...}
+        ```\\n{...}\\n```      →  {...}
+        just plain text        →  just plain text (unchanged)
+    """
+    stripped = text.strip()
+    if stripped.startswith("```"):
+        # Drop the opening fence line (```json or just ```)
+        lines = stripped.split("\n")
+        # Remove first line (```…) and last line if it is ```
+        start = 1
+        end = len(lines)
+        if lines[-1].strip() == "```":
+            end -= 1
+        stripped = "\n".join(lines[start:end]).strip()
+    return stripped
+
+
+# ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
 
@@ -267,11 +297,11 @@ def generate_text(prompt: str, model: str) -> str:
 
     # ── OpenRouter ────────────────────────────────────────────────────────────
     if GENERATION_PROVIDER == "openrouter":
-        return _call_openrouter(prompt, _openrouter_model_for(model))
+        return _strip_code_fence(_call_openrouter(prompt, _openrouter_model_for(model)))
 
     # ── Alibaba DashScope ─────────────────────────────────────────────────────
     if GENERATION_PROVIDER == "alibaba":
-        return _call_alibaba(prompt, _alibaba_model_for(model))
+        return _strip_code_fence(_call_alibaba(prompt, _alibaba_model_for(model)))
 
     # ── Claude ────────────────────────────────────────────────────────────────
     if GENERATION_PROVIDER == "claude":

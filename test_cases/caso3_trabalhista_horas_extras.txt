@@ -1,0 +1,52 @@
+PROCESSO: RR-10368-91.2018.5.03.0097
+TRIBUNAL: Tribunal Superior do Trabalho — 6ª Turma
+RELATOR: Ministro Augusto César Leite de Carvalho
+DATA DO JULGAMENTO: 22/03/2023
+
+EMENTA: HORAS EXTRAS. CONTROLE DE JORNADA. SISTEMA BRITÂNICO. CARGO DE CONFIANÇA. 
+ENQUADRAMENTO NO ART. 62, II DA CLT. REQUISITOS. PROVA.
+
+FATOS:
+Trata-se de reclamação trabalhista ajuizada por ex-empregado em face de empresa de 
+telecomunicações. O reclamante ocupava o cargo de "Supervisor de Operações" com salário 
+mensal de R$ 8.500,00, correspondente a 40% acima dos demais empregados da categoria.
+
+O empregado trabalhou por 6 anos na empresa, cumprindo jornada de 8h diárias com 
+frequentes extensões não remuneradas. A empresa adotava sistema de controle de ponto 
+eletrônico (sistema britânico), porém arguiu que o cargo do reclamante se enquadrava no 
+art. 62, II da CLT (cargo de confiança), razão pela qual não seria devida hora extra.
+
+O Tribunal Regional do Trabalho da 3ª Região (TRT-3) reconheceu o enquadramento no 
+art. 62, II da CLT e julgou improcedente o pedido de horas extras.
+
+QUESTÃO JURÍDICA:
+1. O cargo de "Supervisor de Operações" com poderes limitados e sem alçada para contratar 
+   ou demitir empregados se enquadra no art. 62, II da CLT como cargo de confiança?
+2. O diferencial salarial de 40% (acima do salário da categoria) é suficiente para caracterizar 
+   o cargo de confiança do art. 62, II da CLT?
+
+FUNDAMENTOS DO RECURSO:
+- Ausência de poderes reais de gestão (não podia contratar, demitir ou alterar salários)
+- Diferencial de 40% não atinge o patamar jurisprudencial mínimo do TST (40%)
+- Controle de jornada por sistema britânico afasta a dispensa do registro
+- Hora extra habitual não compensada: 2h/dia × 6 anos
+
+PEDIDOS:
+1. Horas extras com adicional de 50% por 2h diárias durante 6 anos: R$ 184.320,00
+2. Reflexos sobre: DSR, férias + 1/3, 13º salário, FGTS + 40%
+3. Total estimado com reflexos: R$ 280.000,00
+4. Honorários advocatícios: 15%
+
+DECISÃO TST:
+O TST, por unanimidade, deu provimento ao recurso de revista para:
+a) Afastar o enquadramento no art. 62, II da CLT, por ausência de comprovação de 
+   poderes reais de gestão e alçada decisória;
+b) Reconhecer o direito às horas extras no período imprescrito (últimos 5 anos);
+c) Determinar o retorno dos autos ao TRT-3 para apuração do quantum debeatur.
+
+LEGISLAÇÃO APLICADA:
+- Consolidação das Leis do Trabalho (CLT) — art. 62, II; art. 7º, XVI
+- Constituição Federal — art. 7º, XIII, XVI
+- Súmula 102/TST — Cargo de confiança
+
+FONTE: TST — Publicado no DEJT de 24/03/2023

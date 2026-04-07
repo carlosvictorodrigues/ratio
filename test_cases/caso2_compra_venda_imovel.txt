@@ -1,0 +1,50 @@
+PROCESSO: REsp 2.021.711-RS
+TRIBUNAL: Superior Tribunal de Justiça — 3ª Turma
+RELATORA: Ministra Nancy Andrighi
+RELATOR DO ACÓRDÃO: Ministro Moura Ribeiro
+DATA DO JULGAMENTO: 14/03/2023
+
+EMENTA: COMPRA E VENDA DE IMÓVEL NA PLANTA. SALA COMERCIAL. NATUREZA DE INVESTIMENTO. 
+CÓDIGO DE DEFESA DO CONSUMIDOR. APLICAÇÃO. TEORIA FINALISTA MITIGADA. 
+PEQUENA DIFERENÇA NA ÁREA REAL. DESCUMPRIMENTO CONTRATUAL. RESCISÃO DE CONTRATO. NÃO CABIMENTO.
+
+FATOS:
+Trata-se de recurso especial interposto por compradora de sala comercial adquirida na planta 
+de incorporadora imobiliária. A compradora adquiriu o imóvel com finalidade de investimento, 
+sendo que a entrega do bem ocorreu com pequena diferença na área útil real em relação à área 
+prometida em contrato (menos de 1/20 — menos de 5%).
+
+A compradora buscou a rescisão do contrato e a restituição de todos os valores pagos, alegando 
+vício no produto (diferença de área) e descumprimento contratual.
+
+O Tribunal de Origem negou o pedido, entendendo que a diferença de área era mínima e não 
+justificaria a rescisão.
+
+QUESTÃO JURÍDICA:
+1. O Código de Defesa do Consumidor (CDC) se aplica a comprador de imóvel comercial 
+   adquirido como investimento?
+2. A pequena diferença de área (inferior a 1/20 da medida enunciada) configura descumprimento 
+   contratual apto a ensejar a rescisão do contrato?
+
+FUNDAMENTOS DO RECURSO:
+- Vulnerabilidade fática da compradora perante a incorporadora (pessoa jurídica de grande porte)
+- Aplicação da teoria finalista mitigada do CDC
+- Direito à rescisão contratual por vício do produto (art. 18 do CDC)
+- Devolução integral dos valores pagos corrigidos
+
+DECISÃO STJ:
+O STJ, por maioria, decidiu que:
+a) O CDC se aplica ao caso pela teoria finalista mitigada, reconhecendo a vulnerabilidade 
+   fática da compradora pessoa física frente à incorporadora;
+b) Contudo, a pequena diferença de área (inferior a 1/20 da medida enunciada no contrato) 
+   NÃO configura descumprimento contratual apto a ensejar a rescisão do contrato, nos termos 
+   do art. 500, § 1º do Código Civil, aplicável por analogia;
+c) O recurso foi parcialmente provido apenas para reconhecer a aplicabilidade do CDC, mas 
+   sem autorizar a rescisão contratual.
+
+LEGISLAÇÃO APLICADA:
+- Código de Defesa do Consumidor (Lei 8.078/1990) — arts. 2º, 18
+- Código Civil (Lei 10.406/2002) — art. 500, § 1º
+- Teoria finalista mitigada do CDC
+
+FONTE: STJ — Informativo de Jurisprudência n. 767, de 21 de março de 2023
