@@ -854,8 +854,22 @@ Plano detalhado em: `C:\Users\Gabriel\.claude\plans\calm-pondering-whistle.md`
 - [x] Todos os 56 testes frontend passaram
 - [x] Dist sync: index.html, app.js, styles.css → dist/Ratio/_internal/frontend/
 
+### Validação com JSON Real (json_example.txt)
+- [x] Extração testada: 2 decisões extraídas corretamente do arquivo real DataJud
+- [x] Campos mapeados: tribunal, tipo, processo, relator, orgao_julgador, ramo_direito, data_julgamento, texto_busca, texto_integral
+- [x] Decisão 1: TJPA, CONFLITO DE COMPETÊNCIA CÍVEL, 0809814-36.2023.8.14.0000, 1144 chars ementa, 6935 chars integral
+- [x] Decisão 2: TJPA, EXCEÇÃO DE SUSPEIÇÃO, 0816991-85.2022.8.14.0000, 1380 chars ementa, 15497 chars integral
+- [x] ramo_direito extraído corretamente: "Cível - Imunidade de Jurisdição", "Cível - Suspeição"
+
+### Release v2026.04.06-b1
+- [x] Version bump: 2026.03.23 (build 17) → 2026.04.06 (build 1)
+- [x] Commit: `b71bd3f feat: JSON import (DataJud) no Meu Acervo + copiar ementas em lote`
+- [x] Tag: `v2026.04.06-b1` criada e pushed
+- [x] GitHub Actions Release workflow: completado com sucesso
+- [x] Landing page (ratiojuris.me) atualizada com notas da v2026.04.06
+- [x] Landing page pushed e publicada
+
 ### Pendente
-- [ ] Validação manual com JSON real (json_example.txt)
-- [ ] Version bump e release (sessão separada)
-- [ ] Testar dark theme visual
-- [ ] Testar importação por pasta com mix PDF+JSON
+- [ ] Testar dark theme visual (manual)
+- [ ] Testar importação por pasta com mix PDF+JSON (manual)
+- [ ] Verificar auto-update em instalação existente

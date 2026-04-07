@@ -1824,11 +1824,37 @@ def _collect_stj_documents(
     return docs, summary
 
 
+def _juris_lance_schema():
+    import pyarrow as pa
+    return pa.schema(
+        [
+            pa.field("vector", pa.list_(pa.float32(), EMBED_DIM)),
+            pa.field("doc_id", pa.utf8()),
+            pa.field("tribunal", pa.utf8()),
+            pa.field("tipo", pa.utf8()),
+            pa.field("processo", pa.utf8()),
+            pa.field("relator", pa.utf8()),
+            pa.field("ramo_direito", pa.utf8()),
+            pa.field("data_julgamento", pa.utf8()),
+            pa.field("orgao_julgador", pa.utf8()),
+            pa.field("texto_busca", pa.utf8()),
+            pa.field("texto_integral", pa.large_utf8()),
+            pa.field("url", pa.utf8()),
+            pa.field("metadata_extra", pa.utf8()),
+        ]
+    )
+
+
 def _lancedb_open_ratio_table(project_root: Path):
     _internal = project_root / "_internal"
     lance_dir = _internal / "lancedb_store" if (_internal / "lancedb_store").is_dir() else project_root / "lancedb_store"
+    lance_dir.mkdir(parents=True, exist_ok=True)
     db = lancedb.connect(str(lance_dir))
-    return db.open_table(LANCE_TABLE_NAME)
+    try:
+        return db.open_table(LANCE_TABLE_NAME)
+    except Exception:
+        # Tabela nao existe (ex: git clone sem dados pre-construidos). Cria vazia.
+        return db.create_table(LANCE_TABLE_NAME, data=[], schema=_juris_lance_schema(), mode="overwrite")
 
 
 def _quote_sql_literal(value: str) -> str:

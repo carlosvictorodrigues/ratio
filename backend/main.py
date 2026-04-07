@@ -1,4 +1,10 @@
-﻿from __future__ import annotations
+from __future__ import annotations
+
+# Pre-carrega torch antes de qualquer DLL de rede/async (fix WinError 1114 no Windows)
+try:
+    import torch  # noqa: F401
+except Exception:
+    pass
 
 import base64
 from collections import deque
@@ -2237,40 +2243,49 @@ _DATAJUD_KNOWN_FIELDS = frozenset({
 
 
 def _normalize_datajud_decision(d: dict[str, Any]) -> dict[str, str]:
-    texto_busca = str(
-        d.get("ementatextopuro") or d.get("ementaTextoPuro") or ""
-    ).strip()
-    texto_integral = str(
-        d.get("textopuro") or d.get("textoOriginal")
-        or d.get("textoPuro") or d.get("textooriginal") or ""
-    ).strip()
-    if not texto_busca:
-        texto_busca = texto_integral[:8000]
-    if not texto_integral:
-        texto_integral = texto_busca
-    return {
-        "tribunal": str(d.get("origem") or "").strip(),
-        "tipo": str(
-            _deep_get(d, "classe", "nome") or ""
-        ).strip(),
-        "processo": str(
-            d.get("numeroprocesso") or d.get("numeroProcesso") or ""
-        ).strip(),
-        "relator": str(
-            _deep_get(d, "orgaojulgador", "nome")
-            or _deep_get(d, "orgaoJulgador", "nome") or ""
-        ).strip(),
-        "orgao_julgador": str(
-            _deep_get(d, "orgaojulgadorcolegiado", "nome")
-            or _deep_get(d, "orgaoJulgadorColegiado", "nome") or ""
-        ).strip(),
-        "ramo_direito": _extract_ramo_direito(d),
-        "data_julgamento": _clean_iso_date(
-            d.get("datajulgamento") or d.get("dataJulgamento") or ""
-        ),
-        "texto_busca": texto_busca[:8000],
-        "texto_integral": texto_integral,
+    _empty: dict[str, str] = {
+        "tribunal": "", "tipo": "", "processo": "", "relator": "",
+        "orgao_julgador": "", "ramo_direito": "", "data_julgamento": "",
+        "texto_busca": "", "texto_integral": "",
     }
+    try:
+        texto_busca = str(
+            d.get("ementatextopuro") or d.get("ementaTextoPuro") or ""
+        ).strip()
+        texto_integral = str(
+            d.get("textopuro") or d.get("textoOriginal")
+            or d.get("textoPuro") or d.get("textooriginal") or ""
+        ).strip()
+        if not texto_busca:
+            texto_busca = texto_integral[:8000]
+        if not texto_integral:
+            texto_integral = texto_busca
+        return {
+            "tribunal": str(d.get("origem") or "").strip(),
+            "tipo": str(
+                _deep_get(d, "classe", "nome") or ""
+            ).strip(),
+            "processo": str(
+                d.get("numeroprocesso") or d.get("numeroProcesso") or ""
+            ).strip(),
+            "relator": str(
+                _deep_get(d, "orgaojulgador", "nome")
+                or _deep_get(d, "orgaoJulgador", "nome") or ""
+            ).strip(),
+            "orgao_julgador": str(
+                _deep_get(d, "orgaojulgadorcolegiado", "nome")
+                or _deep_get(d, "orgaoJulgadorColegiado", "nome") or ""
+            ).strip(),
+            "ramo_direito": _extract_ramo_direito(d),
+            "data_julgamento": _clean_iso_date(
+                d.get("datajulgamento") or d.get("dataJulgamento") or ""
+            ),
+            "texto_busca": texto_busca[:8000],
+            "texto_integral": texto_integral,
+        }
+    except (KeyError, IndexError, TypeError, AttributeError) as exc:
+        log.warning("_normalize_datajud_decision: registro ignorado (%s)", exc)
+        return _empty
 
 
 def _find_decision_list(data: Any) -> list[dict[str, Any]]:
@@ -2334,12 +2349,16 @@ def _extract_decisions_from_json_file(
 
     results: list[dict[str, str]] = []
     for d in raw_decisions:
-        normalized = _normalize_datajud_decision(d)
-        tb = normalized.get("texto_busca") or ""
-        ti = normalized.get("texto_integral") or ""
-        if len(tb) < 20 and len(ti) < 20:
+        try:
+            normalized = _normalize_datajud_decision(d)
+            tb = normalized.get("texto_busca") or ""
+            ti = normalized.get("texto_integral") or ""
+            if len(tb) < 20 and len(ti) < 20:
+                continue
+            results.append(normalized)
+        except Exception as exc:
+            log.warning("_extract_decisions_from_json_file: decisao ignorada (%s)", exc)
             continue
-        results.append(normalized)
     return results
 
 
@@ -3752,7 +3771,14 @@ def _embed_user_chunks(chunks: list[str]) -> list[list[float]]:
                 ),
             ),
         )
-        vectors.extend([list(e.values) for e in (result.embeddings or [])])
+        embeddings = getattr(result, "embeddings", None) or []
+        for e in embeddings:
+            vals = getattr(e, "values", None)
+            if vals is None:
+                raise RuntimeError(
+                    f"Embedding retornou objeto sem 'values': {type(e).__name__}"
+                )
+            vectors.append(list(vals))
         if start + batch_size < len(chunks):
             time.sleep(0.3)  # avoid 429 on large uploads
     if len(vectors) != len(chunks):

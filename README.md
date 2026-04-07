@@ -113,6 +113,15 @@ O build inclui `lancedb_store` em `dist\Ratio\` e gera backup preventivo de banc
 
 ---
 
+## Manual de Operacao e Pesquisa
+
+O manual completo do Ratio esta disponivel online:
+- [Manual de Operacao e Pesquisa (Google Docs)](https://docs.google.com/document/d/1rZ2XNo0eouUoUJuacjetvBbXDJZ6jcx8/edit?usp=sharing&ouid=113759300308613331484&rtpof=true&sd=true)
+
+O documento tambem esta disponivel na raiz do projeto como `Ratio_Manual_de_Operacao_e_Pesquisa.docx`.
+
+---
+
 ## Primeiro uso (usuario final)
 
 1. Extraia o ZIP para uma pasta local, por exemplo `C:\Ratio`.
@@ -120,6 +129,7 @@ O build inclui `lancedb_store` em `dist\Ratio\` e gera backup preventivo de banc
 3. Aguarde abrir no navegador `http://127.0.0.1:5500`.
 4. No modal inicial, informe a chave Gemini.
 5. Rode uma consulta de teste.
+6. Consulte o [Manual de Operacao e Pesquisa](https://docs.google.com/document/d/1rZ2XNo0eouUoUJuacjetvBbXDJZ6jcx8/edit?usp=sharing&ouid=113759300308613331484&rtpof=true&sd=true) para aprender a utilizar todas as funcionalidades.
 
 ### Diagnostico rapido
 

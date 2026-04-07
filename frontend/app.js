@@ -2573,11 +2573,13 @@ function saveRagConfigNow() {
 
 async function indexUserCorpusNow() {
   resetUserCorpusStages();
-  // Merge files from both inputs (file picker + folder picker), filter PDFs only
-  const pickedFiles = Array.from(userCorpusFilesInput?.files || []);
-  const folderFiles = Array.from(userCorpusFolderInput?.files || [])
-    .filter(f => { const n = f.name.toLowerCase(); return n.endsWith(".pdf") || n.endsWith(".json"); });
-  const files = pickedFiles.length ? pickedFiles : folderFiles;
+  // Merge files from both inputs (file picker + folder picker), filter .pdf/.json
+  const _ext = f => { const n = f.name.toLowerCase(); return n.endsWith(".pdf") || n.endsWith(".json"); };
+  const pickedFiles = Array.from(userCorpusFilesInput?.files || []).filter(_ext);
+  const folderFiles = Array.from(userCorpusFolderInput?.files || []).filter(_ext);
+  // Combine both inputs, dedup by name+size
+  const _seen = new Set(pickedFiles.map(f => f.name + "|" + f.size));
+  const files = [...pickedFiles, ...folderFiles.filter(f => !_seen.has(f.name + "|" + f.size))];
   if (!files.length) {
     setUserCorpusStage("ready", { errored: true });
     setUserCorpusStatus("Selecione ao menos 1 PDF ou JSON para indexar.", true);
