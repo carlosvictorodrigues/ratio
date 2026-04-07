@@ -1,3 +1,5 @@
+import pytest
+
 from backend.escritorio.graph.adversarial_graph import build_adversarial_graph
 from backend.escritorio.models import RatioEscritorioState
 
@@ -103,7 +105,8 @@ def test_sycophancy_router_accepts_after_retry_limit_for_missing_critique():
     assert sycophancy_router(third_state) == "aceita"
 
 
-def test_default_contraparte_node_uses_real_contraparte_layer(monkeypatch):
+@pytest.mark.anyio
+async def test_default_contraparte_node_uses_real_contraparte_layer(monkeypatch):
     captured = {}
 
     async def fake_generate_critique(current_state: RatioEscritorioState):
@@ -124,7 +127,7 @@ def test_default_contraparte_node_uses_real_contraparte_layer(monkeypatch):
 
     from backend.escritorio.graph.adversarial_graph import contraparte_node
 
-    result = contraparte_node(
+    result = await contraparte_node(
         RatioEscritorioState(
             caso_id="caso-1",
             tipo_peca="peticao_inicial",
@@ -137,7 +140,8 @@ def test_default_contraparte_node_uses_real_contraparte_layer(monkeypatch):
     assert result["workflow_stage"] == "adversarial"
 
 
-def test_default_redator_revisao_node_uses_real_revision_layer(monkeypatch):
+@pytest.mark.anyio
+async def test_default_redator_revisao_node_uses_real_revision_layer(monkeypatch):
     captured = {}
 
     async def fake_generate_revision(payload):
@@ -165,7 +169,7 @@ def test_default_redator_revisao_node_uses_real_revision_layer(monkeypatch):
         },
     )
 
-    result = redator_revisao_node(state)
+    result = await redator_revisao_node(state)
 
     assert captured["payload"]["preserve_human_anchors"] is True
     assert result["peca_sections"]["dos_fatos"] == "Texto revisado."

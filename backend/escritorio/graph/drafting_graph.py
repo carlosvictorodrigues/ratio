@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import anyio
 from typing import Any, Callable
 
 from langgraph.graph import END, START, StateGraph
@@ -12,7 +11,7 @@ from backend.escritorio.redaction import (
     generate_sections_with_gemini,
     infer_section_provenance,
 )
-from backend.escritorio.tools.ratio_tools import merge_ranked_results, search_tese_bundle
+from backend.escritorio.tools.ratio_tools import merge_ranked_results, ratio_search, search_tese_bundle
 
 
 def _dedupe_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -64,24 +63,29 @@ async def pesquisar_teses(
     *,
     decompose_case_fn: Callable[[RatioEscritorioState], Any] | None = None,
     search_bundle_fn: Callable[..., Any] | None = None,
+    legislation_search_fn: Callable[[str], Any] | None = None,
 ) -> dict[str, Any]:
     teses = await decompose_case_into_teses(
         state,
         decompose_case_fn=decompose_case_fn,
     )
     active_search_bundle = search_bundle_fn or search_tese_bundle
+    active_legislation_search = legislation_search_fn or _search_legislation
     enriched_teses: list[dict[str, Any]] = []
     jurisprudencia: list[dict[str, Any]] = []
     legislacao: list[dict[str, Any]] = []
 
     for tese in teses:
-        async def _empty_legislacao():
-            return []
+        async def _search_legislacao_tese():
+            result = active_legislation_search(tese.descricao)
+            if callable(getattr(result, "__await__", None)):
+                return await result
+            return result
 
         bundle = await active_search_bundle(
             favoravel_query=tese.descricao,
             contraria_query=tese.descricao,
-            legislacao_operation=_empty_legislacao,
+            legislacao_operation=_search_legislacao_tese,
         )
         docs_favor = list((bundle.get("jurisprudencia_favoravel") or {}).get("docs", []))
         docs_contra = list((bundle.get("jurisprudencia_contraria") or {}).get("docs", []))
@@ -105,15 +109,20 @@ async def pesquisar_teses(
     }
 
 
-def pesquisador_node(state: RatioEscritorioState) -> dict[str, Any]:
-    return anyio.run(pesquisar_teses, state)
+async def pesquisador_node(state: RatioEscritorioState) -> dict[str, Any]:
+    return await pesquisar_teses(state)
 
 
 def make_pesquisador_node(search_bundle_fn: Callable[..., Any]) -> Callable[[RatioEscritorioState], dict[str, Any]]:
-    def _node(state: RatioEscritorioState) -> dict[str, Any]:
-        return anyio.run(lambda: pesquisar_teses(state, search_bundle_fn=search_bundle_fn))
+    async def _node(state: RatioEscritorioState) -> dict[str, Any]:
+        return await pesquisar_teses(state, search_bundle_fn=search_bundle_fn)
 
     return _node
+
+
+async def _search_legislation(query: str) -> list[dict[str, Any]]:
+    result = await ratio_search(query, prefer_recent=True, persona="parecer")
+    return list(result.get("docs", []))[:10]
 
 
 def curadoria_node(state: RatioEscritorioState) -> dict[str, Any]:
@@ -136,8 +145,8 @@ def gate2_router(state: RatioEscritorioState) -> str:
     return "redigir" if state.gate2_aprovado else "buscar_mais"
 
 
-def redator_node(state: RatioEscritorioState) -> dict[str, Any]:
-    sections = anyio.run(generate_sections_with_gemini, state)
+async def redator_node(state: RatioEscritorioState) -> dict[str, Any]:
+    sections = await generate_sections_with_gemini(state)
     provenance = infer_section_provenance(sections)
     evidence_pack = build_section_evidence_pack(state, sections)
     return {
@@ -167,10 +176,7 @@ def build_drafting_graph(
     graph.add_conditional_edges(
         "gate2",
         gate2_router_fn or gate2_router,
-        {
-            "buscar_mais": "pesquisador",
-            "redigir": "redator",
-        },
+        {"buscar_mais": "pesquisador", "redigir": "redator"},
     )
     graph.add_edge("redator", END)
     interrupt_before = ["gate2"] if enable_interrupts else []

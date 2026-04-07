@@ -5,7 +5,6 @@ from pathlib import Path
 import os
 from typing import Any, Callable
 
-import anyio
 from langgraph.graph import END, START, StateGraph
 
 log = logging.getLogger(__name__)
@@ -20,8 +19,8 @@ from backend.escritorio.store import slugify_case_id
 from backend.escritorio.verifier import verify_sections
 
 
-def contraparte_node(state: RatioEscritorioState) -> dict[str, Any]:
-    critique = anyio.run(generate_critique_with_gemini, state)
+async def contraparte_node(state: RatioEscritorioState) -> dict[str, Any]:
+    critique = await generate_critique_with_gemini(state)
     return {
         "status": "adversarial",
         "workflow_stage": "adversarial",
@@ -73,7 +72,7 @@ def decisao_advogado_router(state: RatioEscritorioState) -> str:
     return "finalizar" if state.usuario_finaliza else "mais_rodada"
 
 
-def redator_revisao_node(state: RatioEscritorioState) -> dict[str, Any]:
+async def redator_revisao_node(state: RatioEscritorioState) -> dict[str, Any]:
     current_round = state.rodadas[-1] if state.rodadas else None
     revision_payload = build_redator_revision_payload(
         state,
@@ -81,7 +80,7 @@ def redator_revisao_node(state: RatioEscritorioState) -> dict[str, Any]:
         human_notes=current_round.apontamentos_humanos if current_round else None,
         edited_sections=current_round.secoes_revisadas if current_round else None,
     )
-    revised_sections = anyio.run(generate_revision_with_gemini, revision_payload)
+    revised_sections = await generate_revision_with_gemini(revision_payload)
     merged_sections = dict(state.peca_sections)
     merged_sections.update(revised_sections)
     return {
@@ -158,10 +157,7 @@ def build_adversarial_graph(
     graph.add_conditional_edges(
         "pausa_humana",
         decisao_fn or decisao_advogado_router,
-        {
-            "mais_rodada": "redator_revisao",
-            "finalizar": "verificador",
-        },
+        {"mais_rodada": "redator_revisao", "finalizar": "verificador"},
     )
     graph.add_edge("redator_revisao", "contraparte")
     graph.add_edge("verificador", "formatador")

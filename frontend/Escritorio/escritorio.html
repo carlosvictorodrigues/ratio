@@ -102,46 +102,18 @@
       { id:'intake',      label:'Intake',      num:'01', agent:'intake',      color:'var(--agent-intake)' },
       { id:'research',    label:'Pesquisa',    num:'02', agent:'pesquisador', color:'var(--agent-pesquisador)' },
       { id:'drafting',    label:'Redacao',     num:'03', agent:'redator',     color:'var(--agent-redator)' },
-      { id:'adversarial', label:'Revisao',      num:'04', agent:'contraparte', color:'var(--agent-contraparte)' },
+      { id:'adversarial', label:'Revisao',     num:'04', agent:'contraparte', color:'var(--agent-contraparte)' },
       { id:'delivery',    label:'Entrega',     num:'05', agent:'auditor',     color:'var(--agent-auditor)' },
     ];
 
-    /* ══════════ MOCK DATA ══════════ */
-    const MOCK_SECTIONS = [
-      { id:'fatos',   title:'Dos Fatos',  content:'O autor celebrou contrato de financiamento imobiliario junto ao banco reu em 15/03/2023, comprometendo-se ao pagamento de 360 parcelas mensais. Apos o pagamento integral de todas as parcelas vencidas ate 10/01/2025, verificou-se a manutencao indevida de seu nome nos cadastros restritivos de credito.', status:'done' },
-      { id:'direito', title:'Do Direito',  content:'A responsabilidade objetiva esta caracterizada conforme o art. 14 do CDC, sendo desnecessaria a comprovacao de culpa por parte da instituicao financeira re.', status:'streaming' },
-      { id:'pedidos', title:'Dos Pedidos', content:'Requer-se a condenacao em danos morais no valor de R$ 30.000,00, bem como a exclusao definitiva do nome do autor dos cadastros de inadimplentes.', status:'pending' },
-    ];
-    const MOCK_TESES = [
-      { id:'t1', title:'Responsabilidade Objetiva e Dano in re ipsa', confidence:'Alta', docsCount:5,
-        docs:[ { id:'d1', process:'REsp 1.234.567/SP', court:'STJ', summary:'Manutencao indevida de negativacao gera dano moral presumido.' },
-               { id:'d2', process:'AREsp 2.345.678/RJ', court:'STJ', summary:'Quantum de R$20.000 para negativacao >30 dias.' } ],
-        queries:['manutencao negativacao apos quitacao','dano moral in re ipsa negativacao indevida'] },
-      { id:'t2', title:'Prazo de Exclusao — Sumula 548/STJ', confidence:'Media', docsCount:3,
-        docs:[ { id:'d3', process:'AgInt no AREsp 1.799.837/SP', court:'STJ', summary:'Prazo de 5 dias uteis para exclusao do cadastro.' } ],
-        queries:['sumula 548 STJ prazo exclusao cadastro'] },
-    ];
-    const MOCK_CRITICAS = [
-      { id:'c1', tipo:'material', gravidade:'alta', secao:'pedidos', desc:'Ausencia de fundamentacao sobre requisitos da tutela provisoria (art. 300 CPC).', argumento:'Juiz pode indeferir liminar por falta de fundamentacao.' },
-      { id:'c2', tipo:'jurisprudencia_fraca', gravidade:'media', secao:'pedidos', desc:'Quantum de R$30.000 acima da media do TJSP (~R$20.000) para casos analogos.', argumento:'Juiz pode reduzir o valor contestando excesso.' },
-    ];
-    const FEED_SCRIPT = [
-      { t:0,    agent:'intake',      type:'status', text:'Processando dossie preliminar...' },
-      { t:800,  agent:'intake',      type:'done',   text:'6 fatos extraidos, 4 documentos identificados' },
-      { t:1600, agent:'intake',      type:'done',   text:'Partes: Joao Silva vs. Banco X' },
-      { t:3000, agent:'pesquisador', type:'status', text:'Decompondo caso em teses juridicas...' },
-      { t:4000, agent:'pesquisador', type:'tool',   text:'ratio_search("manutencao negativacao quitacao") -> 22 docs' },
-      { t:5200, agent:'pesquisador', type:'tool',   text:'ratio_search("dano moral in re ipsa") -> 11 docs' },
-      { t:6400, agent:'pesquisador', type:'tool',   text:'ratio_search("sumula 548 prazo exclusao") -> 8 docs' },
-      { t:7200, agent:'pesquisador', type:'done',   text:'3 teses decompostas, 41 documentos coletados' },
-      { t:8500, agent:'redator',     type:'status', text:'Gerando secao "Dos Fatos"...' },
-      { t:10000,agent:'redator',     type:'status', text:'Gerando secao "Do Direito"...' },
-      { t:12000,agent:'redator',     type:'done',   text:'Peticao v1 gerada — 3 secoes, 14 citacoes' },
-      { t:13500,agent:'contraparte', type:'status', text:'Analisando peticao adversarialmente...' },
-      { t:14500,agent:'contraparte', type:'tool',   text:'ratio_search("excludente responsabilidade banco") -> 3 docs' },
-      { t:16000,agent:'contraparte', type:'warn',   text:'Anti-Sycophancy: verificando consistencia da critica...' },
-      { t:17000,agent:'contraparte', type:'done',   text:'Score de risco: 35/100 — 2 falhas identificadas' },
-    ];
+    /* Map backend status to phase index */
+    const STATUS_TO_PHASE = {
+      intake: 0, gate1: 0,
+      pesquisa: 1, gate2: 1,
+      redacao: 2,
+      adversarial: 3, revisao_humana: 3,
+      verificacao: 4, entrega: 4, finalizado: 4,
+    };
 
     /* ══════════ ICON HELPER ══════════ */
     function Icon({ name, className = "w-5 h-5", style }) {
@@ -163,7 +135,7 @@
       <div className="flex items-center space-x-2 font-mono text-xs rounded-md px-3 py-1.5"
         style={{ border:'1px solid var(--stone-300)', background:'var(--stone-100)' }}>
         <span style={{ color:'var(--stone-500)', fontSize:10 }}>Custo</span>
-        <span className="font-medium" style={{ color:'var(--accent)', fontSize:11 }}>R$ {cost.toFixed(2)}</span>
+        <span className="font-medium" style={{ color:'var(--accent)', fontSize:11 }}>US$ {cost.toFixed(4)}</span>
       </div>
     );
 
@@ -208,57 +180,83 @@
       </div>
     );
 
-    /* ── Agent output summaries (mock — replaced by real API data in production) ── */
-    const AGENT_OUTPUTS = {
-      intake: { title:'Dossie de Triagem', items:[
-        { label:'Partes', value:'Joao Silva (autor) vs. Banco X S.A. (reu)' },
-        { label:'Tipo', value:'Peticao Inicial — Danos Morais' },
-        { label:'Fatos extraidos', value:'6 fatos estruturados' },
-        { label:'Documentos', value:'4 documentos identificados (contrato, comprovantes, extrato, notificacao)' },
-        { label:'Area', value:'Direito do Consumidor' },
-      ], detail:'Fatos: (1) Contrato de financiamento celebrado em 15/03/2023; (2) 360 parcelas mensais; (3) Pagamento integral ate 10/01/2025; (4) Manutencao indevida em cadastro restritivo; (5) Tentativa frustrada de resolucao administrativa; (6) Dano moral configurado.' },
-      pesquisador: { title:'Resultado da Pesquisa', items:[
-        { label:'Teses decompostas', value:'3' },
-        { label:'Docs favoraveis', value:'38 decisoes' },
-        { label:'Docs contrarios', value:'3 decisoes' },
-        { label:'Legislacao', value:'Art. 14 CDC, Art. 43 §1 CDC, Sumula 548/STJ, Sumula 385/STJ' },
-      ], detail:'Tese 1: Responsabilidade Objetiva e Dano in re ipsa (5 docs, confianca alta)\nTese 2: Prazo de Exclusao — Sumula 548/STJ (3 docs, confianca media)\nTese 3: Quantum indenizatorio — parametros TJSP (4 docs, confianca media)' },
-      redator: { title:'Peca Redigida', items:[
-        { label:'Secoes', value:'Dos Fatos, Do Direito, Dos Pedidos' },
-        { label:'Citacoes', value:'14 referencias jurisprudenciais' },
-        { label:'Versao', value:'v1 (pre-adversarial)' },
-      ], detail:'Dos Fatos: 3 paragrafos narrando cronologia.\nDo Direito: Fundamentacao em responsabilidade objetiva (art. 14 CDC), dano moral in re ipsa, jurisprudencia STJ consolidada.\nDos Pedidos: Condenacao em danos morais R$30.000, exclusao cadastral, tutela de urgencia.' },
-      contraparte: { title:'Analise Adversarial', items:[
-        { label:'Rodadas', value:'2' },
-        { label:'Score final', value:'8/100 (baixo risco)' },
-        { label:'Falhas criticas', value:'0' },
-        { label:'Pontos ajustados', value:'2 (quantum e tutela provisoria)' },
-      ], detail:'Critica 1 (resolvida): Ausencia de fundamentacao para tutela provisoria — adicionado art. 300 CPC.\nCritica 2 (resolvida): Quantum acima da media TJSP — ajustado para R$20.000 com fundamentacao.' },
-      auditor: { title:'Relatorio de Auditoria', items:[
-        { label:'Citacoes verificadas', value:'7/7 validas' },
-        { label:'Artigos conferidos', value:'4/4 vigentes' },
-        { label:'Sumulas', value:'2/2 ativas' },
-        { label:'Formatacao', value:'ABNT/CNJ conforme' },
-      ], detail:'Todas as referencias jurisprudenciais verificadas contra a base LanceDB. Nenhuma citacao fabricada detectada. Artigos de lei conferidos quanto a vigencia.' },
-      formatador: { title:'Documento Final', items:[
-        { label:'Formato', value:'.docx (Times New Roman 12pt)' },
-        { label:'Margens', value:'3cm esq/sup, 2cm dir/inf' },
-        { label:'Espacamento', value:'1.5 linhas' },
-        { label:'Paginas', value:'~8 paginas estimadas' },
-      ], detail:'Documento formatado conforme normas ABNT e CNJ. Cabecalho, enderecamento, secoes com heading, citacoes longas recuadas (4cm, fonte 10), numeracao de paginas.' },
-    };
-
-    /* ── Agent Detail Modal ── */
-    const AgentDetailModal = ({ agentId, events, onClose }) => {
+    /* ── Agent Detail Modal — shows real data from state ── */
+    const AgentDetailModal = ({ agentId, state, events, onClose }) => {
       const a = AGENTS.find(x => x.id === agentId);
       if (!a) return null;
-      const output = AGENT_OUTPUTS[agentId];
-      const agentEvents = events.filter(e => e.agent === agentId);
+
+      const buildOutput = () => {
+        if (!state) return null;
+        switch (agentId) {
+          case 'intake': return {
+            title: 'Dossie de Triagem',
+            items: [
+              { label: 'Fatos estruturados', value: `${(state.fatos_estruturados || []).length}` },
+              { label: 'Provas disponiveis', value: `${(state.provas_disponiveis || []).length}` },
+              { label: 'Pontos de atencao', value: `${(state.pontos_atencao || []).length}` },
+              { label: 'Tipo', value: state.tipo_peca === 'peticao_inicial' ? 'Peticao Inicial' : 'Contestacao' },
+              { label: 'Area', value: state.area_direito || '(nao definida)' },
+            ],
+            detail: (state.fatos_estruturados || []).map((f, i) => `(${i+1}) ${f}`).join('\n') || null,
+          };
+          case 'pesquisador': return {
+            title: 'Resultado da Pesquisa',
+            items: [
+              { label: 'Teses decompostas', value: `${(state.teses || []).length}` },
+              { label: 'Jurisprudencia encontrada', value: `${(state.pesquisa_jurisprudencia || []).length} docs` },
+              { label: 'Legislacao', value: `${(state.pesquisa_legislacao || []).length} refs` },
+            ],
+            detail: (state.teses || []).map(t => `${t.descricao} (${t.confianca})`).join('\n') || null,
+          };
+          case 'redator': return {
+            title: 'Peca Redigida',
+            items: [
+              { label: 'Secoes', value: Object.keys(state.peca_sections || {}).join(', ') || '(nenhuma)' },
+              { label: 'Citacoes rastreadas', value: `${Object.keys(state.proveniencia || {}).length}` },
+            ],
+            detail: null,
+          };
+          case 'contraparte': {
+            const crit = state.critica_atual;
+            return {
+              title: 'Analise Adversarial',
+              items: [
+                { label: 'Rodadas', value: `${state.rodada_atual || 0}` },
+                { label: 'Score de risco', value: crit ? `${crit.score_de_risco}/100` : '(sem critica)' },
+                { label: 'Recomendacao', value: crit ? crit.recomendacao : '-' },
+                { label: 'Falhas processuais', value: crit ? `${(crit.falhas_processuais || []).length}` : '0' },
+                { label: 'Args materiais fracos', value: crit ? `${(crit.argumentos_materiais_fracos || []).length}` : '0' },
+              ],
+              detail: crit ? crit.analise_contestacao : null,
+            };
+          }
+          case 'auditor': return {
+            title: 'Relatorio de Auditoria',
+            items: [
+              { label: 'Verificacoes', value: `${(state.verificacoes || []).length}` },
+              { label: 'Documento final', value: state.output_docx_path ? 'Gerado' : 'Pendente' },
+            ],
+            detail: (state.verificacoes || []).map(v => `${v.item || v.check || 'verificacao'}: ${v.result || v.status || 'ok'}`).join('\n') || null,
+          };
+          case 'formatador': return {
+            title: 'Documento Final',
+            items: [
+              { label: 'Caminho', value: state.output_docx_path || '(nao gerado)' },
+              { label: 'Formato', value: '.docx (ABNT/CNJ)' },
+            ],
+            detail: null,
+          };
+          default: return null;
+        }
+      };
+
+      const output = buildOutput();
+      const agentEvents = (events || []).filter(e => e.agent === agentId || (e.type_name || '').startsWith(agentId));
+
       return (
         <div className="fixed inset-0 z-50 flex items-center justify-center anim-fade" style={{ background:'rgba(0,0,0,0.5)', backdropFilter:'blur(6px)' }} onClick={onClose}>
           <div className="w-full max-w-lg max-h-[80vh] flex flex-col rounded-xl anim-slide" style={{ background:'var(--stone-100)', border:`1px solid ${a.color}44`, boxShadow:'0 24px 48px rgba(0,0,0,0.3)' }} onClick={e => e.stopPropagation()}>
-            {/* Header */}
-            <div className="flex items-center justify-between p-4" style={{ borderBottom:`1px solid var(--stone-200)` }}>
+            <div className="flex items-center justify-between p-4" style={{ borderBottom:'1px solid var(--stone-200)' }}>
               <div className="flex items-center space-x-3">
                 <AgentBadge agentId={agentId} size={28} active={false} done={true} />
                 <div>
@@ -270,7 +268,6 @@
                 <Icon name="x" className="w-4 h-4" />
               </button>
             </div>
-            {/* Content */}
             <div className="flex-1 overflow-y-auto p-4 space-y-4">
               {output && <>
                 <h4 className="font-serif font-semibold" style={{ fontSize:14, color:'var(--stone-900)' }}>{output.title}</h4>
@@ -289,17 +286,14 @@
                   </div>
                 )}
               </>}
-              {/* Activity log */}
               {agentEvents.length > 0 && (
                 <div>
                   <span className="font-mono" style={{ fontSize:9, color:'var(--stone-500)' }}>Log de atividade</span>
                   <div className="mt-1 space-y-1">
                     {agentEvents.map((ev, i) => (
                       <div key={i} className="flex items-start space-x-2 py-1" style={{ fontSize:10 }}>
-                        <span className="font-mono shrink-0" style={{ color: ev.type==='done' ? 'var(--agent-auditor)' : ev.type==='warn' ? '#d4874a' : a.color }}>
-                          {ev.type==='done'?'\u2713':ev.type==='tool'?'\u2699':ev.type==='warn'?'\u26A0':'\u25CF'}
-                        </span>
-                        <span style={{ color:'var(--stone-600)' }}>{ev.text}</span>
+                        <span className="font-mono shrink-0" style={{ color: a.color }}>{'\u25CF'}</span>
+                        <span style={{ color:'var(--stone-600)' }}>{ev.text || ev.type_name || JSON.stringify(ev.data || {}).slice(0,80)}</span>
                       </div>
                     ))}
                   </div>
@@ -311,30 +305,29 @@
       );
     };
 
-    /* ── In-Column Status (only shows current state, not full history) ── */
+    /* ── In-Column Status ── */
     const InColumnFeed = ({ agentId, color, events, active }) => {
-      const msgs = events.filter(e => e.agent === agentId);
-      if (!msgs.length && !active) return null;
       const a = AGENTS.find(x => x.id === agentId) || AGENTS[0];
-      const last = msgs.length ? msgs[msgs.length - 1] : null;
-      const isDone = last && last.type === 'done';
+      const agentEvents = (events || []).filter(e => e.agent === agentId || (e.type_name || '').startsWith(agentId));
+      const last = agentEvents.length ? agentEvents[agentEvents.length - 1] : null;
+      if (!last && !active) return null;
       return (
         <div className="mx-2 mt-2 rounded-md shrink-0 transition-all duration-300" style={{ background:'var(--stone-100)', border:`1px solid ${color}33`, borderTop:`2px solid ${color}` }}>
           <div className="flex items-center justify-between px-2.5 py-2" style={{ background:color+'08' }}>
             <div className="flex items-center space-x-2 min-w-0">
-              <AgentBadge agentId={agentId} size={20} active={active} done={isDone} />
+              <AgentBadge agentId={agentId} size={20} active={active} done={!!last} />
               <div className="flex flex-col min-w-0">
                 <span className="font-semibold leading-none" style={{ fontSize:10, color }}>{a.name}</span>
                 {last ? (
-                  <span className="font-mono leading-none mt-1 truncate" style={{ fontSize:8, color: isDone ? 'var(--stone-600)' : 'var(--stone-500)' }}>
-                    {last.text}
+                  <span className="font-mono leading-none mt-1 truncate" style={{ fontSize:8, color:'var(--stone-600)' }}>
+                    {last.text || last.type_name || 'Concluido'}
                   </span>
                 ) : active ? (
-                  <span className="font-mono leading-none mt-1" style={{ fontSize:8, color:'var(--stone-500)' }}>Aguardando...</span>
+                  <span className="font-mono leading-none mt-1" style={{ fontSize:8, color:'var(--stone-500)' }}>Processando...</span>
                 ) : null}
               </div>
             </div>
-            {isDone && !active && <span className="font-mono shrink-0 ml-1" style={{ fontSize:8, color:'var(--stone-500)' }}>{'\u2713'}</span>}
+            {!active && last && <span className="font-mono shrink-0 ml-1" style={{ fontSize:8, color:'var(--stone-500)' }}>{'\u2713'}</span>}
             {active && <div className="flex items-center space-x-0.5 shrink-0 ml-1">
               {[0,0.25,0.5].map(d => <div key={d} className="w-1 h-1 rounded-full" style={{ background:color, animation:`pulse-dot 1.4s ease-in-out infinite`, animationDelay:`${d}s` }} />)}
             </div>}
@@ -344,7 +337,7 @@
     };
 
     /* ══════════ GATE OVERLAY ══════════ */
-    const GateOverlay = ({ gate, data, onApprove, onBack }) => (
+    const GateOverlay = ({ gateName, gateLabel, gateDesc, data, onApprove, onReject }) => (
       <div className="fixed inset-0 z-50 flex items-center justify-center anim-fade" style={{ background:'rgba(0,0,0,0.5)', backdropFilter:'blur(6px)' }}>
         <div className="w-full max-w-md rounded-xl p-6 space-y-4 anim-slide" style={{ background:'var(--stone-100)', border:'1px solid var(--stone-300)', boxShadow:'0 24px 48px rgba(0,0,0,0.3)' }}>
           <div className="flex items-center space-x-3">
@@ -352,8 +345,8 @@
               <Icon name="shield-check" className="w-4 h-4" style={{ color:'var(--accent)' }} />
             </div>
             <div>
-              <h3 className="font-serif text-lg font-bold" style={{ color:'var(--stone-900)' }}>Gate {gate}</h3>
-              <p className="font-mono" style={{ fontSize:10, color:'var(--stone-500)' }}>{gate===1?'Entendemos o problema?':'Base de pesquisa suficiente?'}</p>
+              <h3 className="font-serif text-lg font-bold" style={{ color:'var(--stone-900)' }}>{gateLabel}</h3>
+              <p className="font-mono" style={{ fontSize:10, color:'var(--stone-500)' }}>{gateDesc}</p>
             </div>
           </div>
           <div className="space-y-0.5 text-xs rounded-lg p-3" style={{ background:'var(--stone-50)', border:'1px solid var(--stone-200)' }}>
@@ -365,7 +358,7 @@
             ))}
           </div>
           <div className="flex space-x-3 pt-1">
-            <button onClick={onBack} className="flex-1 py-2.5 text-xs font-medium rounded-lg transition-colors duration-200"
+            <button onClick={onReject} className="flex-1 py-2.5 text-xs font-medium rounded-lg transition-colors duration-200"
               style={{ border:'1px solid var(--stone-300)', color:'var(--stone-500)' }}
               onMouseEnter={e => e.target.style.borderColor='var(--stone-400)'} onMouseLeave={e => e.target.style.borderColor='var(--stone-300)'}>
               &#8592; Voltar
@@ -381,36 +374,88 @@
     );
 
     /* ══════════ INTAKE MODE ══════════ */
-    const IntakeMode = ({ casoId, onGateApprove }) => {
-      const [msgs, setMsgs] = useState([{ role:'assistant', content:'Ola. Descreva os fatos do caso, as partes envolvidas e os documentos disponiveis. Quanto mais detalhado, melhor o resultado.' }]);
+    const IntakeMode = ({ casoId, state, onStateUpdate }) => {
+      const [msgs, setMsgs] = useState([]);
       const [input, setInput] = useState('');
       const [loading, setLoading] = useState(false);
+      const [analyzing, setAnalyzing] = useState(false);
       const [showGate, setShowGate] = useState(false);
       const btm = useRef(null);
+
+      /* Sync messages from backend state */
+      useEffect(() => {
+        if (state && state.intake_history && state.intake_history.length > 0) {
+          setMsgs(state.intake_history);
+        } else if (msgs.length === 0) {
+          setMsgs([{ role:'assistant', content:'Ola. Descreva os fatos do caso, as partes envolvidas e os documentos disponiveis. Quanto mais detalhado, melhor o resultado.\n\nQuando terminar, clique em "Analisar com Clara" para que eu estruture o dossie.' }]);
+        }
+      }, [state?.intake_history?.length]);
+
       useEffect(() => { btm.current?.scrollIntoView({ behavior:'smooth' }); }, [msgs.length]);
 
       const send = async () => {
         const txt = input.trim();
-        if (!txt || loading) return;
+        if (!txt || loading || analyzing) return;
         setMsgs(p => [...p, { role:'user', content: txt }]);
         setInput('');
         setLoading(true);
         const resp = await api.sendIntake(casoId, txt);
-        if (resp && resp.assistant_message) {
-          setMsgs(p => [...p, { role:'assistant', content: resp.assistant_message }]);
-        } else {
-          /* fallback mock */
-          setTimeout(() => setMsgs(p => [...p, { role:'assistant', content:'Fatos processados. 6 fatos extraidos, 3 teses identificadas. Deseja aprovar o dossie?' }]), 600);
+        if (resp && resp.state) {
+          onStateUpdate(resp.state);
+          if (resp.state.intake_history && resp.state.intake_history.length > 0) {
+            setMsgs(resp.state.intake_history);
+          }
         }
         setLoading(false);
       };
+
+      const handleAnalyze = async () => {
+        setAnalyzing(true);
+        setMsgs(p => [...p, { role:'assistant', content:'Analisando os fatos com a Clara... Aguarde.' }]);
+        try {
+          const resp = await api.runPipeline(casoId);
+          if (resp && resp.state) {
+            onStateUpdate(resp.state);
+          }
+        } catch (err) {
+          setMsgs(p => [...p, { role:'assistant', content:'Erro ao analisar: ' + (err.message || 'falha na conexao') }]);
+        }
+        setAnalyzing(false);
+      };
+
+      const handleGateApprove = async () => {
+        const resp = await api.approveGate(casoId, 'gate1', true);
+        if (resp && resp.state) {
+          onStateUpdate(resp.state);
+        }
+        setShowGate(false);
+      };
+
+      const handleGateReject = async () => {
+        await api.approveGate(casoId, 'gate1', false);
+        setShowGate(false);
+      };
+
+      const fatos = state?.fatos_estruturados || [];
+      const provas = state?.provas_disponiveis || [];
+      const pontos = state?.pontos_atencao || [];
+      const hasAnalysis = fatos.length > 0;
+      const hasMessages = state?.intake_history?.length > 0;
+
+      const gateData = state ? [
+        { label: 'Fatos estruturados', value: `${fatos.length}` },
+        { label: 'Provas disponiveis', value: `${provas.length}` },
+        { label: 'Pontos de atencao', value: `${pontos.length}` },
+        { label: 'Tipo da peca', value: state.tipo_peca === 'peticao_inicial' ? 'Peticao Inicial' : 'Contestacao' },
+        { label: 'Area', value: state.area_direito || '(nao definida)' },
+      ] : [];
 
       return (
         <>
           <div className="flex flex-col h-full max-w-2xl mx-auto w-full pt-8 pb-4 px-5">
             <div className="text-center mb-6 anim-fade">
               <h2 className="font-serif text-2xl font-bold" style={{ color:'var(--stone-900)' }}>Triagem do Caso</h2>
-              <p className="mt-1" style={{ fontSize:12, color:'var(--stone-500)' }}>Clara ira analisar os fatos e estruturar o dossie preliminar</p>
+              <p className="mt-1" style={{ fontSize:12, color:'var(--stone-500)' }}>Descreva os fatos e clique em "Analisar com Clara" para estruturar o dossie</p>
             </div>
             <div className="flex-1 overflow-y-auto space-y-3 mb-4 pr-1">
               {msgs.map((m, i) => (
@@ -424,88 +469,201 @@
                   </div>
                 </div>
               ))}
-              {loading && <div className="flex justify-start"><div className="rounded-lg px-4 py-3 shimmer" style={{ width:180, height:40, borderLeft:'2px solid var(--agent-intake)' }} /></div>}
+              {(loading || analyzing) && <div className="flex justify-start"><div className="rounded-lg px-4 py-3 shimmer" style={{ width: analyzing ? 260 : 180, height:40, borderLeft:'2px solid var(--agent-intake)' }} /></div>}
+
+              {/* Clara's analysis results */}
+              {hasAnalysis && (
+                <div className="rounded-lg p-4 anim-fade" style={{ background:'var(--stone-50)', border:'1px solid var(--stone-200)', borderLeft:'3px solid var(--agent-intake)' }}>
+                  <p className="text-xs font-semibold mb-3" style={{ color:'var(--agent-intake)' }}>Analise da Clara</p>
+                  {fatos.length > 0 && (
+                    <div className="mb-3">
+                      <p className="text-xs font-semibold mb-1" style={{ color:'var(--stone-600)' }}>Fatos Estruturados ({fatos.length})</p>
+                      <ul className="space-y-1">{fatos.map((f, i) => <li key={i} className="text-xs pl-3" style={{ color:'var(--stone-700)', borderLeft:'2px solid var(--stone-300)' }}>{typeof f === 'string' ? f : JSON.stringify(f)}</li>)}</ul>
+                    </div>
+                  )}
+                  {provas.length > 0 && (
+                    <div className="mb-3">
+                      <p className="text-xs font-semibold mb-1" style={{ color:'var(--stone-600)' }}>Provas Disponiveis ({provas.length})</p>
+                      <ul className="space-y-1">{provas.map((p, i) => <li key={i} className="text-xs pl-3" style={{ color:'var(--stone-700)', borderLeft:'2px solid var(--stone-300)' }}>{typeof p === 'string' ? p : JSON.stringify(p)}</li>)}</ul>
+                    </div>
+                  )}
+                  {pontos.length > 0 && (
+                    <div>
+                      <p className="text-xs font-semibold mb-1" style={{ color:'var(--stone-600)' }}>Pontos de Atencao ({pontos.length})</p>
+                      <ul className="space-y-1">{pontos.map((pt, i) => <li key={i} className="text-xs pl-3" style={{ color:'var(--amber-600, #d97706)', borderLeft:'2px solid var(--amber-400, #fbbf24)' }}>{typeof pt === 'string' ? pt : JSON.stringify(pt)}</li>)}</ul>
+                    </div>
+                  )}
+                </div>
+              )}
               <div ref={btm} />
             </div>
-            {msgs.length >= 3 && !showGate && (
-              <div className="flex justify-center mb-3 anim-fade">
-                <button onClick={() => setShowGate(true)} className="px-6 py-2 text-xs font-semibold rounded-lg transition-all duration-200"
-                  style={{ background:'var(--agent-intake)', color:'white' }}
-                  onMouseEnter={e => e.target.style.filter='brightness(1.15)'} onMouseLeave={e => e.target.style.filter='none'}>
-                  Aprovar Gate 1 &#8594;
-                </button>
-              </div>
-            )}
+
+            {/* Action buttons */}
+            <div className="space-y-2 mb-2">
+              {hasMessages && !hasAnalysis && !analyzing && (
+                <div className="flex justify-center anim-fade">
+                  <button onClick={handleAnalyze} disabled={analyzing} className="px-6 py-2.5 text-xs font-semibold rounded-lg transition-all duration-200 flex items-center gap-2"
+                    style={{ background:'var(--agent-intake)', color:'white' }}
+                    onMouseEnter={e => e.target.style.filter='brightness(1.15)'} onMouseLeave={e => e.target.style.filter='none'}>
+                    <Icon name="sparkles" className="w-3.5 h-3.5" /> Analisar com Clara
+                  </button>
+                </div>
+              )}
+              {hasAnalysis && !showGate && (
+                <div className="flex justify-center gap-3 anim-fade">
+                  <button onClick={handleAnalyze} disabled={analyzing} className="px-4 py-2 text-xs font-medium rounded-lg transition-all duration-200"
+                    style={{ background:'var(--stone-200)', color:'var(--stone-700)' }}
+                    onMouseEnter={e => e.target.style.filter='brightness(0.95)'} onMouseLeave={e => e.target.style.filter='none'}>
+                    Reanalisar
+                  </button>
+                  <button onClick={() => setShowGate(true)} className="px-6 py-2 text-xs font-semibold rounded-lg transition-all duration-200"
+                    style={{ background:'var(--agent-intake)', color:'white' }}
+                    onMouseEnter={e => e.target.style.filter='brightness(1.15)'} onMouseLeave={e => e.target.style.filter='none'}>
+                    Confirmar Triagem &#8594;
+                  </button>
+                </div>
+              )}
+            </div>
+
             <div className="flex items-end rounded-lg p-2 transition-colors duration-200" style={{ background:'var(--stone-100)', border:'1px solid var(--stone-200)' }}>
               <textarea value={input} onChange={e => setInput(e.target.value)}
                 onKeyDown={e => { if (e.key==='Enter' && !e.shiftKey) { e.preventDefault(); send(); } }}
                 placeholder="Descreva os fatos do caso..." rows={2}
                 className="flex-1 bg-transparent border-none outline-none resize-none px-2 text-sm" style={{ color:'var(--stone-900)' }} />
-              <button onClick={send} disabled={loading} className="p-2 rounded transition-opacity" style={{ color:'var(--agent-intake)', opacity: loading?0.4:1 }}>
+              <button onClick={send} disabled={loading || analyzing} className="p-2 rounded transition-opacity" style={{ color:'var(--agent-intake)', opacity: (loading||analyzing)?0.4:1 }}>
                 <Icon name="send" className="w-4 h-4" />
               </button>
             </div>
           </div>
-          {showGate && <GateOverlay gate={1} data={[
-            { label:'Fatos extraidos', value:'6' }, { label:'Partes', value:'Joao Silva vs. Banco X' },
-            { label:'Tipo da peca', value:'Peticao Inicial' }, { label:'Area', value:'Dir. Consumidor' },
-            { label:'Teses identificadas', value:'3' },
-          ]} onApprove={async () => { await api.approveGate(casoId, 'gate1'); onGateApprove(); }} onBack={() => setShowGate(false)} />}
+          {showGate && <GateOverlay
+            gateName="gate1"
+            gateLabel="Confirmacao da Triagem"
+            gateDesc="Os fatos e o dossie estruturado pela Clara estao completos?"
+            data={gateData}
+            onApprove={handleGateApprove}
+            onReject={handleGateReject}
+          />}
         </>
       );
     };
 
     /* ══════════ WORKSPACE MODE ══════════ */
-    const WorkspaceMode = ({ casoId, onFinish, feedEvents }) => {
-      const [sections, setSections] = useState(MOCK_SECTIONS);
-      const [phase, setPhase] = useState(0);
-      const [expandedTese, setExpandedTese] = useState('t1');
-      const [advRound, setAdvRound] = useState(1);
-      const [advScore, setAdvScore] = useState(35);
+    const WorkspaceMode = ({ casoId, state, events, onStateUpdate }) => {
       const [editSec, setEditSec] = useState(null);
+      const [editContent, setEditContent] = useState('');
       const [showGate2, setShowGate2] = useState(false);
+      const [running, setRunning] = useState(false);
 
-      useEffect(() => {
-        if (phase >= 2) {
-          const t = setInterval(() => {
-            setSections(p => p.map(s => s.id==='direito' && s.content.length < 380
-              ? { ...s, content: s.content + ' independentemente de comprovacao de abalo psicologico, configurando dano in re ipsa.' }
-              : s));
-          }, 3200);
-          return () => clearInterval(t);
+      const currentPhase = STATUS_TO_PHASE[state?.status] ?? 1;
+      const sections = state?.peca_sections || {};
+      const teses = state?.teses || [];
+      const critica = state?.critica_atual;
+      const rodadas = state?.rodadas || [];
+      const verificacoes = state?.verificacoes || [];
+
+      /* Derive all falhas from critica_atual */
+      const allFalhas = critica ? [
+        ...(critica.falhas_processuais || []),
+        ...(critica.argumentos_materiais_fracos || []),
+      ] : [];
+
+      const handleRun = async () => {
+        setRunning(true);
+        const resp = await api.runPipeline(casoId);
+        if (resp && resp.state) {
+          onStateUpdate(resp.state);
         }
-      }, [phase]);
-
-      const advancePhase = () => {
-        if (phase === 0) { setShowGate2(true); return; }
-        if (phase < 3) setPhase(phase + 1);
-        else onFinish();
-      };
-      const doRound = async () => {
-        await api.runCritique(casoId);
-        setAdvRound(r => r + 1);
-        setAdvScore(s => Math.max(6, s - 14));
+        setRunning(false);
       };
 
-      const phaseAgentMap = { 0:'pesquisador', 1:'pesquisador', 2:'redator', 3:'contraparte', 4:'auditor' };
-      const phaseCards = {
-        0: MOCK_TESES.map(t => ({ title:t.title, sub:`${t.docsCount} docs | ${t.confidence}`, status:'Concluido', color:'var(--agent-pesquisador)',
-          expand:() => setExpandedTese(expandedTese===t.id?null:t.id), expanded:expandedTese===t.id, tese:t })),
-        1: [],
-        2: sections.map(s => ({ title:s.title, sub:s.content.slice(0,80)+'...', status:s.status==='streaming'?'Gerando...':s.status==='done'?'Pronto':'Pendente',
-          color:'var(--agent-redator)', onClick:() => setEditSec(s) })),
-        3: MOCK_CRITICAS.map(c => ({ title:c.desc.slice(0,55)+'...', sub:c.argumento.slice(0,65), status:c.gravidade==='alta'?'Alta':'Media',
-          color:'var(--agent-contraparte)' })),
-        4: [],
+      const handleGate2Approve = async () => {
+        const resp = await api.approveGate(casoId, 'gate2', true);
+        if (resp && resp.state) {
+          onStateUpdate(resp.state);
+        }
+        setShowGate2(false);
       };
+
+      const handleGate2Reject = async () => {
+        await api.approveGate(casoId, 'gate2', false);
+        setShowGate2(false);
+      };
+
+      const handleSaveSection = async () => {
+        if (!editSec) return;
+        const updated = { ...sections, [editSec]: editContent };
+        const resp = await api.submitDraft(casoId, updated);
+        if (resp && resp.state) onStateUpdate(resp.state);
+        setEditSec(null);
+      };
+
+      const handleDismissFinding = async (findingId) => {
+        const resp = await api.dismissFindings(casoId, [findingId], 'Descartado pelo usuario');
+        if (resp && resp.state) onStateUpdate(resp.state);
+      };
+
+      const handleFinalize = async () => {
+        const resp = await api.submitRevision(casoId, {}, '', true);
+        if (resp && resp.state) onStateUpdate(resp.state);
+      };
+
+      const phaseAgentMap = { 0:'intake', 1:'pesquisador', 2:'redator', 3:'contraparte', 4:'auditor' };
+
+      /* Build cards from real state */
+      const buildCards = (phaseIdx) => {
+        switch (phaseIdx) {
+          case 0: /* Intake summary */
+            if ((state?.fatos_estruturados || []).length === 0) return [];
+            return [{ title: `${(state.fatos_estruturados || []).length} fatos estruturados`, sub: (state.fatos_estruturados || []).slice(0,2).join('; '), color:'var(--agent-intake)' }];
+          case 1: /* Research */
+            return teses.map(t => ({
+              title: t.descricao,
+              sub: `${(t.jurisprudencia_favoravel || []).length} favoraveis, ${(t.jurisprudencia_contraria || []).length} contrarios | ${t.confianca}`,
+              color: 'var(--agent-pesquisador)',
+              tese: t,
+            }));
+          case 2: /* Drafting */
+            return Object.entries(sections).map(([key, content]) => ({
+              title: key,
+              sub: (content || '').slice(0, 80) + (content && content.length > 80 ? '...' : ''),
+              color: 'var(--agent-redator)',
+              sectionKey: key,
+              onClick: () => { setEditSec(key); setEditContent(content); },
+            }));
+          case 3: /* Adversarial */
+            return allFalhas.map(f => ({
+              title: `[${f.gravidade}] ${f.descricao.slice(0,55)}${f.descricao.length>55?'...':''}`,
+              sub: f.argumento_contrario ? f.argumento_contrario.slice(0,65) : f.secao_afetada,
+              color: 'var(--agent-contraparte)',
+              finding: f,
+            }));
+          case 4: /* Delivery */
+            return verificacoes.map(v => ({
+              title: v.item || v.check || 'Verificacao',
+              sub: v.result || v.status || 'ok',
+              color: 'var(--agent-auditor)',
+            }));
+          default: return [];
+        }
+      };
+
+      const gate2Data = [
+        { label: 'Teses decompostas', value: `${teses.length}` },
+        { label: 'Jurisprudencia', value: `${(state?.pesquisa_jurisprudencia || []).length} docs` },
+        { label: 'Legislacao', value: `${(state?.pesquisa_legislacao || []).length} refs` },
+      ];
+
+      /* Show gate2 when backend status is gate2 */
+      const needsGate2 = state?.status === 'gate2';
 
       return (
         <div className="flex h-full w-full">
           <div className="flex flex-1 min-w-0">
             {PHASES.map((ph, i) => {
-              const active = i === phase + 1;
-              const past = i <= phase;
-              const cards = phaseCards[i] || [];
+              const active = i === currentPhase;
+              const past = i < currentPhase;
+              const cards = buildCards(i);
+              const [expandedTese, setExpandedTese] = useState(null);
               return (
                 <div key={ph.id} className="flex-1 flex flex-col min-w-0 transition-all duration-300"
                   style={{ borderRight:'1px solid var(--stone-200)', opacity: !past && !active ? 0.2 : 1 }}>
@@ -522,65 +680,94 @@
                   </div>
 
                   {/* Agent feed */}
-                  <InColumnFeed agentId={phaseAgentMap[i]} color={ph.color} events={feedEvents} active={active} />
+                  <InColumnFeed agentId={phaseAgentMap[i]} color={ph.color} events={events} active={active && running} />
 
                   {/* Cards */}
                   <div className="flex-1 p-2 overflow-y-auto space-y-2">
                     {cards.map((c, ci) => (
-                      <div key={ci} onClick={c.onClick || c.expand || undefined}
-                        className="p-3 rounded-lg cursor-pointer transition-all duration-200"
+                      <div key={ci} onClick={c.onClick || (c.tese ? () => setExpandedTese(expandedTese === c.tese.id ? null : c.tese.id) : undefined)}
+                        className={`p-3 rounded-lg transition-all duration-200 ${c.onClick || c.tese ? 'cursor-pointer' : ''}`}
                         style={{ background:'var(--stone-200)', border:'1px solid var(--stone-300)', borderLeft:`3px solid ${c.color}` }}
                         onMouseEnter={e => e.currentTarget.style.transform='translateY(-1px)'} onMouseLeave={e => e.currentTarget.style.transform='none'}>
                         <h4 className="text-xs font-semibold mb-1" style={{ color:'var(--stone-900)' }}>{c.title}</h4>
                         <p className="leading-relaxed line-clamp-2" style={{ fontSize:10, color:'var(--stone-500)' }}>{c.sub}</p>
-                        {c.status && <div className="flex items-center mt-1.5 space-x-1">
-                          <div className="w-1.5 h-1.5 rounded-full" style={{ background:c.color, animation:'pulse-dot 1.4s ease-in-out infinite' }} />
-                          <span className="font-mono" style={{ fontSize:9, color:c.color }}>{c.status}</span>
-                        </div>}
-                        {c.expanded && c.tese && (
+                        {/* Expanded tese details */}
+                        {c.tese && expandedTese === c.tese.id && (
                           <div className="mt-2.5 pt-2 space-y-1.5" style={{ borderTop:'1px solid var(--stone-300)' }}>
-                            {c.tese.docs.map(d => (
-                              <div key={d.id} className="p-2 rounded" style={{ background:'var(--stone-100)', border:'1px solid var(--stone-200)' }}>
-                                <span className="font-mono font-medium" style={{ fontSize:9, color:'var(--agent-pesquisador)' }}>{d.process} · {d.court}</span>
-                                <p className="font-cite italic mt-0.5" style={{ fontSize:10, color:'var(--stone-500)' }}>{d.summary}</p>
+                            {(c.tese.jurisprudencia_favoravel || []).map((d, di) => (
+                              <div key={di} className="p-2 rounded" style={{ background:'var(--stone-100)', border:'1px solid var(--stone-200)' }}>
+                                <span className="font-mono font-medium" style={{ fontSize:9, color:'var(--agent-pesquisador)' }}>{d.processo || d.process || 'doc'} {d.tribunal ? `· ${d.tribunal}` : ''}</span>
+                                <p className="font-cite italic mt-0.5" style={{ fontSize:10, color:'var(--stone-500)' }}>{d.ementa || d.summary || ''}</p>
                               </div>
                             ))}
-                            <div className="font-mono pt-1" style={{ fontSize:8, color:'var(--stone-400)' }}>
-                              Queries: {c.tese.queries.join(' | ')}
-                            </div>
+                            {(c.tese.legislacao || []).map((l, li) => (
+                              <div key={`l${li}`} className="p-2 rounded" style={{ background:'var(--stone-100)', border:'1px solid var(--stone-200)' }}>
+                                <span className="font-mono font-medium" style={{ fontSize:9, color:'var(--agent-auditor)' }}>{l.artigo || l.ref || JSON.stringify(l).slice(0,60)}</span>
+                              </div>
+                            ))}
                           </div>
+                        )}
+                        {/* Dismiss button for adversarial findings */}
+                        {c.finding && (
+                          <button onClick={(e) => { e.stopPropagation(); handleDismissFinding(c.finding.finding_id); }}
+                            className="mt-2 px-2 py-1 text-xs rounded transition-colors"
+                            style={{ border:'1px solid var(--stone-300)', color:'var(--stone-500)', fontSize:9 }}>
+                            Descartar
+                          </button>
                         )}
                       </div>
                     ))}
-                    {/* Adversarial controls */}
-                    {i === 3 && phase >= 2 && (
-                      <div className="mt-1 p-3 rounded-lg" style={{ background:'var(--stone-100)', border:`1px dashed var(--agent-contraparte)55` }}>
+
+                    {/* Adversarial round controls */}
+                    {i === 3 && currentPhase >= 3 && critica && (
+                      <div className="mt-1 p-3 rounded-lg" style={{ background:'var(--stone-100)', border:'1px dashed var(--agent-contraparte)55' }}>
                         <div className="flex justify-between items-center mb-2.5">
-                          <span className="font-mono font-bold" style={{ fontSize:10, color:'var(--agent-contraparte)' }}>Rodada {advRound}</span>
-                          <span className="font-mono font-medium" style={{ fontSize:10, color: advScore > 25 ? 'var(--agent-contraparte)' : 'var(--agent-auditor)' }}>Score: {advScore}/100</span>
+                          <span className="font-mono font-bold" style={{ fontSize:10, color:'var(--agent-contraparte)' }}>Rodada {state.rodada_atual}</span>
+                          <span className="font-mono font-medium" style={{ fontSize:10, color: critica.score_de_risco > 25 ? 'var(--agent-contraparte)' : 'var(--agent-auditor)' }}>
+                            Score: {critica.score_de_risco}/100
+                          </span>
                         </div>
                         <div className="w-full h-1.5 rounded-full mb-3" style={{ background:'var(--stone-200)' }}>
-                          <div className="h-full rounded-full transition-all duration-700" style={{ width:`${advScore}%`, background: advScore > 25 ? 'var(--agent-contraparte)' : 'var(--agent-auditor)' }} />
+                          <div className="h-full rounded-full transition-all duration-700" style={{ width:`${critica.score_de_risco}%`, background: critica.score_de_risco > 25 ? 'var(--agent-contraparte)' : 'var(--agent-auditor)' }} />
+                        </div>
+                        <div className="font-mono mb-2" style={{ fontSize:9, color:'var(--stone-500)' }}>
+                          Recomendacao: <strong style={{ color:'var(--stone-700)' }}>{critica.recomendacao}</strong>
                         </div>
                         <div className="flex space-x-2">
-                          <button onClick={doRound} className="flex-1 py-1.5 font-semibold rounded transition-all duration-200"
-                            style={{ fontSize:10, border:'1px solid var(--agent-contraparte)55', color:'var(--agent-contraparte)' }}
-                            onMouseEnter={e => e.target.style.background='var(--agent-contraparte)11'} onMouseLeave={e => e.target.style.background='transparent'}>+ Rodada</button>
-                          <button onClick={onFinish} className="flex-1 py-1.5 font-semibold rounded transition-all duration-200"
+                          <button onClick={handleRun} disabled={running} className="flex-1 py-1.5 font-semibold rounded transition-all duration-200"
+                            style={{ fontSize:10, border:'1px solid var(--agent-contraparte)55', color:'var(--agent-contraparte)', opacity: running ? 0.5 : 1 }}>
+                            {running ? 'Executando...' : '+ Rodada'}
+                          </button>
+                          <button onClick={handleFinalize} className="flex-1 py-1.5 font-semibold rounded transition-all duration-200"
                             style={{ fontSize:10, background:'var(--agent-auditor)', color:'white' }}>Finalizar</button>
                         </div>
                       </div>
                     )}
-                    {cards.length === 0 && i > phase + 1 && (
+
+                    {cards.length === 0 && i > currentPhase && (
                       <div className="flex items-center justify-center h-16 font-mono" style={{ fontSize:10, color:'var(--stone-400)' }}>Aguardando...</div>
                     )}
                   </div>
-                  {active && (
+
+                  {/* Run pipeline button for active phase */}
+                  {active && !needsGate2 && state?.status !== 'adversarial' && state?.status !== 'revisao_humana' && (
                     <div className="p-2" style={{ borderTop:'1px solid var(--stone-200)' }}>
-                      <button onClick={advancePhase} className="w-full py-2 font-semibold rounded-lg flex items-center justify-center transition-all duration-200"
-                        style={{ fontSize:10, background:ph.color, color:'white' }}
-                        onMouseEnter={e => e.target.style.filter='brightness(1.12)'} onMouseLeave={e => e.target.style.filter='none'}>
-                        Avancar <Icon name="arrow-right" className="w-3 h-3 ml-1" />
+                      <button onClick={handleRun} disabled={running}
+                        className="w-full py-2 font-semibold rounded-lg flex items-center justify-center transition-all duration-200"
+                        style={{ fontSize:10, background: running ? 'var(--stone-300)' : ph.color, color:'white' }}
+                        onMouseEnter={e => { if(!running) e.target.style.filter='brightness(1.12)'; }} onMouseLeave={e => e.target.style.filter='none'}>
+                        {running ? <><div className="w-3 h-3 border border-white border-t-transparent rounded-full mr-2" style={{ animation:'spin-arc 0.8s linear infinite' }} /> Executando...</> : <>Executar Pipeline <Icon name="arrow-right" className="w-3 h-3 ml-1" /></>}
+                      </button>
+                    </div>
+                  )}
+
+                  {/* Gate2 trigger */}
+                  {active && needsGate2 && (
+                    <div className="p-2" style={{ borderTop:'1px solid var(--stone-200)' }}>
+                      <button onClick={() => setShowGate2(true)}
+                        className="w-full py-2 font-semibold rounded-lg flex items-center justify-center transition-all duration-200"
+                        style={{ fontSize:10, background: ph.color, color:'white' }}>
+                        Confirmar Pesquisa &#8594;
                       </button>
                     </div>
                   )}
@@ -594,34 +781,48 @@
             <div className="fixed inset-0 z-50 flex items-center justify-center anim-fade" style={{ background:'rgba(0,0,0,0.5)', backdropFilter:'blur(6px)' }}>
               <div className="w-full max-w-2xl max-h-[80vh] flex flex-col rounded-xl anim-slide" style={{ background:'var(--stone-100)', border:'1px solid var(--stone-300)', boxShadow:'0 24px 48px rgba(0,0,0,0.3)' }}>
                 <div className="flex items-center justify-between p-4" style={{ borderBottom:'1px solid var(--stone-200)' }}>
-                  <h3 className="font-serif text-lg font-bold" style={{ color:'var(--stone-900)' }}>{editSec.title}</h3>
+                  <h3 className="font-serif text-lg font-bold" style={{ color:'var(--stone-900)' }}>{editSec}</h3>
                   <div className="flex items-center space-x-2">
-                    <button onClick={() => setEditSec(null)} className="px-4 py-1.5 text-xs font-semibold rounded-lg transition-all duration-200"
+                    <button onClick={handleSaveSection} className="px-4 py-1.5 text-xs font-semibold rounded-lg transition-all duration-200"
                       style={{ background:'var(--accent)', color:'var(--stone-50)' }}>Salvar</button>
                     <button onClick={() => setEditSec(null)} style={{ color:'var(--stone-400)' }}><Icon name="x" className="w-4 h-4" /></button>
                   </div>
                 </div>
                 <textarea className="flex-1 p-5 bg-transparent border-none outline-none resize-none text-sm leading-relaxed"
-                  style={{ color:'var(--stone-800)' }} defaultValue={editSec.content} />
+                  style={{ color:'var(--stone-800)' }} value={editContent} onChange={e => setEditContent(e.target.value)} />
               </div>
             </div>
           )}
-          {showGate2 && <GateOverlay gate={2} data={[
-            { label:'Teses decompostas', value:'3' }, { label:'Docs favoraveis', value:'38' },
-            { label:'Docs contrarios', value:'3' }, { label:'Legislacao', value:'4 artigos' },
-          ]} onApprove={async () => { await api.approveGate(casoId, 'gate2'); setShowGate2(false); setPhase(1); }} onBack={() => setShowGate2(false)} />}
+
+          {showGate2 && <GateOverlay
+            gateName="gate2"
+            gateLabel="Confirmacao da Pesquisa"
+            gateDesc="Base de pesquisa suficiente para redigir?"
+            data={gate2Data}
+            onApprove={handleGate2Approve}
+            onReject={handleGate2Reject}
+          />}
         </div>
       );
     };
 
     /* ══════════ DELIVERY MODE ══════════ */
-    const DeliveryMode = ({ casoId }) => {
+    const DeliveryMode = ({ casoId, state }) => {
+      const verificacoes = state?.verificacoes || [];
+      const critica = state?.critica_atual;
       const checks = [
-        { l:'Citacoes verificadas',   v:'7/7',                          c:'var(--agent-auditor)' },
-        { l:'Adversarial',            v:'2 rodadas, score 8/100',       c:'var(--agent-contraparte)' },
-        { l:'Formatacao',             v:'ABNT/CNJ Conforme',            c:'var(--stone-700)' },
-        { l:'Custo total',            v:'R$ 4.25',                      c:'var(--accent)' },
+        { l: 'Verificacoes', v: `${verificacoes.length} itens`, c: 'var(--agent-auditor)' },
+        { l: 'Adversarial', v: `${state?.rodada_atual || 0} rodadas${critica ? `, score ${critica.score_de_risco}/100` : ''}`, c: 'var(--agent-contraparte)' },
+        { l: 'Custo total', v: `US$ ${(state?.custo_total_usd || 0).toFixed(4)}`, c: 'var(--accent)' },
+        { l: 'Documento', v: state?.output_docx_path ? 'Gerado' : 'Pendente', c: state?.output_docx_path ? 'var(--agent-auditor)' : 'var(--stone-500)' },
       ];
+
+      const handleDownload = () => {
+        if (state?.output_docx_path) {
+          window.open(`/api/escritorio/cases/${casoId}/download`, '_blank');
+        }
+      };
+
       return (
         <div className="flex items-center justify-center h-full p-8 anim-fade">
           <div className="max-w-md w-full rounded-xl p-8 text-center space-y-5 anim-slide" style={{ background:'var(--stone-100)', border:'1px solid var(--stone-300)', boxShadow:'0 16px 40px rgba(0,0,0,0.15)' }}>
@@ -630,7 +831,9 @@
             </div>
             <div>
               <h2 className="font-serif text-2xl font-bold" style={{ color:'var(--stone-900)' }}>Pipeline Concluido</h2>
-              <p className="font-cite italic text-sm mt-1" style={{ color:'var(--stone-500)' }}>Verificacao completa. Documento pronto para protocolo.</p>
+              <p className="font-cite italic text-sm mt-1" style={{ color:'var(--stone-500)' }}>
+                {state?.output_docx_path ? 'Documento pronto para protocolo.' : 'Verificacao em andamento...'}
+              </p>
             </div>
             <div className="text-left font-mono space-y-0.5 p-4 rounded-lg" style={{ fontSize:10, background:'var(--stone-50)', border:'1px solid var(--stone-200)' }}>
               {checks.map((x, i) => (
@@ -640,15 +843,26 @@
                 </div>
               ))}
             </div>
+            {/* Verification details */}
+            {verificacoes.length > 0 && (
+              <div className="text-left p-3 rounded-lg space-y-1" style={{ background:'var(--stone-50)', border:'1px solid var(--stone-200)' }}>
+                <span className="font-mono" style={{ fontSize:9, color:'var(--stone-500)' }}>Detalhamento das verificacoes</span>
+                {verificacoes.map((v, i) => (
+                  <div key={i} className="flex justify-between py-1 font-mono" style={{ fontSize:9, borderBottom: i<verificacoes.length-1 ? '1px solid var(--stone-200)' : 'none' }}>
+                    <span style={{ color:'var(--stone-600)' }}>{v.item || v.check || `Item ${i+1}`}</span>
+                    <span style={{ color: (v.result||'').includes('ok') || (v.status||'').includes('pass') ? 'var(--agent-auditor)' : 'var(--stone-700)' }}>
+                      {v.result || v.status || '-'}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
             <div className="space-y-2 pt-2">
-              <button className="w-full py-2.5 text-xs font-semibold rounded-lg flex items-center justify-center transition-all duration-200"
-                style={{ background:'var(--agent-auditor)', color:'white' }}
-                onMouseEnter={e => e.target.style.filter='brightness(1.15)'} onMouseLeave={e => e.target.style.filter='none'}>
-                <Icon name="download" className="w-4 h-4 mr-2" /> Baixar Peticao (.docx)
-              </button>
-              <button className="w-full py-2.5 text-xs font-medium rounded-lg flex items-center justify-center transition-colors duration-200"
-                style={{ border:'1px solid var(--stone-300)', color:'var(--stone-500)' }}>
-                <Icon name="file-text" className="w-4 h-4 mr-2" /> Trilha de Auditoria (.json)
+              <button onClick={handleDownload} disabled={!state?.output_docx_path}
+                className="w-full py-2.5 text-xs font-semibold rounded-lg flex items-center justify-center transition-all duration-200"
+                style={{ background: state?.output_docx_path ? 'var(--agent-auditor)' : 'var(--stone-300)', color:'white' }}
+                onMouseEnter={e => { if(state?.output_docx_path) e.target.style.filter='brightness(1.15)'; }} onMouseLeave={e => e.target.style.filter='none'}>
+                <Icon name="download" className="w-4 h-4 mr-2" /> Baixar Peca (.docx)
               </button>
             </div>
           </div>
@@ -659,14 +873,10 @@
     /* ══════════ MAIN APP ══════════ */
     function App() {
       const [theme, setTheme] = useState('dark');
-      const [mode, setMode] = useState(-1); // -1=welcome, 0=intake, 1=workspace, 2=delivery
       const [casoId, setCasoId] = useState('');
-      const [tipoPeca, setTipoPeca] = useState('peticao_inicial');
-      const [cost, setCost] = useState(0);
-      const [feedEvents, setFeedEvents] = useState([]);
-      const [activeAgents, setActiveAgents] = useState([]);
-      const [completedAgents, setCompletedAgents] = useState([]);
-      const [agentDetail, setAgentDetail] = useState(null); // which agent's output to view
+      const [caseState, setCaseState] = useState(null); // RatioEscritorioState from backend
+      const [events, setEvents] = useState([]);
+      const [agentDetail, setAgentDetail] = useState(null);
 
       const toggleTheme = () => {
         const next = theme === 'dark' ? 'light' : 'dark';
@@ -674,48 +884,75 @@
         document.documentElement.setAttribute('data-theme', next);
       };
 
+      /* Derive UI mode from backend status */
+      const getMode = () => {
+        if (!caseState) return -1; // welcome
+        const s = caseState.status;
+        if (s === 'intake' || s === 'gate1') return 0; // intake
+        if (s === 'entrega' || s === 'finalizado') return 2; // delivery
+        return 1; // workspace (pesquisa, gate2, redacao, adversarial, revisao_humana, verificacao)
+      };
+      const mode = getMode();
+
+      /* Derive active/completed agents from status */
+      const deriveAgents = () => {
+        if (!caseState) return { active: [], completed: [] };
+        const s = caseState.status;
+        const completed = [];
+        const active = [];
+
+        // Intake done if past intake
+        if (['pesquisa','gate2','redacao','adversarial','revisao_humana','verificacao','entrega','finalizado'].includes(s)) completed.push('intake');
+        else if (s === 'intake') active.push('intake');
+
+        // Pesquisador done if past pesquisa
+        if (['redacao','adversarial','revisao_humana','verificacao','entrega','finalizado'].includes(s)) completed.push('pesquisador');
+        else if (['pesquisa','gate2'].includes(s)) active.push('pesquisador');
+
+        // Redator done if past redacao
+        if (['adversarial','revisao_humana','verificacao','entrega','finalizado'].includes(s)) completed.push('redator');
+        else if (s === 'redacao') active.push('redator');
+
+        // Contraparte done if past adversarial
+        if (['verificacao','entrega','finalizado'].includes(s)) completed.push('contraparte');
+        else if (['adversarial','revisao_humana'].includes(s)) active.push('contraparte');
+
+        // Auditor + Formatador done if entrega/finalizado
+        if (['entrega','finalizado'].includes(s)) { completed.push('auditor'); completed.push('formatador'); }
+        else if (s === 'verificacao') { active.push('auditor'); active.push('formatador'); }
+
+        return { active, completed };
+      };
+      const { active: activeAgents, completed: completedAgents } = deriveAgents();
+
       const startCase = async (tipo) => {
         const id = `caso_${Date.now()}`;
-        setTipoPeca(tipo);
         setCasoId(id);
-        await api.createCase(id, tipo, '');
-        setMode(0);
-        setCost(0.45);
-      };
-
-      const goWorkspace = () => {
-        setMode(1);
-        setCost(2.15);
-        setFeedEvents([]);
-        setCompletedAgents(['intake']);
-      };
-
-      /* Simulate feed when in workspace */
-      useEffect(() => {
-        if (mode === 1) {
-          const timers = FEED_SCRIPT.map(ev =>
-            setTimeout(() => {
-              setFeedEvents(p => [...p, ev]);
-              setActiveAgents([ev.agent]);
-              if (ev.type === 'done') setCompletedAgents(p => p.includes(ev.agent) ? p : [...p, ev.agent]);
-            }, ev.t)
-          );
-          const ct = setInterval(() => setCost(c => c + 0.02), 4000);
-          return () => { timers.forEach(clearTimeout); clearInterval(ct); };
+        const resp = await api.createCase(id, tipo, '');
+        if (resp) {
+          // createCase returns the case summary, fetch full state
+          const full = await api.getCase(id);
+          if (full && full.state) setCaseState(full.state);
         }
-      }, [mode]);
+      };
 
-      /* Poll backend events when pipeline is running */
+      const handleStateUpdate = (newState) => {
+        setCaseState(newState);
+      };
+
+      /* Poll backend state and events periodically */
       useEffect(() => {
-        if (mode !== 1 || !casoId) return;
+        if (!casoId || mode === -1) return;
         const iv = setInterval(async () => {
-          const evts = await api.getEvents(casoId);
-          if (evts && Array.isArray(evts) && evts.length) {
-            setFeedEvents(evts);
-          }
+          const [caseResp, evtResp] = await Promise.all([
+            api.getCase(casoId),
+            api.getEvents(casoId),
+          ]);
+          if (caseResp && caseResp.state) setCaseState(caseResp.state);
+          if (evtResp && evtResp.events) setEvents(evtResp.events);
         }, 3000);
         return () => clearInterval(iv);
-      }, [mode, casoId]);
+      }, [casoId, mode]);
 
       return (
         <div className="flex h-screen w-full overflow-hidden" style={{ background:'var(--stone-50)', color:'var(--stone-900)' }}>
@@ -749,7 +986,6 @@
 
           {/* ── MAIN ── */}
           <div className="flex-1 flex flex-col h-full min-w-0">
-            {/* Gold rule */}
             <div className="gold-rule" />
 
             {/* Top bar */}
@@ -764,7 +1000,14 @@
                 </>}
               </div>
               <div className="flex items-center space-x-3">
-                {mode >= 0 && <BurnMeter cost={cost} />}
+                {mode >= 0 && caseState && (
+                  <>
+                    <span className="font-mono px-2 py-1 rounded" style={{ fontSize:9, color:'var(--stone-500)', border:'1px solid var(--stone-300)' }}>
+                      {caseState.status}
+                    </span>
+                    <BurnMeter cost={caseState.custo_total_usd || 0} />
+                  </>
+                )}
               </div>
             </div>
 
@@ -813,12 +1056,12 @@
                   </div>
                 </div>
               )}
-              {mode === 0 && <IntakeMode casoId={casoId} onGateApprove={goWorkspace} />}
-              {mode === 1 && <WorkspaceMode casoId={casoId} onFinish={() => setMode(2)} feedEvents={feedEvents} />}
-              {mode === 2 && <DeliveryMode casoId={casoId} />}
+              {mode === 0 && <IntakeMode casoId={casoId} state={caseState} onStateUpdate={handleStateUpdate} />}
+              {mode === 1 && <WorkspaceMode casoId={casoId} state={caseState} events={events} onStateUpdate={handleStateUpdate} />}
+              {mode === 2 && <DeliveryMode casoId={casoId} state={caseState} />}
             </div>
           </div>
-          {agentDetail && <AgentDetailModal agentId={agentDetail} events={feedEvents} onClose={() => setAgentDetail(null)} />}
+          {agentDetail && <AgentDetailModal agentId={agentDetail} state={caseState} events={events} onClose={() => setAgentDetail(null)} />}
         </div>
       );
     }

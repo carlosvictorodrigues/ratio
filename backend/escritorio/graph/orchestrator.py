@@ -1,37 +1,55 @@
 from __future__ import annotations
 
-import anyio
 import inspect
+import logging
 
 from backend.escritorio.models import RatioEscritorioState
 
-
-async def _default_run_sync_workflow(workflow, state: RatioEscritorioState) -> RatioEscritorioState:
-    result = await anyio.to_thread.run_sync(workflow.invoke, state)
-    return RatioEscritorioState.model_validate(result)
+log = logging.getLogger(__name__)
 
 
 async def run_intake_graph(state: RatioEscritorioState, store) -> RatioEscritorioState:
     from backend.escritorio.graph.intake_graph import build_intake_graph
 
-    result = await _default_run_sync_workflow(build_intake_graph(enable_interrupts=False), state)
+    log.info("orchestrator: running intake graph for caso=%s", state.caso_id)
+    result = RatioEscritorioState.model_validate(
+        await build_intake_graph(
+            enable_interrupts=False,
+            gate1_router_fn=lambda _: "drafting",
+        ).ainvoke(state)
+    )
     store.save_snapshot(result, stage=result.status)
+    log.info("orchestrator: intake complete - status=%s", result.status)
     return result
 
 
 async def run_drafting_graph(state: RatioEscritorioState, store) -> RatioEscritorioState:
     from backend.escritorio.graph.drafting_graph import build_drafting_graph
 
-    result = await _default_run_sync_workflow(build_drafting_graph(enable_interrupts=False), state)
+    log.info("orchestrator: running drafting graph for caso=%s", state.caso_id)
+    result = RatioEscritorioState.model_validate(
+        await build_drafting_graph(
+            enable_interrupts=False,
+            gate2_router_fn=lambda _: "redigir",
+        ).ainvoke(state)
+    )
     store.save_snapshot(result, stage=result.status)
+    log.info("orchestrator: drafting complete - status=%s", result.status)
     return result
 
 
 async def run_adversarial_graph(state: RatioEscritorioState, store) -> RatioEscritorioState:
     from backend.escritorio.graph.adversarial_graph import build_adversarial_graph
 
-    result = await _default_run_sync_workflow(build_adversarial_graph(enable_interrupts=False), state)
+    log.info("orchestrator: running adversarial graph for caso=%s", state.caso_id)
+    result = RatioEscritorioState.model_validate(
+        await build_adversarial_graph(
+            enable_interrupts=False,
+            decisao_fn=lambda _: "finalizar",
+        ).ainvoke(state)
+    )
     store.save_snapshot(result, stage=result.status)
+    log.info("orchestrator: adversarial complete - status=%s", result.status)
     return result
 
 

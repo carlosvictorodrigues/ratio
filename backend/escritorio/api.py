@@ -14,7 +14,7 @@ from backend.escritorio.adversarial import (
     submit_human_revision,
 )
 from backend.escritorio.graph.orchestrator import run_escritorio_pipeline
-from backend.escritorio.intake import build_next_question, process_intake_message
+from backend.escritorio.intake import process_intake_message
 from backend.escritorio.store import CaseIndex, CaseStore
 
 
@@ -198,7 +198,6 @@ def build_escritorio_router() -> APIRouter:
         return {
             "summary": {**summary, "status": updated.status},
             "state": updated.model_dump(mode="json"),
-            "next_question": build_next_question(updated),
         }
 
     @router.post("/cases/{caso_id}/gates/{gate_name}")

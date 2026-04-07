@@ -1,40 +1,36 @@
 from __future__ import annotations
 
-import anyio
 import logging
 from typing import Any, Callable
 
 from langgraph.graph import END, START, StateGraph
 
-from backend.escritorio.intake import compute_checklist
 from backend.escritorio.intake_llm import generate_intake_with_gemini
 from backend.escritorio.models import RatioEscritorioState
 
 log = logging.getLogger(__name__)
 
 
-def intake_node(state: RatioEscritorioState) -> dict[str, Any]:
+async def intake_node(state: RatioEscritorioState) -> dict[str, Any]:
+    log.info("intake_node: chamando Gemini para analise de intake...")
     try:
-        parsed = anyio.run(generate_intake_with_gemini, state)
+        parsed = await generate_intake_with_gemini(state)
     except Exception:
         log.exception("intake_node: falha ao gerar intake com Gemini")
         parsed = {}
 
-    draft_state = state.model_copy(deep=True)
-    if parsed.get("fatos_estruturados"):
-        draft_state.fatos_estruturados = list(parsed["fatos_estruturados"])
-    if parsed.get("provas_disponiveis"):
-        draft_state.provas_disponiveis = list(parsed["provas_disponiveis"])
-    if parsed.get("pontos_atencao"):
-        draft_state.pontos_atencao = list(parsed["pontos_atencao"])
+    log.info("intake_node: resposta Gemini recebida. Processando...")
+    fatos = list(parsed.get("fatos_estruturados") or [])
+    provas = list(parsed.get("provas_disponiveis") or [])
+    pontos = list(parsed.get("pontos_atencao") or [])
 
-    checklist = compute_checklist(draft_state)
-    status = "gate1" if checklist.fatos_principais_cobertos else "intake"
+    has_structured_data = len(fatos) > 0
+    status = "gate1" if has_structured_data else "intake"
+    log.info("intake_node: concluido — status=%s (fatos=%d)", status, len(fatos))
     return {
-        "fatos_estruturados": draft_state.fatos_estruturados,
-        "provas_disponiveis": draft_state.provas_disponiveis,
-        "pontos_atencao": draft_state.pontos_atencao,
-        "intake_checklist": checklist.model_dump(),
+        "fatos_estruturados": fatos,
+        "provas_disponiveis": provas,
+        "pontos_atencao": pontos,
         "status": status,
         "workflow_stage": status,
     }

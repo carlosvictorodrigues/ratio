@@ -1,5 +1,7 @@
 import pytest
 
+import pytest
+
 from backend.escritorio.graph.intake_graph import build_intake_graph
 from backend.escritorio.models import RatioEscritorioState
 
@@ -39,7 +41,8 @@ def test_intake_graph_can_advance_to_gate1_when_gate_is_approved():
     assert result["status"] == "gate1"
 
 
-def test_default_intake_node_uses_real_llm_layer(monkeypatch):
+@pytest.mark.anyio
+async def test_default_intake_node_uses_real_llm_layer(monkeypatch):
     captured = {}
 
     async def fake_generate_intake(current_state: RatioEscritorioState):
@@ -57,7 +60,7 @@ def test_default_intake_node_uses_real_llm_layer(monkeypatch):
 
     from backend.escritorio.graph.intake_graph import intake_node
 
-    result = intake_node(
+    result = await intake_node(
         RatioEscritorioState(
             caso_id="caso-1",
             tipo_peca="peticao_inicial",

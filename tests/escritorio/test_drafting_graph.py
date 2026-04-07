@@ -80,7 +80,8 @@ def test_drafting_graph_compiles_with_gate2_interrupt():
     assert workflow.interrupt_before_nodes == ["gate2"]
 
 
-def test_default_redator_node_uses_real_redaction_layer(monkeypatch):
+@pytest.mark.anyio
+async def test_default_redator_node_uses_real_redaction_layer(monkeypatch):
     captured = {}
 
     async def fake_generate_sections(current_state: RatioEscritorioState):
@@ -94,7 +95,7 @@ def test_default_redator_node_uses_real_redaction_layer(monkeypatch):
 
     from backend.escritorio.graph.drafting_graph import redator_node
 
-    result = redator_node(
+    result = await redator_node(
         RatioEscritorioState(
             caso_id="caso-1",
             tipo_peca="peticao_inicial",
@@ -110,7 +111,8 @@ def test_default_redator_node_uses_real_redaction_layer(monkeypatch):
     assert result["workflow_stage"] == "redacao"
 
 
-def test_drafting_graph_default_pesquisador_uses_real_decomposition_and_search(monkeypatch):
+@pytest.mark.anyio
+async def test_drafting_graph_default_pesquisador_uses_real_decomposition_and_search(monkeypatch):
     async def fake_decompose_case_with_gemini(state: RatioEscritorioState):
         return [TeseJuridica(id="t1", descricao="CDC", tipo="principal")]
 
@@ -159,7 +161,7 @@ def test_drafting_graph_default_pesquisador_uses_real_decomposition_and_search(m
         gate2_aprovado=True,
     )
 
-    result = workflow.invoke(state)
+    result = await workflow.ainvoke(state)
 
     assert result["workflow_stage"] == "redacao"
     assert result["peca_sections"]["dos_fatos"] == "texto redigido"
