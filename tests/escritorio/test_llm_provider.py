@@ -172,6 +172,71 @@ def test_generate_text_claude_raises_on_empty_response(monkeypatch):
 
 
 # ---------------------------------------------------------------------------
+# Tests — OpenRouter provider
+# ---------------------------------------------------------------------------
+
+def test_generate_text_uses_openrouter_when_provider_set(monkeypatch):
+    """When GENERATION_PROVIDER=openrouter, calls _call_openrouter."""
+    captured = {}
+
+    import rag.query as rq
+    import backend.escritorio.llm_provider as lp
+    importlib.reload(lp)
+
+    monkeypatch.setattr(rq, "GENERATION_PROVIDER", "openrouter")
+    monkeypatch.setattr(lp, "_call_openrouter", lambda prompt, model: (
+        captured.update({"prompt": prompt, "model": model}) or "Resposta OpenRouter"
+    ))
+
+    result = lp.generate_text("prompt legal", "gemini-3-flash")
+
+    assert result == "Resposta OpenRouter"
+    # Should have been mapped to a free/cheap default, not the Gemini name
+    assert captured["model"] != "gemini-3-flash"
+
+
+def test_openrouter_model_resolution_respects_env_override(monkeypatch):
+    """OPENROUTER_MODEL env var overrides model mapping."""
+    import backend.escritorio.llm_provider as lp
+    importlib.reload(lp)
+
+    monkeypatch.setenv("OPENROUTER_MODEL", "moonshot/kimi-k2")
+    resolved = lp._openrouter_model_for("gemini-3.1-pro-preview")
+    assert resolved == "moonshot/kimi-k2"
+
+
+def test_openrouter_model_resolution_flash_default(monkeypatch):
+    """Flash model maps to a lightweight default when no override set."""
+    import backend.escritorio.llm_provider as lp
+    importlib.reload(lp)
+
+    monkeypatch.delenv("OPENROUTER_MODEL", raising=False)
+    resolved = lp._openrouter_model_for("gemini-3-flash")
+    # Must be a free/distill model for flash tier
+    assert "free" in resolved or "distill" in resolved or "qwen" in resolved
+
+
+def test_openrouter_raises_when_key_absent(monkeypatch):
+    """_call_openrouter raises RuntimeError when OPENROUTER_API_KEY not set."""
+    import backend.escritorio.llm_provider as lp
+    importlib.reload(lp)
+
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+    with pytest.raises(RuntimeError, match="OPENROUTER_API_KEY"):
+        lp._call_openrouter("prompt", "deepseek/deepseek-chat-v3-0324:free")
+
+
+def test_openrouter_slug_passthrough(monkeypatch):
+    """If model name already contains '/', it's treated as an OpenRouter slug."""
+    import backend.escritorio.llm_provider as lp
+    importlib.reload(lp)
+
+    monkeypatch.delenv("OPENROUTER_MODEL", raising=False)
+    resolved = lp._openrouter_model_for("moonshot/kimi-k2")
+    assert resolved == "moonshot/kimi-k2"
+
+
+# ---------------------------------------------------------------------------
 # Tests — integration: existing call sites still accept explicit client
 # ---------------------------------------------------------------------------
 
