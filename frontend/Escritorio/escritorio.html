@@ -3,7 +3,10 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Ratio Escritorio</title>
+  <title>Ratio · Escritório</title>
+  <link rel="icon" type="image/png" sizes="32x32" href="/escritorio/assets/favicon-32x32.png" />
+  <link rel="icon" type="image/png" sizes="48x48" href="/escritorio/assets/favicon-48x48.png" />
+  <link rel="apple-touch-icon" sizes="180x180" href="/escritorio/assets/apple-touch-icon.png" />
   <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
   <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
@@ -58,6 +61,32 @@
     /* Streaming shimmer effect */
     .shimmer{background:linear-gradient(90deg,var(--stone-200) 0%,var(--stone-300) 50%,var(--stone-200) 100%);
       background-size:200% 100%;animation:shimmer 1.8s ease-in-out infinite}
+
+    /* ── Top header ── */
+    .ratio-top-header{
+      height:64px;
+      border-bottom:1px solid var(--stone-200);
+      background:rgba(28,25,23,0.85);
+      backdrop-filter:blur(6px);
+      display:flex;align-items:center;justify-content:space-between;
+      padding:0 30px;gap:16px;flex-shrink:0;
+    }
+    [data-theme="light"] .ratio-top-header{background:rgba(250,250,249,0.85)}
+    .ratio-top-brand{display:flex;align-items:center;gap:12px;min-width:0}
+    .ratio-top-brand-mark{
+      width:auto;height:28px;display:block;object-fit:contain;opacity:.94;
+    }
+    .ratio-eyebrow{
+      margin:0;font-family:'Inter',sans-serif;font-size:14px;font-weight:600;
+      letter-spacing:.08em;text-transform:uppercase;color:var(--stone-900);
+    }
+    .ratio-top-brand h1{
+      margin:0;font-family:'Inter',sans-serif;font-size:14px;font-weight:500;
+      text-transform:uppercase;letter-spacing:.03em;color:var(--stone-400);
+    }
+    .ratio-top-brand h1::before{content:"/ "}
+    .ratio-top-brand-divider{height:18px;width:1px;background:var(--stone-300);margin:0 4px}
+    .ratio-top-actions{display:flex;align-items:center;gap:8px}
   </style>
 </head>
 <body class="noise">
@@ -87,61 +116,41 @@
       runCritique: (id) => api._f(`/cases/${id}/adversarial/critique`, { method: 'POST' }),
       dismissFindings: (id, ids, reason) => api._f(`/cases/${id}/adversarial/dismiss`, { method: 'POST', body: JSON.stringify({ finding_ids: ids, reason }) }),
       submitRevision: (id, updates, notes, finalize) => api._f(`/cases/${id}/adversarial/revise`, { method: 'POST', body: JSON.stringify({ section_updates: updates, notes, finalize }) }),
+      archiveCase: (id, archived = true) => api._f(`/cases/${id}/archive`, { method: 'POST', body: JSON.stringify({ archived }) }),
+      renameCase: (id, name) => api._f(`/cases/${id}/rename`, { method: 'POST', body: JSON.stringify({ name }) }),
+      deleteCase: (id) => api._f(`/cases/${id}`, { method: 'DELETE' }),
+      getCaseFolder: (id) => api._f(`/cases/${id}/folder`),
     };
 
     /* ══════════ AGENTS & PHASES ══════════ */
     const AGENTS = [
       { id:'intake',       name:'Clara',      role:'Analista de Triagem',  color:'var(--agent-intake)',      icon:'message-circle', llm:true },
-      { id:'pesquisador',  name:'Theo',       role:'Pesquisador Juridico', color:'var(--agent-pesquisador)', icon:'search',         llm:true },
-      { id:'redator',      name:'Helena',     role:'Redatora de Pecas',    color:'var(--agent-redator)',     icon:'pen-tool',       llm:true },
+      { id:'pesquisador',  name:'Theo',       role:'Pesquisador Jurídico', color:'var(--agent-pesquisador)', icon:'search',         llm:true },
+      { id:'redator',      name:'Helena',     role:'Redatora de Peças',    color:'var(--agent-redator)',     icon:'pen-tool',       llm:true },
       { id:'contraparte',  name:'Marco',      role:'Adv. Parte Adversa',  color:'var(--agent-contraparte)', icon:'shield-alert',   llm:true },
-      { id:'auditor',      name:'Auditor',    role:'Codigo / Checagem',   color:'var(--agent-auditor)',     icon:'check-circle',   llm:false },
-      { id:'formatador',   name:'Formatador', role:'Codigo / python-docx',color:'var(--agent-formatador)',  icon:'file-text',      llm:false },
+      { id:'auditor',      name:'Auditor',    role:'Código / Checagem',   color:'var(--agent-auditor)',     icon:'check-circle',   llm:false },
+      { id:'formatador',   name:'Formatador', role:'Código / python-docx',color:'var(--agent-formatador)',  icon:'file-text',      llm:false },
     ];
     const PHASES = [
       { id:'intake',      label:'Intake',      num:'01', agent:'intake',      color:'var(--agent-intake)' },
       { id:'research',    label:'Pesquisa',    num:'02', agent:'pesquisador', color:'var(--agent-pesquisador)' },
-      { id:'drafting',    label:'Redacao',     num:'03', agent:'redator',     color:'var(--agent-redator)' },
-      { id:'adversarial', label:'Revisao',      num:'04', agent:'contraparte', color:'var(--agent-contraparte)' },
+      { id:'drafting',    label:'Redação',     num:'03', agent:'redator',     color:'var(--agent-redator)' },
+      { id:'adversarial', label:'Revisão',      num:'04', agent:'contraparte', color:'var(--agent-contraparte)' },
       { id:'delivery',    label:'Entrega',     num:'05', agent:'auditor',     color:'var(--agent-auditor)' },
     ];
 
-    /* ══════════ MOCK DATA ══════════ */
-    const MOCK_SECTIONS = [
-      { id:'fatos',   title:'Dos Fatos',  content:'O autor celebrou contrato de financiamento imobiliario junto ao banco reu em 15/03/2023, comprometendo-se ao pagamento de 360 parcelas mensais. Apos o pagamento integral de todas as parcelas vencidas ate 10/01/2025, verificou-se a manutencao indevida de seu nome nos cadastros restritivos de credito.', status:'done' },
-      { id:'direito', title:'Do Direito',  content:'A responsabilidade objetiva esta caracterizada conforme o art. 14 do CDC, sendo desnecessaria a comprovacao de culpa por parte da instituicao financeira re.', status:'streaming' },
-      { id:'pedidos', title:'Dos Pedidos', content:'Requer-se a condenacao em danos morais no valor de R$ 30.000,00, bem como a exclusao definitiva do nome do autor dos cadastros de inadimplentes.', status:'pending' },
-    ];
-    const MOCK_TESES = [
-      { id:'t1', title:'Responsabilidade Objetiva e Dano in re ipsa', confidence:'Alta', docsCount:5,
-        docs:[ { id:'d1', process:'REsp 1.234.567/SP', court:'STJ', summary:'Manutencao indevida de negativacao gera dano moral presumido.' },
-               { id:'d2', process:'AREsp 2.345.678/RJ', court:'STJ', summary:'Quantum de R$20.000 para negativacao >30 dias.' } ],
-        queries:['manutencao negativacao apos quitacao','dano moral in re ipsa negativacao indevida'] },
-      { id:'t2', title:'Prazo de Exclusao — Sumula 548/STJ', confidence:'Media', docsCount:3,
-        docs:[ { id:'d3', process:'AgInt no AREsp 1.799.837/SP', court:'STJ', summary:'Prazo de 5 dias uteis para exclusao do cadastro.' } ],
-        queries:['sumula 548 STJ prazo exclusao cadastro'] },
-    ];
-    const MOCK_CRITICAS = [
-      { id:'c1', tipo:'material', gravidade:'alta', secao:'pedidos', desc:'Ausencia de fundamentacao sobre requisitos da tutela provisoria (art. 300 CPC).', argumento:'Juiz pode indeferir liminar por falta de fundamentacao.' },
-      { id:'c2', tipo:'jurisprudencia_fraca', gravidade:'media', secao:'pedidos', desc:'Quantum de R$30.000 acima da media do TJSP (~R$20.000) para casos analogos.', argumento:'Juiz pode reduzir o valor contestando excesso.' },
-    ];
-    const FEED_SCRIPT = [
-      { t:0,    agent:'intake',      type:'status', text:'Processando dossie preliminar...' },
-      { t:800,  agent:'intake',      type:'done',   text:'6 fatos extraidos, 4 documentos identificados' },
-      { t:1600, agent:'intake',      type:'done',   text:'Partes: Joao Silva vs. Banco X' },
-      { t:3000, agent:'pesquisador', type:'status', text:'Decompondo caso em teses juridicas...' },
-      { t:4000, agent:'pesquisador', type:'tool',   text:'ratio_search("manutencao negativacao quitacao") -> 22 docs' },
-      { t:5200, agent:'pesquisador', type:'tool',   text:'ratio_search("dano moral in re ipsa") -> 11 docs' },
-      { t:6400, agent:'pesquisador', type:'tool',   text:'ratio_search("sumula 548 prazo exclusao") -> 8 docs' },
-      { t:7200, agent:'pesquisador', type:'done',   text:'3 teses decompostas, 41 documentos coletados' },
-      { t:8500, agent:'redator',     type:'status', text:'Gerando secao "Dos Fatos"...' },
-      { t:10000,agent:'redator',     type:'status', text:'Gerando secao "Do Direito"...' },
-      { t:12000,agent:'redator',     type:'done',   text:'Peticao v1 gerada — 3 secoes, 14 citacoes' },
-      { t:13500,agent:'contraparte', type:'status', text:'Analisando peticao adversarialmente...' },
-      { t:14500,agent:'contraparte', type:'tool',   text:'ratio_search("excludente responsabilidade banco") -> 3 docs' },
-      { t:16000,agent:'contraparte', type:'warn',   text:'Anti-Sycophancy: verificando consistencia da critica...' },
-      { t:17000,agent:'contraparte', type:'done',   text:'Score de risco: 35/100 — 2 falhas identificadas' },
-    ];
+    const shortText = (value, max = 120) => {
+      const text = String(value || '').replace(/\s+/g, ' ').trim();
+      return text.length > max ? text.slice(0, max - 3).trimEnd() + '...' : text;
+    };
+
+    const titleFromSectionKey = (key) => String(key || '')
+      .replace(/^do_/, 'dos_')
+      .replace(/^da_/, 'das_')
+      .split('_')
+      .filter(Boolean)
+      .map(part => part.charAt(0).toUpperCase() + part.slice(1))
+      .join(' ');
 
     /* ══════════ ICON HELPER ══════════ */
     function Icon({ name, className = "w-5 h-5", style }) {
@@ -163,7 +172,7 @@
       <div className="flex items-center space-x-2 font-mono text-xs rounded-md px-3 py-1.5"
         style={{ border:'1px solid var(--stone-300)', background:'var(--stone-100)' }}>
         <span style={{ color:'var(--stone-500)', fontSize:10 }}>Custo</span>
-        <span className="font-medium" style={{ color:'var(--accent)', fontSize:11 }}>R$ {cost.toFixed(2)}</span>
+        <span className="font-medium" style={{ color:'var(--accent)', fontSize:11 }}>R$ {(cost || 0).toFixed(2)}</span>
       </div>
     );
 
@@ -208,116 +217,15 @@
       </div>
     );
 
-    /* ── Agent output summaries (mock — replaced by real API data in production) ── */
-    const AGENT_OUTPUTS = {
-      intake: { title:'Dossie de Triagem', items:[
-        { label:'Partes', value:'Joao Silva (autor) vs. Banco X S.A. (reu)' },
-        { label:'Tipo', value:'Peticao Inicial — Danos Morais' },
-        { label:'Fatos extraidos', value:'6 fatos estruturados' },
-        { label:'Documentos', value:'4 documentos identificados (contrato, comprovantes, extrato, notificacao)' },
-        { label:'Area', value:'Direito do Consumidor' },
-      ], detail:'Fatos: (1) Contrato de financiamento celebrado em 15/03/2023; (2) 360 parcelas mensais; (3) Pagamento integral ate 10/01/2025; (4) Manutencao indevida em cadastro restritivo; (5) Tentativa frustrada de resolucao administrativa; (6) Dano moral configurado.' },
-      pesquisador: { title:'Resultado da Pesquisa', items:[
-        { label:'Teses decompostas', value:'3' },
-        { label:'Docs favoraveis', value:'38 decisoes' },
-        { label:'Docs contrarios', value:'3 decisoes' },
-        { label:'Legislacao', value:'Art. 14 CDC, Art. 43 §1 CDC, Sumula 548/STJ, Sumula 385/STJ' },
-      ], detail:'Tese 1: Responsabilidade Objetiva e Dano in re ipsa (5 docs, confianca alta)\nTese 2: Prazo de Exclusao — Sumula 548/STJ (3 docs, confianca media)\nTese 3: Quantum indenizatorio — parametros TJSP (4 docs, confianca media)' },
-      redator: { title:'Peca Redigida', items:[
-        { label:'Secoes', value:'Dos Fatos, Do Direito, Dos Pedidos' },
-        { label:'Citacoes', value:'14 referencias jurisprudenciais' },
-        { label:'Versao', value:'v1 (pre-adversarial)' },
-      ], detail:'Dos Fatos: 3 paragrafos narrando cronologia.\nDo Direito: Fundamentacao em responsabilidade objetiva (art. 14 CDC), dano moral in re ipsa, jurisprudencia STJ consolidada.\nDos Pedidos: Condenacao em danos morais R$30.000, exclusao cadastral, tutela de urgencia.' },
-      contraparte: { title:'Analise Adversarial', items:[
-        { label:'Rodadas', value:'2' },
-        { label:'Score final', value:'8/100 (baixo risco)' },
-        { label:'Falhas criticas', value:'0' },
-        { label:'Pontos ajustados', value:'2 (quantum e tutela provisoria)' },
-      ], detail:'Critica 1 (resolvida): Ausencia de fundamentacao para tutela provisoria — adicionado art. 300 CPC.\nCritica 2 (resolvida): Quantum acima da media TJSP — ajustado para R$20.000 com fundamentacao.' },
-      auditor: { title:'Relatorio de Auditoria', items:[
-        { label:'Citacoes verificadas', value:'7/7 validas' },
-        { label:'Artigos conferidos', value:'4/4 vigentes' },
-        { label:'Sumulas', value:'2/2 ativas' },
-        { label:'Formatacao', value:'ABNT/CNJ conforme' },
-      ], detail:'Todas as referencias jurisprudenciais verificadas contra a base LanceDB. Nenhuma citacao fabricada detectada. Artigos de lei conferidos quanto a vigencia.' },
-      formatador: { title:'Documento Final', items:[
-        { label:'Formato', value:'.docx (Times New Roman 12pt)' },
-        { label:'Margens', value:'3cm esq/sup, 2cm dir/inf' },
-        { label:'Espacamento', value:'1.5 linhas' },
-        { label:'Paginas', value:'~8 paginas estimadas' },
-      ], detail:'Documento formatado conforme normas ABNT e CNJ. Cabecalho, enderecamento, secoes com heading, citacoes longas recuadas (4cm, fonte 10), numeracao de paginas.' },
-    };
+    const AgentDetailModal = () => null;
 
-    /* ── Agent Detail Modal ── */
-    const AgentDetailModal = ({ agentId, events, onClose }) => {
-      const a = AGENTS.find(x => x.id === agentId);
-      if (!a) return null;
-      const output = AGENT_OUTPUTS[agentId];
-      const agentEvents = events.filter(e => e.agent === agentId);
-      return (
-        <div className="fixed inset-0 z-50 flex items-center justify-center anim-fade" style={{ background:'rgba(0,0,0,0.5)', backdropFilter:'blur(6px)' }} onClick={onClose}>
-          <div className="w-full max-w-lg max-h-[80vh] flex flex-col rounded-xl anim-slide" style={{ background:'var(--stone-100)', border:`1px solid ${a.color}44`, boxShadow:'0 24px 48px rgba(0,0,0,0.3)' }} onClick={e => e.stopPropagation()}>
-            {/* Header */}
-            <div className="flex items-center justify-between p-4" style={{ borderBottom:`1px solid var(--stone-200)` }}>
-              <div className="flex items-center space-x-3">
-                <AgentBadge agentId={agentId} size={28} active={false} done={true} />
-                <div>
-                  <h3 className="font-serif text-base font-bold" style={{ color: a.color }}>{a.name}</h3>
-                  <span className="font-mono" style={{ fontSize:9, color:'var(--stone-500)' }}>{a.role}</span>
-                </div>
-              </div>
-              <button onClick={onClose} className="p-1 rounded transition-colors" style={{ color:'var(--stone-400)' }}>
-                <Icon name="x" className="w-4 h-4" />
-              </button>
-            </div>
-            {/* Content */}
-            <div className="flex-1 overflow-y-auto p-4 space-y-4">
-              {output && <>
-                <h4 className="font-serif font-semibold" style={{ fontSize:14, color:'var(--stone-900)' }}>{output.title}</h4>
-                <div className="rounded-lg p-3 space-y-0.5" style={{ background:'var(--stone-50)', border:'1px solid var(--stone-200)' }}>
-                  {output.items.map((item, i) => (
-                    <div key={i} className="flex justify-between py-1.5 font-mono" style={{ fontSize:10, borderBottom: i < output.items.length-1 ? '1px solid var(--stone-200)' : 'none' }}>
-                      <span style={{ color:'var(--stone-500)' }}>{item.label}</span>
-                      <span className="text-right ml-3" style={{ color:'var(--stone-800)' }}>{item.value}</span>
-                    </div>
-                  ))}
-                </div>
-                {output.detail && (
-                  <div className="rounded-lg p-3" style={{ background:'var(--stone-50)', border:'1px solid var(--stone-200)' }}>
-                    <span className="font-mono" style={{ fontSize:9, color:'var(--stone-500)' }}>Detalhamento</span>
-                    <p className="mt-1 text-xs whitespace-pre-line leading-relaxed" style={{ color:'var(--stone-700)' }}>{output.detail}</p>
-                  </div>
-                )}
-              </>}
-              {/* Activity log */}
-              {agentEvents.length > 0 && (
-                <div>
-                  <span className="font-mono" style={{ fontSize:9, color:'var(--stone-500)' }}>Log de atividade</span>
-                  <div className="mt-1 space-y-1">
-                    {agentEvents.map((ev, i) => (
-                      <div key={i} className="flex items-start space-x-2 py-1" style={{ fontSize:10 }}>
-                        <span className="font-mono shrink-0" style={{ color: ev.type==='done' ? 'var(--agent-auditor)' : ev.type==='warn' ? '#d4874a' : a.color }}>
-                          {ev.type==='done'?'\u2713':ev.type==='tool'?'\u2699':ev.type==='warn'?'\u26A0':'\u25CF'}
-                        </span>
-                        <span style={{ color:'var(--stone-600)' }}>{ev.text}</span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-      );
-    };
-
-    /* ── In-Column Status (only shows current state, not full history) ── */
+    /* ── In-Column Status ── */
     const InColumnFeed = ({ agentId, color, events, active }) => {
       const msgs = events.filter(e => e.agent === agentId);
       if (!msgs.length && !active) return null;
       const a = AGENTS.find(x => x.id === agentId) || AGENTS[0];
       const last = msgs.length ? msgs[msgs.length - 1] : null;
-      const isDone = last && last.type === 'done';
+      const isDone = last && (last.type === 'done' || last.status === 'completed');
       return (
         <div className="mx-2 mt-2 rounded-md shrink-0 transition-all duration-300" style={{ background:'var(--stone-100)', border:`1px solid ${color}33`, borderTop:`2px solid ${color}` }}>
           <div className="flex items-center justify-between px-2.5 py-2" style={{ background:color+'08' }}>
@@ -327,7 +235,7 @@
                 <span className="font-semibold leading-none" style={{ fontSize:10, color }}>{a.name}</span>
                 {last ? (
                   <span className="font-mono leading-none mt-1 truncate" style={{ fontSize:8, color: isDone ? 'var(--stone-600)' : 'var(--stone-500)' }}>
-                    {last.text}
+                    {last.text || last.message || 'Status atualizado'}
                   </span>
                 ) : active ? (
                   <span className="font-mono leading-none mt-1" style={{ fontSize:8, color:'var(--stone-500)' }}>Aguardando...</span>
@@ -343,51 +251,131 @@
       );
     };
 
-    /* ══════════ GATE OVERLAY ══════════ */
-    const GateOverlay = ({ gate, data, onApprove, onBack }) => (
-      <div className="fixed inset-0 z-50 flex items-center justify-center anim-fade" style={{ background:'rgba(0,0,0,0.5)', backdropFilter:'blur(6px)' }}>
-        <div className="w-full max-w-md rounded-xl p-6 space-y-4 anim-slide" style={{ background:'var(--stone-100)', border:'1px solid var(--stone-300)', boxShadow:'0 24px 48px rgba(0,0,0,0.3)' }}>
-          <div className="flex items-center space-x-3">
-            <div className="w-9 h-9 rounded-lg flex items-center justify-center" style={{ background:'var(--accent-dim)', border:'1px solid var(--accent)44' }}>
-              <Icon name="shield-check" className="w-4 h-4" style={{ color:'var(--accent)' }} />
-            </div>
-            <div>
-              <h3 className="font-serif text-lg font-bold" style={{ color:'var(--stone-900)' }}>Gate {gate}</h3>
-              <p className="font-mono" style={{ fontSize:10, color:'var(--stone-500)' }}>{gate===1?'Entendemos o problema?':'Base de pesquisa suficiente?'}</p>
-            </div>
-          </div>
-          <div className="space-y-0.5 text-xs rounded-lg p-3" style={{ background:'var(--stone-50)', border:'1px solid var(--stone-200)' }}>
-            {data.map((item, i) => (
-              <div key={i} className="flex justify-between py-2" style={{ borderBottom: i<data.length-1 ? '1px solid var(--stone-200)' : 'none' }}>
-                <span style={{ color:'var(--stone-500)' }}>{item.label}</span>
-                <span className="font-medium" style={{ color:'var(--stone-800)' }}>{item.value}</span>
+    /* ══════════ GATE 1 OVERLAY (Confirmação da Triagem) ══════════ */
+    const Gate1Overlay = ({ state, onApprove, onBack }) => {
+      const fatos = state.fatos_estruturados || [];
+      const provas = state.provas_disponiveis || [];
+      const provasRec = state.provas_recomendadas || [];
+      const pontos = state.pontos_atencao || [];
+      return (
+        <div className="fixed inset-0 z-50 flex items-center justify-center anim-fade" style={{ background:'rgba(0,0,0,0.55)', backdropFilter:'blur(6px)' }}>
+          <div className="w-full max-w-2xl max-h-[85vh] flex flex-col rounded-xl anim-slide"
+               style={{ background:'var(--stone-100)', border:'1px solid var(--stone-300)', boxShadow:'0 24px 48px rgba(0,0,0,0.3)' }}>
+            <div className="p-5 pb-3 flex items-start space-x-3" style={{ borderBottom:'1px solid var(--stone-200)' }}>
+              <div className="w-9 h-9 rounded-lg flex items-center justify-center shrink-0" style={{ background:'var(--accent-dim)', border:'1px solid var(--accent)44' }}>
+                <Icon name="shield-check" className="w-4 h-4" style={{ color:'var(--accent)' }} />
               </div>
-            ))}
-          </div>
-          <div className="flex space-x-3 pt-1">
-            <button onClick={onBack} className="flex-1 py-2.5 text-xs font-medium rounded-lg transition-colors duration-200"
-              style={{ border:'1px solid var(--stone-300)', color:'var(--stone-500)' }}
-              onMouseEnter={e => e.target.style.borderColor='var(--stone-400)'} onMouseLeave={e => e.target.style.borderColor='var(--stone-300)'}>
-              &#8592; Voltar
-            </button>
-            <button onClick={onApprove} className="flex-1 py-2.5 text-xs font-semibold rounded-lg transition-all duration-200"
-              style={{ background:'var(--accent)', color:'var(--stone-50)' }}
-              onMouseEnter={e => e.target.style.filter='brightness(1.1)'} onMouseLeave={e => e.target.style.filter='none'}>
-              Aprovar &#8594;
-            </button>
+              <div className="flex-1 min-w-0">
+                <h3 className="font-serif text-lg font-bold" style={{ color:'var(--stone-900)' }}>Confirmação da Triagem</h3>
+                <p className="font-mono uppercase tracking-wider mt-1" style={{ fontSize:10, color:'var(--stone-500)' }}>Clara · Análise dos fatos</p>
+                <p className="mt-2 text-xs leading-relaxed" style={{ color:'var(--stone-600)' }}>
+                  Confirme se Clara entendeu corretamente os fatos, provas e pontos críticos do caso. Ao aprovar, Theo iniciará a pesquisa jurisprudencial.
+                </p>
+              </div>
+            </div>
+
+            <div className="flex-1 overflow-y-auto p-5 space-y-3">
+              {fatos.length > 0 && (
+                <div className="p-3 rounded-lg" style={{ background:'var(--stone-50)', border:'1px solid var(--stone-200)', borderLeft:'3px solid var(--agent-intake)' }}>
+                  <div className="font-mono uppercase tracking-wider mb-1.5" style={{ fontSize:9, color:'var(--agent-intake)' }}>Fatos estruturados ({fatos.length})</div>
+                  <ul className="space-y-1">
+                    {fatos.map((f, i) => (<li key={i} className="text-xs leading-relaxed" style={{ color:'var(--stone-800)' }}>· {f}</li>))}
+                  </ul>
+                </div>
+              )}
+              {provas.length > 0 && (
+                <div className="p-3 rounded-lg" style={{ background:'var(--stone-50)', border:'1px solid var(--stone-200)', borderLeft:'3px solid var(--agent-auditor)' }}>
+                  <div className="font-mono uppercase tracking-wider mb-1.5" style={{ fontSize:9, color:'var(--agent-auditor)' }}>Provas disponíveis ({provas.length})</div>
+                  <ul className="space-y-1">
+                    {provas.map((p, i) => (<li key={i} className="text-xs leading-relaxed" style={{ color:'var(--stone-800)' }}>· {p}</li>))}
+                  </ul>
+                </div>
+              )}
+              {provasRec.length > 0 && (
+                <div className="p-3 rounded-lg" style={{ background:'var(--stone-50)', border:'1px solid var(--stone-200)', borderLeft:'3px solid var(--accent)' }}>
+                  <div className="font-mono uppercase tracking-wider mb-1.5" style={{ fontSize:9, color:'var(--accent)' }}>Provas recomendadas ({provasRec.length})</div>
+                  <ul className="space-y-1">
+                    {provasRec.map((p, i) => (<li key={i} className="text-xs leading-relaxed" style={{ color:'var(--stone-700)' }}>· {p}</li>))}
+                  </ul>
+                </div>
+              )}
+              {pontos.length > 0 && (
+                <div className="p-3 rounded-lg" style={{ background:'var(--stone-50)', border:'1px solid var(--stone-200)', borderLeft:'3px solid var(--agent-contraparte)' }}>
+                  <div className="font-mono uppercase tracking-wider mb-1.5" style={{ fontSize:9, color:'var(--agent-contraparte)' }}>Pontos de atenção ({pontos.length})</div>
+                  <ul className="space-y-1">
+                    {pontos.map((p, i) => (<li key={i} className="text-xs leading-relaxed" style={{ color:'var(--stone-700)' }}>· {p}</li>))}
+                  </ul>
+                </div>
+              )}
+              {fatos.length === 0 && provas.length === 0 && pontos.length === 0 && (
+                <div className="text-center py-6 font-mono" style={{ fontSize:11, color:'var(--stone-500)' }}>Nada estruturado ainda — descreva mais fatos antes de aprovar.</div>
+              )}
+            </div>
+
+            <div className="flex space-x-3 p-5 pt-3" style={{ borderTop:'1px solid var(--stone-200)' }}>
+              <button onClick={onBack}
+                className="flex-1 py-2.5 text-xs font-medium rounded-lg transition-colors duration-200"
+                style={{ border:'1px solid var(--stone-300)', color:'var(--stone-500)' }}>
+                ← Revisar fatos
+              </button>
+              <button onClick={onApprove}
+                className="flex-1 py-2.5 text-xs font-semibold rounded-lg transition-all duration-200"
+                style={{ background:'var(--accent)', color:'var(--stone-50)' }}>
+                Iniciar pesquisa →
+              </button>
+            </div>
           </div>
         </div>
-      </div>
-    );
+      );
+    };
 
     /* ══════════ INTAKE MODE ══════════ */
+    /* Conectado ao backend real:
+       - Lê state via GET /pipeline; restaura intake_history
+       - send → POST /intake; concluirTriagem → POST /run (executa intake_graph)
+       - Quando state.status === 'gate1' e !gate1_aprovado, abre Gate1Overlay
+       - Aprovar chama POST /gates/gate1 (backend transita para 'pesquisa') */
     const IntakeMode = ({ casoId, onGateApprove }) => {
-      const [msgs, setMsgs] = useState([{ role:'assistant', content:'Ola. Descreva os fatos do caso, as partes envolvidas e os documentos disponiveis. Quanto mais detalhado, melhor o resultado.' }]);
+      const [state, setState] = useState(null);
+      const [msgs, setMsgs] = useState([
+        { role:'assistant', content:'Olá. Descreva os fatos do caso, as partes envolvidas e os documentos disponíveis. Quanto mais detalhado, melhor o resultado.' }
+      ]);
       const [input, setInput] = useState('');
       const [loading, setLoading] = useState(false);
+      const [analyzing, setAnalyzing] = useState(false);
       const [showGate, setShowGate] = useState(false);
       const btm = useRef(null);
-      useEffect(() => { btm.current?.scrollIntoView({ behavior:'smooth' }); }, [msgs.length]);
+
+      const refresh = useCallback(async () => {
+        if (!casoId) return;
+        const data = await api.getPipeline(casoId);
+        if (data && data.state) setState(data.state);
+      }, [casoId]);
+
+      useEffect(() => {
+        refresh();
+        const iv = setInterval(refresh, 3000);
+        return () => clearInterval(iv);
+      }, [refresh]);
+
+      // Restaura histórico de mensagens reais do backend (se existir)
+      useEffect(() => {
+        if (state && Array.isArray(state.intake_history) && state.intake_history.length > 0) {
+          setMsgs(state.intake_history.map(m => ({ role: m.role, content: m.content })));
+        }
+      }, [state && state.intake_history && state.intake_history.length]);
+
+      // Backend sinaliza pronto para confirmar triagem
+      useEffect(() => {
+        if (state && state.status === 'gate1' && !state.gate1_aprovado) {
+          setShowGate(true);
+        }
+      }, [state && state.status, state && state.gate1_aprovado]);
+
+      useEffect(() => { btm.current && btm.current.scrollIntoView({ behavior:'smooth' }); }, [msgs.length]);
+
+      const checklist = (state && state.intake_checklist) || { partes_identificadas:false, fatos_principais_cobertos:false, documentos_listados:false };
+      const checklistComplete = checklist.partes_identificadas && checklist.fatos_principais_cobertos && checklist.documentos_listados;
 
       const send = async () => {
         const txt = input.trim();
@@ -396,13 +384,33 @@
         setInput('');
         setLoading(true);
         const resp = await api.sendIntake(casoId, txt);
-        if (resp && resp.assistant_message) {
-          setMsgs(p => [...p, { role:'assistant', content: resp.assistant_message }]);
-        } else {
-          /* fallback mock */
-          setTimeout(() => setMsgs(p => [...p, { role:'assistant', content:'Fatos processados. 6 fatos extraidos, 3 teses identificadas. Deseja aprovar o dossie?' }]), 600);
+        if (resp && resp.state) setState(resp.state);
+        if (resp && resp.next_question) {
+          setMsgs(p => [...p, { role:'assistant', content: resp.next_question }]);
+        } else if (!resp) {
+          setMsgs(p => [...p, { role:'assistant', content:'Não foi possível conectar ao backend. Verifique se o servidor Ratio está em execução.' }]);
         }
         setLoading(false);
+      };
+
+      const concluirTriagem = async () => {
+        setAnalyzing(true);
+        setMsgs(p => [...p, { role:'assistant', content:'Clara está estruturando os fatos do caso… isso pode levar alguns segundos.' }]);
+        const resp = await api.runPipeline(casoId);
+        setAnalyzing(false);
+        if (resp && resp.state) {
+          setState(resp.state);
+          // Não força showGate aqui — o efeito acima abre quando status === 'gate1'
+        } else {
+          setMsgs(p => [...p, { role:'assistant', content:'Falha ao executar a análise. Verifique a chave Gemini e os logs do backend.' }]);
+        }
+      };
+
+      const approveGate1 = async () => {
+        const resp = await api.approveGate(casoId, 'gate1', true);
+        if (resp && resp.state) setState(resp.state);
+        setShowGate(false);
+        if (onGateApprove) onGateApprove();
       };
 
       return (
@@ -410,7 +418,7 @@
           <div className="flex flex-col h-full max-w-2xl mx-auto w-full pt-8 pb-4 px-5">
             <div className="text-center mb-6 anim-fade">
               <h2 className="font-serif text-2xl font-bold" style={{ color:'var(--stone-900)' }}>Triagem do Caso</h2>
-              <p className="mt-1" style={{ fontSize:12, color:'var(--stone-500)' }}>Clara ira analisar os fatos e estruturar o dossie preliminar</p>
+              <p className="mt-1" style={{ fontSize:12, color:'var(--stone-500)' }}>Clara irá analisar os fatos e estruturar o dossiê preliminar</p>
             </div>
             <div className="flex-1 overflow-y-auto space-y-3 mb-4 pr-1">
               {msgs.map((m, i) => (
@@ -424,16 +432,33 @@
                   </div>
                 </div>
               ))}
-              {loading && <div className="flex justify-start"><div className="rounded-lg px-4 py-3 shimmer" style={{ width:180, height:40, borderLeft:'2px solid var(--agent-intake)' }} /></div>}
+              {(loading || analyzing) && (
+                <div className="flex justify-start">
+                  <div className="rounded-lg px-4 py-3 shimmer" style={{ width:180, height:40, borderLeft:'2px solid var(--agent-intake)' }} />
+                </div>
+              )}
               <div ref={btm} />
             </div>
-            {msgs.length >= 3 && !showGate && (
-              <div className="flex justify-center mb-3 anim-fade">
-                <button onClick={() => setShowGate(true)} className="px-6 py-2 text-xs font-semibold rounded-lg transition-all duration-200"
-                  style={{ background:'var(--agent-intake)', color:'white' }}
-                  onMouseEnter={e => e.target.style.filter='brightness(1.15)'} onMouseLeave={e => e.target.style.filter='none'}>
-                  Aprovar Gate 1 &#8594;
-                </button>
+            {(checklist.partes_identificadas || checklist.fatos_principais_cobertos || checklist.documentos_listados) && !showGate && (
+              <div className="mb-3 anim-fade rounded-lg p-3" style={{ background:'var(--stone-100)', border:'1px solid var(--stone-200)' }}>
+                <div className="flex items-center justify-between mb-2">
+                  <span className="font-mono uppercase tracking-wider" style={{ fontSize:9, color:'var(--stone-500)' }}>Informações detectadas</span>
+                  {checklistComplete && (
+                    <button onClick={concluirTriagem} disabled={analyzing}
+                      className="px-4 py-1.5 text-xs font-semibold rounded-md transition-all duration-200"
+                      style={{ background:'var(--agent-intake)', color:'white', opacity: analyzing ? 0.5 : 1 }}>
+                      {analyzing ? 'Estruturando...' : 'Concluir triagem →'}
+                    </button>
+                  )}
+                </div>
+                <div className="grid grid-cols-3 gap-2 font-mono" style={{ fontSize:10 }}>
+                  {[['Partes','partes_identificadas'],['Fatos','fatos_principais_cobertos'],['Documentos','documentos_listados']].map(([lbl,key]) => (
+                    <div key={key} className="flex items-center space-x-1.5">
+                      <span style={{ color: checklist[key] ? 'var(--agent-auditor)' : 'var(--stone-400)' }}>{checklist[key] ? '✓' : '○'}</span>
+                      <span style={{ color: checklist[key] ? 'var(--stone-700)' : 'var(--stone-500)' }}>{lbl}</span>
+                    </div>
+                  ))}
+                </div>
               </div>
             )}
             <div className="flex items-end rounded-lg p-2 transition-colors duration-200" style={{ background:'var(--stone-100)', border:'1px solid var(--stone-200)' }}>
@@ -446,58 +471,292 @@
               </button>
             </div>
           </div>
-          {showGate && <GateOverlay gate={1} data={[
-            { label:'Fatos extraidos', value:'6' }, { label:'Partes', value:'Joao Silva vs. Banco X' },
-            { label:'Tipo da peca', value:'Peticao Inicial' }, { label:'Area', value:'Dir. Consumidor' },
-            { label:'Teses identificadas', value:'3' },
-          ]} onApprove={async () => { await api.approveGate(casoId, 'gate1'); onGateApprove(); }} onBack={() => setShowGate(false)} />}
+          {showGate && state && (
+            <Gate1Overlay state={state} onApprove={approveGate1} onBack={() => setShowGate(false)} />
+          )}
         </>
       );
     };
 
     /* ══════════ WORKSPACE MODE ══════════ */
+    /* Conectado ao backend real:
+       - Lê state via GET /api/escritorio/cases/{id}/pipeline (campo state + pipeline)
+       - Dispara POST /run nas transições (intake→pesquisa→gate2→redacao→adversarial→entrega)
+       - Gate2 abre modal explicativo (teses reais, não números) e chama POST /gates/gate2
+       - Editor de seções persiste via POST /draft (peca_sections)
+       - Conclusão automática quando state.output_docx_path é preenchido */
     const WorkspaceMode = ({ casoId, onFinish, feedEvents }) => {
-      const [sections, setSections] = useState(MOCK_SECTIONS);
-      const [phase, setPhase] = useState(0);
-      const [expandedTese, setExpandedTese] = useState('t1');
-      const [advRound, setAdvRound] = useState(1);
-      const [advScore, setAdvScore] = useState(35);
-      const [editSec, setEditSec] = useState(null);
+      const [state, setState] = useState(null);            // RatioEscritorioState
+      const [pipeline, setPipeline] = useState(null);      // _pipeline_payload
+      const [running, setRunning] = useState(false);       // lock para /run
       const [showGate2, setShowGate2] = useState(false);
+      const [editKey, setEditKey] = useState(null);
+      const [editValue, setEditValue] = useState('');
+      const [expandedTeseId, setExpandedTeseId] = useState(null);
+      const triggeredRef = useRef({ research: false, draft: false });
+
+      // status (backend) → índice da última fase concluída em PHASES
+      // PHASES: 0=intake, 1=research, 2=drafting, 3=adversarial, 4=delivery
+      const statusToPhase = (status) => {
+        if (!status || status === 'intake' || status === 'gate1') return -1;
+        if (status === 'pesquisa' || status === 'gate2') return 0;
+        if (status === 'redacao') return 1;
+        if (['adversarial','revisao_humana','verificacao'].includes(status)) return 2;
+        if (status === 'entrega') return 3;
+        if (status === 'finalizado') return 4;
+        return 0;
+      };
+      const phase = statusToPhase((pipeline && pipeline.status) || (state && state.status));
+
+      // ── Polling do estado real ──
+      const refresh = useCallback(async () => {
+        if (!casoId) return;
+        const data = await api.getPipeline(casoId);
+        if (data) {
+          if (data.state) setState(data.state);
+          if (data.pipeline) setPipeline(data.pipeline);
+        }
+      }, [casoId]);
 
       useEffect(() => {
-        if (phase >= 2) {
-          const t = setInterval(() => {
-            setSections(p => p.map(s => s.id==='direito' && s.content.length < 380
-              ? { ...s, content: s.content + ' independentemente de comprovacao de abalo psicologico, configurando dano in re ipsa.' }
-              : s));
-          }, 3200);
-          return () => clearInterval(t);
+        refresh();
+        const iv = setInterval(refresh, 3000);
+        return () => clearInterval(iv);
+      }, [refresh]);
+
+      // ── /run automático nas transições naturais ──
+      useEffect(() => {
+        if (!state || running) return;
+        const status = state.status;
+
+        // (a) Pesquisa: rodar drafting_graph (pesquisa+curadoria) até atingir gate2
+        const needsResearch =
+          status === 'pesquisa' &&
+          (!state.teses || state.teses.length === 0) &&
+          !triggeredRef.current.research;
+
+        // (b) Após gate2 aprovado: rodar redação + adversarial até gerar docx
+        const needsDraftAndReview =
+          state.gate2_aprovado &&
+          !state.output_docx_path &&
+          !triggeredRef.current.draft &&
+          ['redacao','adversarial','revisao_humana','verificacao'].includes(status);
+
+        if (needsResearch || needsDraftAndReview) {
+          if (needsResearch) triggeredRef.current.research = true;
+          if (needsDraftAndReview) triggeredRef.current.draft = true;
+          (async () => {
+            setRunning(true);
+            const resp = await api.runPipeline(casoId);
+            if (resp && resp.state) setState(resp.state);
+            if (resp && resp.pipeline) setPipeline(resp.pipeline);
+            setRunning(false);
+          })();
         }
-      }, [phase]);
+      }, [state, running, casoId]);
 
-      const advancePhase = () => {
-        if (phase === 0) { setShowGate2(true); return; }
-        if (phase < 3) setPhase(phase + 1);
-        else onFinish();
-      };
-      const doRound = async () => {
-        await api.runCritique(casoId);
-        setAdvRound(r => r + 1);
-        setAdvScore(s => Math.max(6, s - 14));
+      // ── Mostra gate2 quando backend sinalizar ──
+      useEffect(() => {
+        if (state && state.status === 'gate2' && !state.gate2_aprovado) {
+          setShowGate2(true);
+        }
+      }, [state && state.status, state && state.gate2_aprovado]);
+
+      // ── Conclusão: documento gerado → segue para Delivery ──
+      useEffect(() => {
+        if (state && state.output_docx_path) onFinish();
+      }, [state && state.output_docx_path, onFinish]);
+
+      const teses = (state && state.teses) || [];
+      const sections = (state && state.peca_sections) || {};
+      const sectionEntries = Object.entries(sections);
+      const critica = (state && state.critica_atual) || null;
+      const rodadaAtual = (state && state.rodada_atual) || 0;
+      const advScore = critica && typeof critica.score_de_risco === 'number' ? critica.score_de_risco : 0;
+      const todasFalhas = critica
+        ? [...(critica.falhas_processuais || []), ...(critica.argumentos_materiais_fracos || [])]
+        : [];
+
+      const approveGate2 = async () => {
+        await api.approveGate(casoId, 'gate2', true);
+        setShowGate2(false);
+        triggeredRef.current.draft = false;
+        await refresh();
       };
 
-      const phaseAgentMap = { 0:'pesquisador', 1:'pesquisador', 2:'redator', 3:'contraparte', 4:'auditor' };
-      const phaseCards = {
-        0: MOCK_TESES.map(t => ({ title:t.title, sub:`${t.docsCount} docs | ${t.confidence}`, status:'Concluido', color:'var(--agent-pesquisador)',
-          expand:() => setExpandedTese(expandedTese===t.id?null:t.id), expanded:expandedTese===t.id, tese:t })),
-        1: [],
-        2: sections.map(s => ({ title:s.title, sub:s.content.slice(0,80)+'...', status:s.status==='streaming'?'Gerando...':s.status==='done'?'Pronto':'Pendente',
-          color:'var(--agent-redator)', onClick:() => setEditSec(s) })),
-        3: MOCK_CRITICAS.map(c => ({ title:c.desc.slice(0,55)+'...', sub:c.argumento.slice(0,65), status:c.gravidade==='alta'?'Alta':'Media',
-          color:'var(--agent-contraparte)' })),
-        4: [],
+      const runAnotherCritique = async () => {
+        triggeredRef.current.draft = false;
+        setRunning(true);
+        const resp = await api.runPipeline(casoId);
+        if (resp && resp.state) setState(resp.state);
+        if (resp && resp.pipeline) setPipeline(resp.pipeline);
+        setRunning(false);
       };
+
+      const openSectionEditor = (key) => {
+        setEditKey(key);
+        setEditValue(sections[key] || '');
+      };
+
+      const saveSection = async () => {
+        if (!editKey) return;
+        const updated = { ...sections, [editKey]: editValue };
+        const resp = await api.submitDraft(casoId, updated);
+        if (resp && resp.state) setState(resp.state);
+        setEditKey(null);
+        setEditValue('');
+      };
+
+      // ── Conteúdo de cada coluna (a partir do state real) ──
+      const renderResearchColumn = () => (
+        <>
+          {teses.length === 0 && (
+            <div className="flex items-center justify-center h-16 font-mono" style={{ fontSize:10, color:'var(--stone-400)' }}>
+              {running ? 'Pesquisando teses...' : 'Aguardando pesquisa'}
+            </div>
+          )}
+          {teses.map((t) => {
+            const expanded = expandedTeseId === t.id;
+            const fav = (t.jurisprudencia_favoravel || []).length;
+            const con = (t.jurisprudencia_contraria || []).length;
+            const leg = (t.legislacao || []).length;
+            return (
+              <div key={t.id} onClick={() => setExpandedTeseId(expanded ? null : t.id)}
+                className="p-3 rounded-lg cursor-pointer transition-all duration-200"
+                style={{ background:'var(--stone-200)', border:'1px solid var(--stone-300)', borderLeft:'3px solid var(--agent-pesquisador)' }}
+                onMouseEnter={e => e.currentTarget.style.transform='translateY(-1px)'}
+                onMouseLeave={e => e.currentTarget.style.transform='none'}>
+                <h4 className="text-xs font-semibold mb-1" style={{ color:'var(--stone-900)' }}>{shortText(t.descricao || t.id, 90)}</h4>
+                <p className="leading-relaxed font-mono" style={{ fontSize:9, color:'var(--stone-500)' }}>
+                  {t.tipo || 'principal'} · {fav} fav · {con} contra · {leg} leg · confiança {t.confianca || 'media'}
+                </p>
+                {expanded && (
+                  <div className="mt-2.5 pt-2 space-y-1.5" style={{ borderTop:'1px solid var(--stone-300)' }}>
+                    {(t.jurisprudencia_favoravel || []).slice(0, 5).map((d, di) => (
+                      <div key={di} className="p-2 rounded" style={{ background:'var(--stone-100)', border:'1px solid var(--stone-200)' }}>
+                        <span className="font-mono font-medium" style={{ fontSize:9, color:'var(--agent-pesquisador)' }}>
+                          {d.processo || d.numero || d.id || '—'} · {d.tribunal || d.fonte || ''}
+                        </span>
+                        {(d.ementa || d.resumo || d.titulo) && (
+                          <p className="font-cite italic mt-0.5" style={{ fontSize:10, color:'var(--stone-500)' }}>
+                            {shortText(d.ementa || d.resumo || d.titulo, 220)}
+                          </p>
+                        )}
+                      </div>
+                    ))}
+                    {(t.jurisprudencia_contraria || []).length > 0 && (
+                      <div className="font-mono pt-1" style={{ fontSize:8, color:'var(--agent-contraparte)' }}>
+                        {(t.jurisprudencia_contraria || []).length} decisões contrárias mapeadas
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </>
+      );
+
+      const renderDraftingColumn = () => (
+        <>
+          {sectionEntries.length === 0 && (
+            <div className="flex items-center justify-center h-16 font-mono" style={{ fontSize:10, color:'var(--stone-400)' }}>
+              {running ? 'Redigindo seções...' : 'Aguardando redação'}
+            </div>
+          )}
+          {sectionEntries.map(([key, content]) => (
+            <div key={key} onClick={() => openSectionEditor(key)}
+              className="p-3 rounded-lg cursor-pointer transition-all duration-200"
+              style={{ background:'var(--stone-200)', border:'1px solid var(--stone-300)', borderLeft:'3px solid var(--agent-redator)' }}
+              onMouseEnter={e => e.currentTarget.style.transform='translateY(-1px)'}
+              onMouseLeave={e => e.currentTarget.style.transform='none'}>
+              <h4 className="text-xs font-semibold mb-1" style={{ color:'var(--stone-900)' }}>{titleFromSectionKey(key)}</h4>
+              <p className="leading-relaxed line-clamp-2" style={{ fontSize:10, color:'var(--stone-500)' }}>{shortText(content, 160)}</p>
+            </div>
+          ))}
+        </>
+      );
+
+      const renderAdversarialColumn = () => (
+        <>
+          {!critica && todasFalhas.length === 0 && (
+            <div className="flex items-center justify-center h-16 font-mono" style={{ fontSize:10, color:'var(--stone-400)' }}>
+              {running ? 'Stress test em andamento...' : 'Aguardando análise adversarial'}
+            </div>
+          )}
+          {todasFalhas.map((f, i) => (
+            <div key={f.finding_id || i}
+              className="p-3 rounded-lg transition-all duration-200"
+              style={{ background:'var(--stone-200)', border:'1px solid var(--stone-300)', borderLeft:'3px solid var(--agent-contraparte)' }}>
+              <h4 className="text-xs font-semibold mb-1" style={{ color:'var(--stone-900)' }}>{shortText(f.descricao, 90)}</h4>
+              <p className="leading-relaxed line-clamp-2 font-cite italic" style={{ fontSize:10, color:'var(--stone-500)' }}>
+                {shortText(f.argumento_contrario, 160)}
+              </p>
+              <div className="flex items-center mt-1.5 space-x-2 font-mono" style={{ fontSize:9 }}>
+                <span style={{ color:'var(--agent-contraparte)' }}>{f.gravidade}</span>
+                <span style={{ color:'var(--stone-400)' }}>·</span>
+                <span style={{ color:'var(--stone-500)' }}>{f.tipo}</span>
+                {f.secao_afetada && (
+                  <>
+                    <span style={{ color:'var(--stone-400)' }}>·</span>
+                    <span style={{ color:'var(--stone-500)' }}>{f.secao_afetada}</span>
+                  </>
+                )}
+              </div>
+            </div>
+          ))}
+          {critica && (
+            <div className="mt-1 p-3 rounded-lg" style={{ background:'var(--stone-100)', border:'1px dashed var(--agent-contraparte)55' }}>
+              <div className="flex justify-between items-center mb-2.5">
+                <span className="font-mono font-bold" style={{ fontSize:10, color:'var(--agent-contraparte)' }}>Rodada {rodadaAtual}</span>
+                <span className="font-mono font-medium" style={{ fontSize:10, color: advScore > 25 ? 'var(--agent-contraparte)' : 'var(--agent-auditor)' }}>
+                  Score: {advScore}/100
+                </span>
+              </div>
+              <div className="w-full h-1.5 rounded-full mb-3" style={{ background:'var(--stone-200)' }}>
+                <div className="h-full rounded-full transition-all duration-700"
+                  style={{ width:`${Math.max(0, Math.min(100, advScore))}%`,
+                           background: advScore > 25 ? 'var(--agent-contraparte)' : 'var(--agent-auditor)' }} />
+              </div>
+              {critica.analise_contestacao && (
+                <p className="font-cite italic mb-2" style={{ fontSize:10, color:'var(--stone-600)' }}>
+                  {shortText(critica.analise_contestacao, 200)}
+                </p>
+              )}
+              <div className="flex space-x-2">
+                <button onClick={runAnotherCritique} disabled={running}
+                  className="flex-1 py-1.5 font-semibold rounded transition-all duration-200"
+                  style={{ fontSize:10, border:'1px solid var(--agent-contraparte)55', color:'var(--agent-contraparte)', opacity: running ? 0.4 : 1 }}>
+                  + Rodada
+                </button>
+                <button onClick={onFinish}
+                  className="flex-1 py-1.5 font-semibold rounded transition-all duration-200"
+                  style={{ fontSize:10, background:'var(--agent-auditor)', color:'white' }}>
+                  Finalizar
+                </button>
+              </div>
+            </div>
+          )}
+        </>
+      );
+
+      const renderDeliveryColumn = () => (
+        <div className="flex items-center justify-center h-16 font-mono text-center px-2" style={{ fontSize:10, color:'var(--stone-400)' }}>
+          {state && state.output_docx_path
+            ? 'Documento pronto para entrega'
+            : (running ? 'Verificando e formatando...' : 'Aguardando verificação')}
+        </div>
+      );
+
+      const columnContent = [
+        null,                       // 0 intake (concluído)
+        renderResearchColumn(),     // 1 research
+        renderDraftingColumn(),     // 2 drafting
+        renderAdversarialColumn(),  // 3 adversarial
+        renderDeliveryColumn(),     // 4 delivery
+      ];
+
+      const phaseAgentMap = { 0:'intake', 1:'pesquisador', 2:'redator', 3:'contraparte', 4:'auditor' };
 
       return (
         <div className="flex h-full w-full">
@@ -505,132 +764,207 @@
             {PHASES.map((ph, i) => {
               const active = i === phase + 1;
               const past = i <= phase;
-              const cards = phaseCards[i] || [];
               return (
                 <div key={ph.id} className="flex-1 flex flex-col min-w-0 transition-all duration-300"
                   style={{ borderRight:'1px solid var(--stone-200)', opacity: !past && !active ? 0.2 : 1 }}>
-                  {/* Column header */}
                   <div className="p-3 shrink-0" style={{ borderBottom:'1px solid var(--stone-200)', background:'var(--stone-100)' }}>
                     <div className="flex items-center justify-between">
                       <div className="flex items-center space-x-2">
                         <span className="font-mono font-bold" style={{ fontSize:10, color:ph.color }}>{ph.num}</span>
                         <span className="text-xs font-semibold" style={{ color: active ? ph.color : past ? 'var(--stone-700)' : 'var(--stone-500)' }}>{ph.label}</span>
                       </div>
-                      {cards.length > 0 && <span className="font-mono" style={{ fontSize:9, color:'var(--stone-400)' }}>{cards.length}</span>}
                     </div>
                     {active && <div className="h-0.5 mt-2 rounded-full transition-all duration-500" style={{ background:ph.color }} />}
                   </div>
-
-                  {/* Agent feed */}
-                  <InColumnFeed agentId={phaseAgentMap[i]} color={ph.color} events={feedEvents} active={active} />
-
-                  {/* Cards */}
+                  <InColumnFeed agentId={phaseAgentMap[i]} color={ph.color} events={feedEvents || []} active={active && running} />
                   <div className="flex-1 p-2 overflow-y-auto space-y-2">
-                    {cards.map((c, ci) => (
-                      <div key={ci} onClick={c.onClick || c.expand || undefined}
-                        className="p-3 rounded-lg cursor-pointer transition-all duration-200"
-                        style={{ background:'var(--stone-200)', border:'1px solid var(--stone-300)', borderLeft:`3px solid ${c.color}` }}
-                        onMouseEnter={e => e.currentTarget.style.transform='translateY(-1px)'} onMouseLeave={e => e.currentTarget.style.transform='none'}>
-                        <h4 className="text-xs font-semibold mb-1" style={{ color:'var(--stone-900)' }}>{c.title}</h4>
-                        <p className="leading-relaxed line-clamp-2" style={{ fontSize:10, color:'var(--stone-500)' }}>{c.sub}</p>
-                        {c.status && <div className="flex items-center mt-1.5 space-x-1">
-                          <div className="w-1.5 h-1.5 rounded-full" style={{ background:c.color, animation:'pulse-dot 1.4s ease-in-out infinite' }} />
-                          <span className="font-mono" style={{ fontSize:9, color:c.color }}>{c.status}</span>
-                        </div>}
-                        {c.expanded && c.tese && (
-                          <div className="mt-2.5 pt-2 space-y-1.5" style={{ borderTop:'1px solid var(--stone-300)' }}>
-                            {c.tese.docs.map(d => (
-                              <div key={d.id} className="p-2 rounded" style={{ background:'var(--stone-100)', border:'1px solid var(--stone-200)' }}>
-                                <span className="font-mono font-medium" style={{ fontSize:9, color:'var(--agent-pesquisador)' }}>{d.process} · {d.court}</span>
-                                <p className="font-cite italic mt-0.5" style={{ fontSize:10, color:'var(--stone-500)' }}>{d.summary}</p>
-                              </div>
-                            ))}
-                            <div className="font-mono pt-1" style={{ fontSize:8, color:'var(--stone-400)' }}>
-                              Queries: {c.tese.queries.join(' | ')}
-                            </div>
-                          </div>
-                        )}
-                      </div>
-                    ))}
-                    {/* Adversarial controls */}
-                    {i === 3 && phase >= 2 && (
-                      <div className="mt-1 p-3 rounded-lg" style={{ background:'var(--stone-100)', border:`1px dashed var(--agent-contraparte)55` }}>
-                        <div className="flex justify-between items-center mb-2.5">
-                          <span className="font-mono font-bold" style={{ fontSize:10, color:'var(--agent-contraparte)' }}>Rodada {advRound}</span>
-                          <span className="font-mono font-medium" style={{ fontSize:10, color: advScore > 25 ? 'var(--agent-contraparte)' : 'var(--agent-auditor)' }}>Score: {advScore}/100</span>
-                        </div>
-                        <div className="w-full h-1.5 rounded-full mb-3" style={{ background:'var(--stone-200)' }}>
-                          <div className="h-full rounded-full transition-all duration-700" style={{ width:`${advScore}%`, background: advScore > 25 ? 'var(--agent-contraparte)' : 'var(--agent-auditor)' }} />
-                        </div>
-                        <div className="flex space-x-2">
-                          <button onClick={doRound} className="flex-1 py-1.5 font-semibold rounded transition-all duration-200"
-                            style={{ fontSize:10, border:'1px solid var(--agent-contraparte)55', color:'var(--agent-contraparte)' }}
-                            onMouseEnter={e => e.target.style.background='var(--agent-contraparte)11'} onMouseLeave={e => e.target.style.background='transparent'}>+ Rodada</button>
-                          <button onClick={onFinish} className="flex-1 py-1.5 font-semibold rounded transition-all duration-200"
-                            style={{ fontSize:10, background:'var(--agent-auditor)', color:'white' }}>Finalizar</button>
-                        </div>
-                      </div>
-                    )}
-                    {cards.length === 0 && i > phase + 1 && (
-                      <div className="flex items-center justify-center h-16 font-mono" style={{ fontSize:10, color:'var(--stone-400)' }}>Aguardando...</div>
-                    )}
+                    {columnContent[i]}
                   </div>
-                  {active && (
-                    <div className="p-2" style={{ borderTop:'1px solid var(--stone-200)' }}>
-                      <button onClick={advancePhase} className="w-full py-2 font-semibold rounded-lg flex items-center justify-center transition-all duration-200"
-                        style={{ fontSize:10, background:ph.color, color:'white' }}
-                        onMouseEnter={e => e.target.style.filter='brightness(1.12)'} onMouseLeave={e => e.target.style.filter='none'}>
-                        Avancar <Icon name="arrow-right" className="w-3 h-3 ml-1" />
-                      </button>
-                    </div>
-                  )}
                 </div>
               );
             })}
           </div>
 
-          {/* Editor modal */}
-          {editSec && (
+          {/* Editor de seções — persiste via /draft */}
+          {editKey && (
             <div className="fixed inset-0 z-50 flex items-center justify-center anim-fade" style={{ background:'rgba(0,0,0,0.5)', backdropFilter:'blur(6px)' }}>
               <div className="w-full max-w-2xl max-h-[80vh] flex flex-col rounded-xl anim-slide" style={{ background:'var(--stone-100)', border:'1px solid var(--stone-300)', boxShadow:'0 24px 48px rgba(0,0,0,0.3)' }}>
                 <div className="flex items-center justify-between p-4" style={{ borderBottom:'1px solid var(--stone-200)' }}>
-                  <h3 className="font-serif text-lg font-bold" style={{ color:'var(--stone-900)' }}>{editSec.title}</h3>
+                  <h3 className="font-serif text-lg font-bold" style={{ color:'var(--stone-900)' }}>{titleFromSectionKey(editKey)}</h3>
                   <div className="flex items-center space-x-2">
-                    <button onClick={() => setEditSec(null)} className="px-4 py-1.5 text-xs font-semibold rounded-lg transition-all duration-200"
-                      style={{ background:'var(--accent)', color:'var(--stone-50)' }}>Salvar</button>
-                    <button onClick={() => setEditSec(null)} style={{ color:'var(--stone-400)' }}><Icon name="x" className="w-4 h-4" /></button>
+                    <button onClick={saveSection}
+                      className="px-4 py-1.5 text-xs font-semibold rounded-lg transition-all duration-200"
+                      style={{ background:'var(--accent)', color:'var(--stone-50)' }}>
+                      Salvar
+                    </button>
+                    <button onClick={() => { setEditKey(null); setEditValue(''); }} style={{ color:'var(--stone-400)' }}>
+                      <Icon name="x" className="w-4 h-4" />
+                    </button>
                   </div>
                 </div>
                 <textarea className="flex-1 p-5 bg-transparent border-none outline-none resize-none text-sm leading-relaxed"
-                  style={{ color:'var(--stone-800)' }} defaultValue={editSec.content} />
+                  style={{ color:'var(--stone-800)' }} value={editValue}
+                  onChange={(e) => setEditValue(e.target.value)} />
               </div>
             </div>
           )}
-          {showGate2 && <GateOverlay gate={2} data={[
-            { label:'Teses decompostas', value:'3' }, { label:'Docs favoraveis', value:'38' },
-            { label:'Docs contrarios', value:'3' }, { label:'Legislacao', value:'4 artigos' },
-          ]} onApprove={async () => { await api.approveGate(casoId, 'gate2'); setShowGate2(false); setPhase(1); }} onBack={() => setShowGate2(false)} />}
+
+          {/* Gate 2 — pausa humana com explicação real (não apenas números) */}
+          {showGate2 && state && (
+            <Gate2Overlay state={state} onApprove={approveGate2} onBack={() => setShowGate2(false)} />
+          )}
+        </div>
+      );
+    };
+
+    /* ══════════ GATE 2 OVERLAY ══════════ */
+    const Gate2Overlay = ({ state, onApprove, onBack }) => {
+      const teses = state.teses || [];
+      const totalFav = teses.reduce((acc, t) => acc + ((t.jurisprudencia_favoravel || []).length), 0);
+      const totalCon = teses.reduce((acc, t) => acc + ((t.jurisprudencia_contraria || []).length), 0);
+      const totalLeg = teses.reduce((acc, t) => acc + ((t.legislacao || []).length), 0);
+      const pontos = state.pontos_atencao || [];
+      return (
+        <div className="fixed inset-0 z-50 flex items-center justify-center anim-fade" style={{ background:'rgba(0,0,0,0.55)', backdropFilter:'blur(6px)' }}>
+          <div className="w-full max-w-2xl max-h-[85vh] flex flex-col rounded-xl anim-slide"
+               style={{ background:'var(--stone-100)', border:'1px solid var(--stone-300)', boxShadow:'0 24px 48px rgba(0,0,0,0.3)' }}>
+            <div className="p-5 pb-3 flex items-start space-x-3" style={{ borderBottom:'1px solid var(--stone-200)' }}>
+              <div className="w-9 h-9 rounded-lg flex items-center justify-center shrink-0" style={{ background:'var(--accent-dim)', border:'1px solid var(--accent)44' }}>
+                <Icon name="shield-check" className="w-4 h-4" style={{ color:'var(--accent)' }} />
+              </div>
+              <div className="flex-1 min-w-0">
+                  <h3 className="font-serif text-lg font-bold" style={{ color:'var(--stone-900)' }}>Confirmação da Pesquisa</h3>
+                  <p className="font-mono uppercase tracking-wider mt-1" style={{ fontSize:10, color:'var(--stone-500)' }}>Theo · Base de pesquisa</p>
+                <p className="mt-2 text-xs leading-relaxed" style={{ color:'var(--stone-600)' }}>
+                  Theo identificou {teses.length} tese{teses.length === 1 ? '' : 's'} com {totalFav} decisões favoráveis, {totalCon} contrárias e {totalLeg} dispositivos legais. Revise abaixo antes de iniciar a redação.
+                </p>
+              </div>
+            </div>
+
+            <div className="flex-1 overflow-y-auto p-5 space-y-3">
+              {teses.length === 0 && (
+                <div className="text-center py-6 font-mono" style={{ fontSize:11, color:'var(--stone-500)' }}>
+                  Nenhuma tese identificada ainda.
+                </div>
+              )}
+              {teses.map((t) => (
+                <div key={t.id} className="p-3 rounded-lg" style={{ background:'var(--stone-50)', border:'1px solid var(--stone-200)', borderLeft:'3px solid var(--agent-pesquisador)' }}>
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="font-mono uppercase tracking-wider" style={{ fontSize:9, color:'var(--agent-pesquisador)' }}>{t.tipo || 'principal'}</span>
+                    <span className="font-mono" style={{ fontSize:9, color:'var(--stone-500)' }}>confiança: {t.confianca || 'media'}</span>
+                  </div>
+                  <p className="text-xs leading-relaxed mb-2" style={{ color:'var(--stone-800)' }}>{t.descricao || t.id}</p>
+                  <div className="flex items-center space-x-3 font-mono" style={{ fontSize:9, color:'var(--stone-500)' }}>
+                    <span><strong style={{ color:'var(--agent-auditor)' }}>{(t.jurisprudencia_favoravel || []).length}</strong> favoráveis</span>
+                    <span><strong style={{ color:'var(--agent-contraparte)' }}>{(t.jurisprudencia_contraria || []).length}</strong> contrárias</span>
+                    <span><strong style={{ color:'var(--stone-700)' }}>{(t.legislacao || []).length}</strong> dispositivos</span>
+                  </div>
+                </div>
+              ))}
+
+              {pontos.length > 0 && (
+                <div className="p-3 rounded-lg" style={{ background:'var(--stone-50)', border:'1px solid var(--stone-200)', borderLeft:'3px solid var(--agent-contraparte)' }}>
+                  <div className="font-mono uppercase tracking-wider mb-1.5" style={{ fontSize:9, color:'var(--agent-contraparte)' }}>Pontos de atenção</div>
+                  <ul className="space-y-1">
+                    {pontos.map((p, i) => (
+                      <li key={i} className="text-xs leading-relaxed" style={{ color:'var(--stone-700)' }}>· {p}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </div>
+
+            <div className="flex space-x-3 p-5 pt-3" style={{ borderTop:'1px solid var(--stone-200)' }}>
+              <button onClick={onBack}
+                className="flex-1 py-2.5 text-xs font-medium rounded-lg transition-colors duration-200"
+                style={{ border:'1px solid var(--stone-300)', color:'var(--stone-500)' }}>
+                ← Revisar pesquisa
+              </button>
+              <button onClick={onApprove}
+                className="flex-1 py-2.5 text-xs font-semibold rounded-lg transition-all duration-200"
+                style={{ background:'var(--accent)', color:'var(--stone-50)' }}>
+                Iniciar redação →
+              </button>
+            </div>
+          </div>
         </div>
       );
     };
 
     /* ══════════ DELIVERY MODE ══════════ */
+    /* Conectado ao backend real:
+       - Lê verificacoes, rodadas, critica_atual, custo_total_usd, output_docx_path
+       - Botão "Abrir documento" só ativa quando state.output_docx_path existe */
     const DeliveryMode = ({ casoId }) => {
+      const [state, setState] = useState(null);
+
+      const refresh = useCallback(async () => {
+        if (!casoId) return;
+        const data = await api.getCase(casoId);
+        if (data && data.state) setState(data.state);
+      }, [casoId]);
+
+      useEffect(() => {
+        refresh();
+        const iv = setInterval(refresh, 5000);
+        return () => clearInterval(iv);
+      }, [refresh]);
+
+      const verificacoes = (state && state.verificacoes) || [];
+      const rodadas = (state && state.rodadas) || [];
+      const ultimaCritica = rodadas.length > 0
+        ? rodadas[rodadas.length - 1].critica_contraparte
+        : (state && state.critica_atual);
+      const advScore = ultimaCritica && typeof ultimaCritica.score_de_risco === 'number' ? ultimaCritica.score_de_risco : null;
+      const rodadaCount = rodadas.length || (state && state.rodada_atual) || 0;
+      const custo = state && typeof state.custo_total_usd === 'number' ? state.custo_total_usd : 0;
+      const docPath = state && state.output_docx_path ? state.output_docx_path : '';
+      const finalizado = !!docPath;
+
       const checks = [
-        { l:'Citacoes verificadas',   v:'7/7',                          c:'var(--agent-auditor)' },
-        { l:'Adversarial',            v:'2 rodadas, score 8/100',       c:'var(--agent-contraparte)' },
-        { l:'Formatacao',             v:'ABNT/CNJ Conforme',            c:'var(--stone-700)' },
-        { l:'Custo total',            v:'R$ 4.25',                      c:'var(--accent)' },
+        {
+          l: 'Verificações',
+          v: verificacoes.length > 0 ? `${verificacoes.length} checagem(ns)` : (finalizado ? 'Sem registros' : 'Pendente'),
+          c: 'var(--agent-auditor)'
+        },
+        {
+          l: 'Rodadas adversariais',
+          v: advScore !== null ? `${rodadaCount} rodada(s) · score ${advScore}/100` : `${rodadaCount} rodada(s)`,
+          c: 'var(--agent-contraparte)'
+        },
+        {
+          l: 'Documento final',
+          v: finalizado ? 'Gerado (.docx)' : 'Aguardando',
+          c: finalizado ? 'var(--stone-700)' : 'var(--stone-500)'
+        },
+        {
+          l: 'Custo (USD)',
+          v: `$ ${custo.toFixed(4)}`,
+          c: 'var(--accent)'
+        },
       ];
+
+      const openDoc = () => {
+        if (!docPath) return;
+        try {
+          const normalized = docPath.replace(/\\/g, '/');
+          window.open(`file:///${normalized}`, '_blank');
+        } catch (e) { console.warn('Não foi possível abrir o documento:', e); }
+      };
+
       return (
         <div className="flex items-center justify-center h-full p-8 anim-fade">
           <div className="max-w-md w-full rounded-xl p-8 text-center space-y-5 anim-slide" style={{ background:'var(--stone-100)', border:'1px solid var(--stone-300)', boxShadow:'0 16px 40px rgba(0,0,0,0.15)' }}>
             <div className="w-16 h-16 rounded-full mx-auto flex items-center justify-center" style={{ background:'var(--agent-auditor)18', border:'2px solid var(--agent-auditor)' }}>
-              <Icon name="check-circle" className="w-8 h-8" style={{ color:'var(--agent-auditor)' }} />
+              <Icon name={finalizado ? 'check-circle' : 'clock'} className="w-8 h-8" style={{ color:'var(--agent-auditor)' }} />
             </div>
             <div>
-              <h2 className="font-serif text-2xl font-bold" style={{ color:'var(--stone-900)' }}>Pipeline Concluido</h2>
-              <p className="font-cite italic text-sm mt-1" style={{ color:'var(--stone-500)' }}>Verificacao completa. Documento pronto para protocolo.</p>
+              <h2 className="font-serif text-2xl font-bold" style={{ color:'var(--stone-900)' }}>
+                {finalizado ? 'Pipeline Concluído' : 'Aguardando documento final'}
+              </h2>
+              <p className="font-cite italic text-sm mt-1" style={{ color:'var(--stone-500)' }}>
+                {finalizado ? 'Verificação completa. Documento pronto para protocolo.' : 'A revisão adversarial e a verificação ainda estão em andamento.'}
+              </p>
             </div>
             <div className="text-left font-mono space-y-0.5 p-4 rounded-lg" style={{ fontSize:10, background:'var(--stone-50)', border:'1px solid var(--stone-200)' }}>
               {checks.map((x, i) => (
@@ -640,15 +974,26 @@
                 </div>
               ))}
             </div>
+            {verificacoes.length > 0 && (
+              <div className="text-left font-mono space-y-1 p-3 rounded-lg" style={{ fontSize:9, background:'var(--stone-50)', border:'1px solid var(--stone-200)' }}>
+                {verificacoes.map((v, i) => {
+                  const ok = v.ok || v.passed || v.aprovado;
+                  return (
+                    <div key={i} className="flex items-start space-x-1.5">
+                      <span style={{ color: ok ? 'var(--agent-auditor)' : 'var(--agent-contraparte)' }}>{ok ? '✓' : '✗'}</span>
+                      <span style={{ color:'var(--stone-700)' }}>{v.descricao || v.tipo || v.nome || JSON.stringify(v)}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
             <div className="space-y-2 pt-2">
-              <button className="w-full py-2.5 text-xs font-semibold rounded-lg flex items-center justify-center transition-all duration-200"
-                style={{ background:'var(--agent-auditor)', color:'white' }}
-                onMouseEnter={e => e.target.style.filter='brightness(1.15)'} onMouseLeave={e => e.target.style.filter='none'}>
-                <Icon name="download" className="w-4 h-4 mr-2" /> Baixar Peticao (.docx)
-              </button>
-              <button className="w-full py-2.5 text-xs font-medium rounded-lg flex items-center justify-center transition-colors duration-200"
-                style={{ border:'1px solid var(--stone-300)', color:'var(--stone-500)' }}>
-                <Icon name="file-text" className="w-4 h-4 mr-2" /> Trilha de Auditoria (.json)
+              <button onClick={openDoc} disabled={!finalizado}
+                className="w-full py-2.5 text-xs font-semibold rounded-lg flex items-center justify-center transition-all duration-200"
+                style={{ background:'var(--agent-auditor)', color:'white', opacity: finalizado ? 1 : 0.4, cursor: finalizado ? 'pointer' : 'not-allowed' }}
+                onMouseEnter={e => { if (finalizado) e.currentTarget.style.filter='brightness(1.15)'; }}
+                onMouseLeave={e => e.currentTarget.style.filter='none'}>
+                <Icon name="download" className="w-4 h-4 mr-2" /> {finalizado ? 'Abrir Petição (.docx)' : 'Aguardando documento final'}
               </button>
             </div>
           </div>
@@ -656,17 +1001,332 @@
       );
     };
 
+    /* ══════════ CASES SIDEBAR ══════════ */
+    const STATUS_LABELS = {
+      intake:'Triagem', gate1:'Aguardando confirmação', pesquisa:'Pesquisa',
+      gate2:'Aguardando confirmação', redacao:'Redação', adversarial:'Revisão',
+      revisao_humana:'Revisão humana', verificacao:'Verificação',
+      entrega:'Entrega', finalizado:'Finalizado',
+    };
+    const TIPO_LABELS = { peticao_inicial:'Petição Inicial', contestacao:'Contestação' };
+
+    const formatRelative = (iso) => {
+      if (!iso) return '';
+      const t = Date.parse(iso.replace(' ', 'T') + (iso.includes('Z') ? '' : 'Z'));
+      if (Number.isNaN(t)) return iso;
+      const diff = (Date.now() - t) / 1000;
+      if (diff < 60) return 'agora';
+      if (diff < 3600) return `${Math.floor(diff/60)} min`;
+      if (diff < 86400) return `${Math.floor(diff/3600)} h`;
+      if (diff < 86400*7) return `${Math.floor(diff/86400)} d`;
+      return new Date(t).toLocaleDateString('pt-BR');
+    };
+
+    const CasesSidebar = ({ currentCasoId, onOpen, onNewCase }) => {
+      const [collapsed, setCollapsed] = useState(false);
+      const [cases, setCases] = useState([]);
+      const [loading, setLoading] = useState(false);
+      const [search, setSearch] = useState('');
+      const [showArchived, setShowArchived] = useState(false);
+      const [filterStatus, setFilterStatus] = useState('todos');
+      const [renamingId, setRenamingId] = useState(null);
+      const [renameValue, setRenameValue] = useState('');
+      const renameInputRef = useRef(null);
+
+      const refresh = useCallback(async () => {
+        setLoading(true);
+        const list = await api.listCases();
+        setCases(Array.isArray(list) ? list : []);
+        setLoading(false);
+      }, []);
+
+      useEffect(() => { refresh(); }, [refresh, currentCasoId]);
+      useEffect(() => {
+        const iv = setInterval(refresh, 8000);
+        return () => clearInterval(iv);
+      }, [refresh]);
+
+      useEffect(() => {
+        if (renamingId && renameInputRef.current) renameInputRef.current.focus();
+      }, [renamingId]);
+
+      const handleArchive = async (id, archived) => {
+        await api.archiveCase(id, archived);
+        refresh();
+      };
+
+      const handleDelete = async (id) => {
+        if (!confirm('Tem certeza que deseja excluir este caso? Esta ação não pode ser desfeita.')) return;
+        await api.deleteCase(id);
+        refresh();
+      };
+
+      const handleOpenFolder = async (id) => {
+        const resp = await api.getCaseFolder(id);
+        if (resp && resp.path) {
+          try {
+            const normalized = resp.path.replace(/\//g, '\\');
+            window.open(`file:///${normalized}`, '_blank');
+          } catch (e) { console.warn('Não foi possível abrir a pasta:', e); }
+        }
+      };
+
+      const startRename = (c) => {
+        setRenamingId(c.caso_id);
+        setRenameValue(c.area_direito || '');
+      };
+
+      const confirmRename = async () => {
+        if (renamingId && renameValue.trim()) {
+          await api.renameCase(renamingId, renameValue.trim());
+          refresh();
+        }
+        setRenamingId(null);
+        setRenameValue('');
+      };
+
+      const cancelRename = () => {
+        setRenamingId(null);
+        setRenameValue('');
+      };
+
+      const visible = cases.filter(c => {
+        if (showArchived ? !c.archived : !!c.archived) return false;
+        if (filterStatus !== 'todos' && c.status !== filterStatus) return false;
+        if (search) {
+          const s = search.toLowerCase();
+          if (!(`${c.caso_id} ${c.area_direito || ''}`.toLowerCase().includes(s))) return false;
+        }
+        return true;
+      });
+
+      if (collapsed) {
+        return (
+          <div className="h-full flex flex-col items-center py-4 shrink-0"
+            style={{ width:36, background:'var(--stone-100)', borderRight:'1px solid var(--stone-200)' }}>
+            <button onClick={() => setCollapsed(false)} title="Mostrar casos"
+              className="p-1.5 rounded transition-colors duration-200" style={{ color:'var(--stone-400)' }}
+              onMouseEnter={e => e.currentTarget.style.color='var(--stone-700)'}
+              onMouseLeave={e => e.currentTarget.style.color='var(--stone-400)'}>
+              <Icon name="panel-left-open" className="w-[18px] h-[18px]" />
+            </button>
+          </div>
+        );
+      }
+
+      return (
+        <aside className="h-full flex flex-col shrink-0"
+          style={{ width:268, background:'var(--stone-100)', borderRight:'1px solid var(--stone-200)' }}>
+          {/* Header */}
+          <div className="flex items-center justify-between px-4 pt-4 pb-3">
+            <div className="flex items-center gap-2">
+              <Icon name="folder" className="w-[14px] h-[14px]" style={{ color:'var(--stone-500)' }} />
+              <span className="font-mono uppercase tracking-wider"
+                style={{ fontSize:10, color:'var(--stone-500)', letterSpacing:'0.08em' }}>
+                Meus casos
+              </span>
+            </div>
+            <button onClick={() => setCollapsed(true)} title="Recolher"
+              className="p-1 rounded transition-colors duration-200" style={{ color:'var(--stone-400)' }}
+              onMouseEnter={e => e.currentTarget.style.color='var(--stone-700)'}
+              onMouseLeave={e => e.currentTarget.style.color='var(--stone-400)'}>
+              <Icon name="panel-left-close" className="w-[14px] h-[14px]" />
+            </button>
+          </div>
+
+          {/* New case */}
+          <div className="px-4 pb-3">
+            <button onClick={onNewCase}
+              className="w-full flex items-center justify-center gap-2 py-2 rounded-md text-xs font-medium transition-all duration-200"
+              style={{ background:'var(--accent)', color:'var(--stone-50)' }}
+              onMouseEnter={e => e.currentTarget.style.filter='brightness(1.1)'}
+              onMouseLeave={e => e.currentTarget.style.filter='none'}>
+              <Icon name="plus" className="w-3 h-3" />
+              Novo caso
+            </button>
+          </div>
+
+          {/* Search */}
+          <div className="px-4 pb-2">
+            <div className="flex items-center gap-2 px-2 py-1.5 rounded"
+              style={{ background:'var(--stone-50)', border:'1px solid var(--stone-200)' }}>
+              <Icon name="search" className="w-3 h-3" style={{ color:'var(--stone-400)' }} />
+              <input value={search} onChange={e => setSearch(e.target.value)}
+                placeholder="Buscar caso ou área..."
+                className="bg-transparent border-0 outline-none text-xs flex-1 min-w-0"
+                style={{ color:'var(--stone-900)' }} />
+            </div>
+          </div>
+
+          {/* Status filter */}
+          <div className="px-4 pb-2">
+            <select value={filterStatus} onChange={e => setFilterStatus(e.target.value)}
+              className="w-full px-2 py-1.5 rounded text-xs"
+              style={{ background:'var(--stone-50)', border:'1px solid var(--stone-200)', color:'var(--stone-700)' }}>
+              <option value="todos">Todos os estágios</option>
+              {Object.entries(STATUS_LABELS).map(([k,v]) => <option key={k} value={k}>{v}</option>)}
+            </select>
+          </div>
+
+          {/* Archived toggle */}
+          <div className="px-4 pb-3">
+            <button onClick={() => setShowArchived(!showArchived)}
+              className="w-full flex items-center justify-between px-2 py-1.5 rounded text-xs transition-colors duration-200"
+              style={{ background: showArchived?'var(--stone-200)':'transparent', color:'var(--stone-500)' }}>
+              <span className="flex items-center gap-1.5">
+                <Icon name={showArchived?'archive-restore':'archive'} className="w-3 h-3" />
+                {showArchived?'Mostrando arquivados':'Ver arquivados'}
+              </span>
+            </button>
+          </div>
+
+          {/* List */}
+          <div className="flex-1 overflow-y-auto px-2 pb-3">
+            {loading && cases.length === 0 && (
+              <div className="px-3 py-4 text-xs text-center" style={{ color:'var(--stone-400)' }}>Carregando...</div>
+            )}
+            {!loading && visible.length === 0 && (
+              <div className="px-3 py-6 text-xs text-center" style={{ color:'var(--stone-400)' }}>
+                {showArchived ? 'Nenhum caso arquivado.' : 'Nenhum caso ainda. Clique em "Novo caso".'}
+              </div>
+            )}
+            {visible.map(c => {
+              const active = c.caso_id === currentCasoId;
+              const isRenaming = renamingId === c.caso_id;
+              return (
+                <div key={c.caso_id}
+                  onClick={() => !isRenaming && onOpen(c.caso_id)}
+                  className="group px-3 py-2.5 rounded mb-1 cursor-pointer transition-all duration-150 anim-fade"
+                  style={{
+                    background: active ? 'var(--accent-dim)' : 'transparent',
+                    borderLeft: active ? '2px solid var(--accent)' : '2px solid transparent',
+                  }}
+                  onMouseEnter={e => { if (!active) e.currentTarget.style.background='var(--stone-200)'; }}
+                  onMouseLeave={e => { if (!active) e.currentTarget.style.background='transparent'; }}>
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0 flex-1">
+                      {isRenaming ? (
+                        <div className="flex items-center gap-1">
+                          <input ref={renameInputRef} value={renameValue}
+                            onChange={e => setRenameValue(e.target.value)}
+                            onKeyDown={e => { if (e.key === 'Enter') confirmRename(); if (e.key === 'Escape') cancelRename(); }}
+                            onClick={e => e.stopPropagation()}
+                            className="bg-transparent border-0 outline-none text-xs font-medium flex-1 min-w-0 px-1 py-0.5 rounded"
+                            style={{ color:'var(--stone-900)', background:'var(--stone-50)', border:'1px solid var(--accent)' }}
+                            placeholder="Nome do caso..." />
+                          <button onClick={e => { e.stopPropagation(); confirmRename(); }} title="Confirmar"
+                            className="p-0.5 rounded" style={{ color:'var(--agent-auditor)' }}>
+                            <Icon name="check" className="w-3 h-3" />
+                          </button>
+                          <button onClick={e => { e.stopPropagation(); cancelRename(); }} title="Cancelar"
+                            className="p-0.5 rounded" style={{ color:'var(--stone-400)' }}>
+                            <Icon name="x" className="w-3 h-3" />
+                          </button>
+                        </div>
+                      ) : (
+                        <div className="text-xs font-medium truncate" style={{ color:'var(--stone-900)' }}>
+                          {c.area_direito || c.caso_id}
+                        </div>
+                      )}
+                      <div className="flex items-center gap-1.5 mt-1 font-mono"
+                        style={{ fontSize:9, color:'var(--stone-500)' }}>
+                        <span>{TIPO_LABELS[c.tipo_peca] || c.tipo_peca}</span>
+                        <span>·</span>
+                        <span>{STATUS_LABELS[c.status] || c.status}</span>
+                      </div>
+                      {c.area_direito && (
+                        <div className="text-[9px] mt-0.5 truncate font-mono" style={{ color:'var(--stone-400)' }}>
+                          {c.caso_id}
+                        </div>
+                      )}
+                      <div className="text-[9px] mt-0.5 font-mono" style={{ color:'var(--stone-400)' }}>
+                        {formatRelative(c.updated_at)}
+                      </div>
+                    </div>
+                    {/* Action buttons — shown on hover */}
+                    <div className="flex flex-col items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
+                      <button
+                        onClick={e => { e.stopPropagation(); handleOpenFolder(c.caso_id); }}
+                        title="Abrir pasta do caso"
+                        className="p-1 rounded transition-colors"
+                        style={{ color:'var(--stone-400)' }}
+                        onMouseEnter={e => e.currentTarget.style.color='var(--stone-700)'}
+                        onMouseLeave={e => e.currentTarget.style.color='var(--stone-400)'}>
+                        <Icon name="folder-open" className="w-3 h-3" />
+                      </button>
+                      <button
+                        onClick={e => { e.stopPropagation(); startRename(c); }}
+                        title="Renomear caso"
+                        className="p-1 rounded transition-colors"
+                        style={{ color:'var(--stone-400)' }}
+                        onMouseEnter={e => e.currentTarget.style.color='var(--stone-700)'}
+                        onMouseLeave={e => e.currentTarget.style.color='var(--stone-400)'}>
+                        <Icon name="pencil" className="w-3 h-3" />
+                      </button>
+                      <button
+                        onClick={e => { e.stopPropagation(); handleArchive(c.caso_id, !c.archived); }}
+                        title={c.archived ? 'Restaurar' : 'Arquivar'}
+                        className="p-1 rounded transition-colors"
+                        style={{ color:'var(--stone-400)' }}
+                        onMouseEnter={e => e.currentTarget.style.color='var(--stone-700)'}
+                        onMouseLeave={e => e.currentTarget.style.color='var(--stone-400)'}>
+                        <Icon name={c.archived ? 'archive-restore' : 'archive'} className="w-3 h-3" />
+                      </button>
+                      <button
+                        onClick={e => { e.stopPropagation(); handleDelete(c.caso_id); }}
+                        title="Excluir caso"
+                        className="p-1 rounded transition-colors"
+                        style={{ color:'var(--stone-400)' }}
+                        onMouseEnter={e => e.currentTarget.style.color='var(--agent-contraparte)'}
+                        onMouseLeave={e => e.currentTarget.style.color='var(--stone-400)'}>
+                        <Icon name="trash-2" className="w-3 h-3" />
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </aside>
+      );
+    };
+
     /* ══════════ MAIN APP ══════════ */
+    /* mode é estritamente derivado de state.status do caso ativo.
+       Não há transições locais — o backend é a fonte de verdade. */
     function App() {
       const [theme, setTheme] = useState('dark');
-      const [mode, setMode] = useState(-1); // -1=welcome, 0=intake, 1=workspace, 2=delivery
       const [casoId, setCasoId] = useState('');
       const [tipoPeca, setTipoPeca] = useState('peticao_inicial');
-      const [cost, setCost] = useState(0);
+      const [activeState, setActiveState] = useState(null);
       const [feedEvents, setFeedEvents] = useState([]);
-      const [activeAgents, setActiveAgents] = useState([]);
-      const [completedAgents, setCompletedAgents] = useState([]);
-      const [agentDetail, setAgentDetail] = useState(null); // which agent's output to view
+      const [agentDetail, setAgentDetail] = useState(null);
+
+      // status (backend) → mode da UI
+      const statusToMode = (status) => {
+        if (!status) return 0;
+        if (['intake','gate1'].includes(status)) return 0;
+        if (['pesquisa','gate2','redacao','adversarial','revisao_humana','verificacao'].includes(status)) return 1;
+        if (['entrega','finalizado'].includes(status)) return 2;
+        return 0;
+      };
+      const mode = !casoId ? -1 : statusToMode(activeState && activeState.status);
+      const cost = activeState && typeof activeState.custo_total_usd === 'number' ? activeState.custo_total_usd : 0;
+
+      // Agentes ativos/concluídos derivados do status real (sem heurísticas em eventos)
+      const statusToAgentSets = (status) => {
+        if (!status || ['intake'].includes(status)) return { active:['intake'], completed:[] };
+        if (status === 'gate1') return { active:[], completed:['intake'] };
+        if (status === 'pesquisa') return { active:['pesquisador'], completed:['intake'] };
+        if (status === 'gate2') return { active:[], completed:['intake','pesquisador'] };
+        if (status === 'redacao') return { active:['redator'], completed:['intake','pesquisador'] };
+        if (['adversarial','revisao_humana'].includes(status)) return { active:['contraparte'], completed:['intake','pesquisador','redator'] };
+        if (status === 'verificacao') return { active:['auditor'], completed:['intake','pesquisador','redator','contraparte'] };
+        if (status === 'entrega') return { active:['formatador'], completed:['intake','pesquisador','redator','contraparte','auditor'] };
+        if (status === 'finalizado') return { active:[], completed:['intake','pesquisador','redator','contraparte','auditor','formatador'] };
+        return { active:[], completed:[] };
+      };
+      const { active: activeAgents, completed: completedAgents } = statusToAgentSets(activeState && activeState.status);
 
       const toggleTheme = () => {
         const next = theme === 'dark' ? 'light' : 'dark';
@@ -677,45 +1337,35 @@
       const startCase = async (tipo) => {
         const id = `caso_${Date.now()}`;
         setTipoPeca(tipo);
-        setCasoId(id);
         await api.createCase(id, tipo, '');
-        setMode(0);
-        setCost(0.45);
+        setCasoId(id);
+        setActiveState(null);
       };
 
-      const goWorkspace = () => {
-        setMode(1);
-        setCost(2.15);
-        setFeedEvents([]);
-        setCompletedAgents(['intake']);
+      const openCase = async (id) => {
+        setCasoId(id);
+        setActiveState(null);
       };
 
-      /* Simulate feed when in workspace */
-      useEffect(() => {
-        if (mode === 1) {
-          const timers = FEED_SCRIPT.map(ev =>
-            setTimeout(() => {
-              setFeedEvents(p => [...p, ev]);
-              setActiveAgents([ev.agent]);
-              if (ev.type === 'done') setCompletedAgents(p => p.includes(ev.agent) ? p : [...p, ev.agent]);
-            }, ev.t)
-          );
-          const ct = setInterval(() => setCost(c => c + 0.02), 4000);
-          return () => { timers.forEach(clearTimeout); clearInterval(ct); };
-        }
-      }, [mode]);
+      const newCase = () => {
+        setCasoId('');
+        setActiveState(null);
+      };
 
-      /* Poll backend events when pipeline is running */
+      // Polling único do estado do caso ativo (fonte de verdade para mode/cost/agents)
       useEffect(() => {
-        if (mode !== 1 || !casoId) return;
-        const iv = setInterval(async () => {
+        if (!casoId) return;
+        let cancelled = false;
+        const fetchAll = async () => {
+          const data = await api.getPipeline(casoId);
+          if (!cancelled && data && data.state) setActiveState(data.state);
           const evts = await api.getEvents(casoId);
-          if (evts && Array.isArray(evts) && evts.length) {
-            setFeedEvents(evts);
-          }
-        }, 3000);
-        return () => clearInterval(iv);
-      }, [mode, casoId]);
+          if (!cancelled && evts && Array.isArray(evts.events)) setFeedEvents(evts.events);
+        };
+        fetchAll();
+        const iv = setInterval(fetchAll, 3000);
+        return () => { cancelled = true; clearInterval(iv); };
+      }, [casoId]);
 
       return (
         <div className="flex h-screen w-full overflow-hidden" style={{ background:'var(--stone-50)', color:'var(--stone-900)' }}>
@@ -724,51 +1374,53 @@
             style={{ background:'var(--stone-100)', borderRight:'1px solid var(--stone-200)' }}>
             <div className="w-8 h-8 rounded flex items-center justify-center font-serif font-bold text-sm mb-2"
               style={{ background: theme==='dark'?'var(--stone-900)':'var(--accent)', color:'var(--stone-50)' }}>R</div>
-            {['search','clock','bookmark'].map(ic =>
-              <button key={ic} className="p-1 rounded transition-colors duration-200" style={{ color:'var(--stone-400)' }}
-                onMouseEnter={e => e.target.style.color='var(--stone-700)'} onMouseLeave={e => e.target.style.color='var(--stone-400)'}>
-                <Icon name={ic} className="w-[18px] h-[18px]" />
-              </button>
-            )}
-            <div className="w-6 h-px" style={{ background:'var(--stone-300)' }} />
-            <div className="relative flex items-center justify-center w-full">
+            <div className="relative flex items-center justify-center w-full" title="Escritório">
               <div className="absolute left-0 w-1 h-7 rounded-r" style={{ background:'var(--accent)' }} />
               <Icon name="briefcase" className="w-[18px] h-[18px]" style={{ color:'var(--accent)' }} />
             </div>
-            <button className="p-1 rounded transition-colors duration-200" style={{ color:'var(--stone-400)' }}>
-              <Icon name="folder" className="w-[18px] h-[18px]" />
-            </button>
+            <a href="http://127.0.0.1:5500/" title="Voltar à pesquisa jurisprudencial"
+              className="p-1 rounded transition-colors duration-200" style={{ color:'var(--stone-400)' }}
+              onMouseEnter={e => e.currentTarget.style.color='var(--stone-700)'}
+              onMouseLeave={e => e.currentTarget.style.color='var(--stone-400)'}>
+              <Icon name="search" className="w-[18px] h-[18px]" />
+            </a>
             <div className="flex-1" />
-            <button onClick={toggleTheme} className="p-1 rounded transition-colors duration-200" style={{ color:'var(--stone-400)' }}>
+            <button onClick={toggleTheme} title="Alternar tema"
+              className="p-1 rounded transition-colors duration-200" style={{ color:'var(--stone-400)' }}>
               <Icon name={theme==='dark'?'sun':'moon'} className="w-[18px] h-[18px]" />
             </button>
-            <button className="p-1 rounded" style={{ color:'var(--stone-400)' }}>
+            <button title="Configurações" className="p-1 rounded" style={{ color:'var(--stone-400)' }}>
               <Icon name="settings" className="w-[18px] h-[18px]" />
             </button>
           </div>
 
+          {/* ── CASES SIDEBAR ── */}
+          <CasesSidebar
+            currentCasoId={casoId}
+            onOpen={openCase}
+            onNewCase={newCase}
+          />
+
           {/* ── MAIN ── */}
           <div className="flex-1 flex flex-col h-full min-w-0">
-            {/* Gold rule */}
             <div className="gold-rule" />
 
-            {/* Top bar */}
-            <div className="h-14 flex items-center justify-between px-5 shrink-0" style={{ borderBottom:'1px solid var(--stone-200)', background:'var(--stone-100)' }}>
-              <div className="flex items-center space-x-4">
-                <h1 className="font-serif text-lg font-bold tracking-wide" style={{ color:'var(--stone-900)' }}>
-                  Ratio <span style={{ color:'var(--accent)' }}>Escritorio</span>
-                </h1>
+            <header className="ratio-top-header">
+              <div className="ratio-top-brand">
+                <img className="ratio-top-brand-mark" src="/escritorio/assets/favicon-48x48.png"
+                  alt="Ratio" onError={(e) => { e.currentTarget.style.display='none'; }} />
+                <p className="ratio-eyebrow">RATIO</p>
+                <h1>Escritório</h1>
                 {mode >= 0 && <>
-                  <div className="h-4 w-px" style={{ background:'var(--stone-300)' }} />
+                  <div className="ratio-top-brand-divider" />
                   <AgentAvatars activeAgents={activeAgents} completedAgents={completedAgents} onClickAgent={setAgentDetail} />
                 </>}
               </div>
-              <div className="flex items-center space-x-3">
+              <div className="ratio-top-actions">
                 {mode >= 0 && <BurnMeter cost={cost} />}
               </div>
-            </div>
+            </header>
 
-            {/* Content */}
             <div className="flex-1 overflow-hidden">
               {mode === -1 && (
                 <div className="flex items-center justify-center h-full anim-fade">
@@ -778,25 +1430,25 @@
                         style={{ background:'var(--accent-dim)', border:'1px solid var(--accent)33' }}>
                         <Icon name="briefcase" className="w-7 h-7" style={{ color:'var(--accent)' }} />
                       </div>
-                      <h2 className="font-serif text-3xl font-bold" style={{ color:'var(--stone-900)' }}>Ratio Escritorio</h2>
+                      <h2 className="font-serif text-3xl font-bold" style={{ color:'var(--stone-900)' }}>Ratio Escritório</h2>
                       <p className="mt-2 text-sm" style={{ color:'var(--stone-500)', maxWidth:380, margin:'8px auto 0' }}>
-                        Pipeline multi-agente para redacao de pecas juridicas com pesquisa automatizada e revisao adversarial.
+                        Pipeline multi-agente para redação de peças jurídicas com pesquisa automatizada e revisão adversarial.
                       </p>
                     </div>
                     <div className="flex justify-center space-x-4">
                       <button onClick={() => startCase('peticao_inicial')}
                         className="px-6 py-3 rounded-lg font-semibold text-sm transition-all duration-200"
                         style={{ background:'var(--accent)', color:'var(--stone-50)' }}
-                        onMouseEnter={e => e.target.style.filter='brightness(1.12)'} onMouseLeave={e => e.target.style.filter='none'}>
+                        onMouseEnter={e => e.currentTarget.style.filter='brightness(1.12)'} onMouseLeave={e => e.currentTarget.style.filter='none'}>
                         <Icon name="file-plus" className="w-4 h-4 inline mr-2" style={{ verticalAlign:'-2px' }} />
-                        Nova Peticao Inicial
+                        Nova Petição Inicial
                       </button>
                       <button onClick={() => startCase('contestacao')}
                         className="px-6 py-3 rounded-lg font-semibold text-sm transition-all duration-200"
                         style={{ border:'1px solid var(--stone-300)', color:'var(--stone-700)' }}
-                        onMouseEnter={e => e.target.style.borderColor='var(--accent)'} onMouseLeave={e => e.target.style.borderColor='var(--stone-300)'}>
+                        onMouseEnter={e => e.currentTarget.style.borderColor='var(--accent)'} onMouseLeave={e => e.currentTarget.style.borderColor='var(--stone-300)'}>
                         <Icon name="shield" className="w-4 h-4 inline mr-2" style={{ verticalAlign:'-2px' }} />
-                        Nova Contestacao
+                        Nova Contestação
                       </button>
                     </div>
                     <div className="pt-4">
@@ -813,8 +1465,8 @@
                   </div>
                 </div>
               )}
-              {mode === 0 && <IntakeMode casoId={casoId} onGateApprove={goWorkspace} />}
-              {mode === 1 && <WorkspaceMode casoId={casoId} onFinish={() => setMode(2)} feedEvents={feedEvents} />}
+              {mode === 0 && <IntakeMode casoId={casoId} onGateApprove={() => { /* mode auto-deriva */ }} />}
+              {mode === 1 && <WorkspaceMode casoId={casoId} onFinish={() => { /* mode auto-deriva */ }} feedEvents={feedEvents} />}
               {mode === 2 && <DeliveryMode casoId={casoId} />}
             </div>
           </div>
@@ -824,6 +1476,7 @@
     }
 
     ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+
   </script>
 </body>
 </html>

@@ -1,37 +1,66 @@
 from __future__ import annotations
 
-import anyio
 import inspect
+import logging
 
 from backend.escritorio.models import RatioEscritorioState
 
-
-async def _default_run_sync_workflow(workflow, state: RatioEscritorioState) -> RatioEscritorioState:
-    result = await anyio.to_thread.run_sync(workflow.invoke, state)
-    return RatioEscritorioState.model_validate(result)
+log = logging.getLogger(__name__)
 
 
 async def run_intake_graph(state: RatioEscritorioState, store) -> RatioEscritorioState:
+    """Run intake analysis once and stop at the triage confirmation."""
     from backend.escritorio.graph.intake_graph import build_intake_graph
 
-    result = await _default_run_sync_workflow(build_intake_graph(enable_interrupts=False), state)
+    log.info("orchestrator: running intake graph for caso=%s", state.caso_id)
+    result = RatioEscritorioState.model_validate(
+        build_intake_graph(
+            enable_interrupts=False,
+            gate1_router_fn=lambda _: "drafting",
+        ).invoke(state)
+    )
     store.save_snapshot(result, stage=result.status)
+    log.info("orchestrator: intake complete - status=%s", result.status)
     return result
 
 
 async def run_drafting_graph(state: RatioEscritorioState, store) -> RatioEscritorioState:
-    from backend.escritorio.graph.drafting_graph import build_drafting_graph
+    """Run the next drafting step only: research/curation OR redaction."""
+    from backend.escritorio.graph.drafting_graph import curadoria_node, pesquisar_teses, redator_node
 
-    result = await _default_run_sync_workflow(build_drafting_graph(enable_interrupts=False), state)
+    log.info("orchestrator: running drafting graph for caso=%s", state.caso_id)
+    if not state.gate2_aprovado:
+        researched = await pesquisar_teses(state)
+        interim = RatioEscritorioState.model_validate(
+            {**state.model_dump(mode="python"), **researched}
+        )
+        curated = curadoria_node(interim)
+        result = RatioEscritorioState.model_validate(
+            {**interim.model_dump(mode="python"), **curated}
+        )
+    else:
+        result_payload = redator_node(state)
+        result = RatioEscritorioState.model_validate(
+            {**state.model_dump(mode="python"), **result_payload}
+        )
     store.save_snapshot(result, stage=result.status)
+    log.info("orchestrator: drafting complete - status=%s", result.status)
     return result
 
 
 async def run_adversarial_graph(state: RatioEscritorioState, store) -> RatioEscritorioState:
+    """Run one critique/verificacao/finalizacao pass after the draft exists."""
     from backend.escritorio.graph.adversarial_graph import build_adversarial_graph
 
-    result = await _default_run_sync_workflow(build_adversarial_graph(enable_interrupts=False), state)
+    log.info("orchestrator: running adversarial graph for caso=%s", state.caso_id)
+    result = RatioEscritorioState.model_validate(
+        build_adversarial_graph(
+            enable_interrupts=False,
+            decisao_fn=lambda _: "finalizar",
+        ).invoke(state)
+    )
     store.save_snapshot(result, stage=result.status)
+    log.info("orchestrator: adversarial complete - status=%s", result.status)
     return result
 
 
@@ -65,14 +94,21 @@ async def run_escritorio_pipeline(
                 {"stage": "intake", "workflow_stage": state.workflow_stage, "status": state.status},
             )
 
-        if state.gate1_aprovado and not state.gate2_aprovado:
+        if state.gate1_aprovado and not state.gate2_aprovado and state.status != "gate2":
             state = await _invoke_stage(run_drafting_graph_fn, state)
             _append_event(
                 "pipeline.stage_completed",
-                {"stage": "drafting", "workflow_stage": state.workflow_stage, "status": state.status},
+                {"stage": "research", "workflow_stage": state.workflow_stage, "status": state.status},
             )
 
-        if state.gate2_aprovado and not state.usuario_finaliza:
+        if state.gate2_aprovado and not state.peca_sections and state.status == "redacao":
+            state = await _invoke_stage(run_drafting_graph_fn, state)
+            _append_event(
+                "pipeline.stage_completed",
+                {"stage": "redaction", "workflow_stage": state.workflow_stage, "status": state.status},
+            )
+
+        if state.gate2_aprovado and state.peca_sections and not state.output_docx_path:
             state = await _invoke_stage(run_adversarial_graph_fn, state)
             _append_event(
                 "pipeline.stage_completed",

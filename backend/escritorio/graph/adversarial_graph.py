@@ -155,17 +155,15 @@ def build_adversarial_graph(
             "rejeita": "contraparte",
         },
     )
+    graph.add_edge("verificador", "formatador")
+    graph.add_edge("formatador", END)
+
     graph.add_conditional_edges(
         "pausa_humana",
         decisao_fn or decisao_advogado_router,
-        {
-            "mais_rodada": "redator_revisao",
-            "finalizar": "verificador",
-        },
+        {"mais_rodada": "redator_revisao", "finalizar": "verificador"},
     )
     graph.add_edge("redator_revisao", "contraparte")
-    graph.add_edge("verificador", "formatador")
-    graph.add_edge("formatador", END)
 
     interrupt_before = ["pausa_humana"] if enable_interrupts else []
     return graph.compile(interrupt_before=interrupt_before)

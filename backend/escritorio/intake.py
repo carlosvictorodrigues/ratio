@@ -57,7 +57,10 @@ def build_next_question(state: RatioEscritorioState) -> str:
         return "Descreva a sequencia dos fatos com datas, valores e o que exatamente aconteceu."
     if not checklist.documentos_listados:
         return "Quais documentos, contratos, comprovantes ou anexos voce ja possui para sustentar o caso?"
-    return "Checklist minimo completo. Podemos avancar para o Gate 1?"
+    return (
+        "Detectamos as partes envolvidas, o relato dos fatos e a documentacao. "
+        "Quando quiser, pode pedir para a Clara analisar o caso."
+    )
 
 
 def process_intake_message(

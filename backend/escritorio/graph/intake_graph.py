@@ -14,12 +14,14 @@ log = logging.getLogger(__name__)
 
 
 def intake_node(state: RatioEscritorioState) -> dict[str, Any]:
+    log.info("intake_node: chamando Gemini para analise de intake...")
     try:
         parsed = anyio.run(generate_intake_with_gemini, state)
     except Exception:
         log.exception("intake_node: falha ao gerar intake com Gemini")
         parsed = {}
 
+    log.info("intake_node: resposta Gemini recebida. Processando...")
     draft_state = state.model_copy(deep=True)
     if parsed.get("fatos_estruturados"):
         draft_state.fatos_estruturados = list(parsed["fatos_estruturados"])
@@ -30,6 +32,7 @@ def intake_node(state: RatioEscritorioState) -> dict[str, Any]:
 
     checklist = compute_checklist(draft_state)
     status = "gate1" if checklist.fatos_principais_cobertos else "intake"
+    log.info("intake_node: concluido — status=%s", status)
     return {
         "fatos_estruturados": draft_state.fatos_estruturados,
         "provas_disponiveis": draft_state.provas_disponiveis,
@@ -61,14 +64,12 @@ def build_intake_graph(
     graph.add_node("intake", intake_fn or intake_node)
     graph.add_node("gate1", gate1_node)
     graph.add_edge(START, "intake")
+
     graph.add_edge("intake", "gate1")
     graph.add_conditional_edges(
         "gate1",
         gate1_router_fn or gate1_router,
-        {
-            "intake": "intake",
-            "drafting": END,
-        },
+        {"intake": "intake", "drafting": END},
     )
     interrupt_before = ["gate1"] if enable_interrupts else []
     return graph.compile(interrupt_before=interrupt_before)

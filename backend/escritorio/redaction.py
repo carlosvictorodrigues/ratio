@@ -4,7 +4,13 @@ import json
 
 import anyio
 
-from backend.escritorio.config import DEFAULT_REASONING_MODEL
+from backend.escritorio._llm_utils import (
+    coerce_to_long_text,
+    make_json_response_config,
+    parse_json_payload,
+    unwrap_envelope,
+)
+from backend.escritorio.config import DEFAULT_LLM_TIMEOUT_MS, DEFAULT_REASONING_MODEL
 from backend.escritorio.models import RatioEscritorioState
 from backend.escritorio.verifier import CitationCandidate, canonicalize_candidate, extract_citation_candidates
 
@@ -37,8 +43,25 @@ def build_redaction_prompt(state: RatioEscritorioState) -> str:
     )
 
 
+_SECTION_ENVELOPE_KEYS = ("peca_sections", "sections", "secoes", "peca", "data")
+
+
 def parse_sections_payload(raw_payload: str) -> dict[str, str]:
-    data = json.loads(str(raw_payload or "").strip())
+    """Parse a sections dict, never dropping section text.
+
+    Gemini sometimes returns:
+      - ``{"peca_sections": {...}}`` instead of the bare object;
+      - section values as nested dicts (``{"titulo":..., "conteudo":...}``);
+      - section values as lists of paragraphs.
+
+    We flatten everything via :func:`coerce_to_long_text`, joining lists with
+    blank lines and dicts by their canonical content key, so the petition
+    text is preserved.
+    """
+    data = parse_json_payload(raw_payload, expect="object")
+    if not isinstance(data, dict):
+        raise ValueError("Payload de redacao deve ser um objeto JSON.")
+    data = unwrap_envelope(data, candidate_keys=_SECTION_ENVELOPE_KEYS)
     if not isinstance(data, dict):
         raise ValueError("Payload de redacao deve ser um objeto JSON.")
     parsed: dict[str, str] = {}
@@ -46,7 +69,10 @@ def parse_sections_payload(raw_payload: str) -> dict[str, str]:
         normalized_key = str(key or "").strip()
         if not normalized_key:
             continue
-        parsed[normalized_key] = str(value or "").strip()
+        text = coerce_to_long_text(value)
+        if not text:
+            continue
+        parsed[normalized_key] = text
     if not parsed:
         raise ValueError("Payload de redacao nao contem secoes validas.")
     return parsed
@@ -135,10 +161,11 @@ async def generate_sections_with_gemini(
 
             active_client = get_gemini_client()
 
-        response = active_client.models.generate_content(
-            model=configured_model,
-            contents=prompt,
-        )
+        config = make_json_response_config(timeout_ms=DEFAULT_LLM_TIMEOUT_MS)
+        kwargs = {"model": configured_model, "contents": prompt}
+        if config is not None:
+            kwargs["config"] = config
+        response = active_client.models.generate_content(**kwargs)
         text = getattr(response, "text", None)
         if not text:
             raise ValueError("Resposta vazia na redacao de secoes.")
@@ -163,10 +190,11 @@ async def generate_revision_with_gemini(
 
             active_client = get_gemini_client()
 
-        response = active_client.models.generate_content(
-            model=configured_model,
-            contents=prompt,
-        )
+        config = make_json_response_config(timeout_ms=DEFAULT_LLM_TIMEOUT_MS)
+        kwargs = {"model": configured_model, "contents": prompt}
+        if config is not None:
+            kwargs["config"] = config
+        response = active_client.models.generate_content(**kwargs)
         text = getattr(response, "text", None)
         if not text:
             raise ValueError("Resposta vazia na revisao de secoes.")
