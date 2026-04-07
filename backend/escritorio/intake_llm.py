@@ -6,10 +6,20 @@ import anyio
 
 from backend.escritorio.config import DEFAULT_PESQUISADOR_MODEL
 from backend.escritorio.models import RatioEscritorioState
+from backend.escritorio.pii_guard import maybe_mask
 
 
 def build_intake_prompt(state: RatioEscritorioState) -> str:
-    facts = (state.fatos_brutos or "").strip() or "Sem fatos informados."
+    raw_facts = (state.fatos_brutos or "").strip() or "Sem fatos informados."
+    # Mask PII before sending to any LLM provider (no-op when RATIO_PII_GUARD_ENABLED != "1")
+    facts, guard = maybe_mask(raw_facts)
+    if guard.has_pii:
+        import sys
+        print(
+            f"[intake] Guard Brasil mascarou {guard.masked_count} itens PII "
+            f"({', '.join(guard.patterns)}) — risco LGPD: {guard.lgpd_risk}",
+            file=sys.stderr,
+        )
     return (
         "Voce e um advogado assistente em intake juridico.\n"
         "Estruture o caso abaixo e retorne SOMENTE um objeto JSON com os campos: "

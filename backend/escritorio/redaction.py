@@ -6,11 +6,14 @@ import anyio
 
 from backend.escritorio.config import DEFAULT_REASONING_MODEL
 from backend.escritorio.models import RatioEscritorioState
+from backend.escritorio.pii_guard import maybe_mask
 from backend.escritorio.verifier import CitationCandidate, canonicalize_candidate, extract_citation_candidates
 
 
 def build_redaction_prompt(state: RatioEscritorioState) -> str:
-    facts = (state.fatos_brutos or "").strip() or "Sem fatos informados."
+    raw_facts = (state.fatos_brutos or "").strip() or "Sem fatos informados."
+    # Mask PII before sending to any LLM provider (no-op when RATIO_PII_GUARD_ENABLED != "1")
+    facts, _guard = maybe_mask(raw_facts)
     teses = [f"- {tese.descricao}" for tese in state.teses] or ["- Sem teses estruturadas"]
     jurisprudencia = [
         f"- {row.get('processo') or row.get('doc_id') or 'Documento sem id'}"
