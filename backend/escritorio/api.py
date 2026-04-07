@@ -94,6 +94,89 @@ def _pipeline_payload(state) -> dict[str, Any]:
     }
 
 
+_STAGE_AGENT_MAP = {
+    "intake": "intake",
+    "drafting": "pesquisador",
+    "pesquisa": "pesquisador",
+    "research": "pesquisador",
+    "curadoria": "pesquisador",
+    "gate2": "pesquisador",
+    "redacao": "redator",
+    "redaction": "redator",
+    "adversarial": "contraparte",
+    "revisao_humana": "contraparte",
+    "verificacao": "auditor",
+    "verification": "auditor",
+    "entrega": "formatador",
+    "delivery": "formatador",
+    "finalizado": "formatador",
+}
+
+
+def _agent_for_stage(stage_name: str) -> str | None:
+    return _STAGE_AGENT_MAP.get(str(stage_name or "").strip().lower())
+
+
+def _describe_event(event_type: str, data: dict[str, Any]) -> tuple[str | None, str]:
+    approved = bool(data.get("approved"))
+    if event_type == "case.created":
+        return "intake", "Caso criado"
+    if event_type == "intake.turn":
+        return "intake", "Nova mensagem na triagem"
+    if event_type == "gate1.decision":
+        return "intake", "Triagem aprovada" if approved else "Triagem devolvida"
+    if event_type == "gate2.decision":
+        return "pesquisador", "Pesquisa aprovada para redação" if approved else "Pesquisa devolvida"
+    if event_type == "draft.updated":
+        return "redator", "Minuta atualizada"
+    if event_type == "adversarial.critique_registered":
+        rodada = int(data.get("rodada_atual") or 0)
+        return "contraparte", f"Crítica registrada na rodada {rodada}" if rodada else "Crítica registrada"
+    if event_type == "pipeline.error":
+        message = str(data.get("message") or "").strip()
+        return _agent_for_stage(data.get("stage") or data.get("workflow_stage") or data.get("status")), (
+            f"Falha no pipeline: {message}" if message else "Falha no pipeline"
+        )
+    if event_type in {"pipeline.stage_started", "pipeline.stage_completed"}:
+        stage = str(data.get("stage") or data.get("workflow_stage") or data.get("status") or "").strip().lower()
+        started = event_type.endswith("started")
+        labels = {
+            "intake": "Triagem",
+            "drafting": "Pesquisa",
+            "pesquisa": "Pesquisa",
+            "research": "Pesquisa",
+            "curadoria": "Curadoria",
+            "gate2": "Confirmação da pesquisa",
+            "redacao": "Redação",
+            "redaction": "Redação",
+            "adversarial": "Revisão",
+            "revisao_humana": "Revisão humana",
+            "verificacao": "Verificação",
+            "verification": "Verificação",
+            "entrega": "Entrega",
+            "delivery": "Entrega",
+            "finalizado": "Entrega",
+        }
+        label = labels.get(stage, stage or "Pipeline")
+        suffix = "iniciada" if started else "concluída"
+        return _agent_for_stage(stage), f"{label} {suffix}"
+    return _agent_for_stage(event_type.split(".", 1)[0]), event_type
+
+
+def _serialize_event_for_frontend(event: dict[str, Any]) -> dict[str, Any]:
+    data = event.get("payload")
+    if not isinstance(data, dict):
+        data = {}
+    agent, text = _describe_event(str(event.get("event_type") or ""), data)
+    return {
+        **event,
+        "type_name": event.get("event_type"),
+        "agent": agent,
+        "text": text,
+        "data": data,
+    }
+
+
 def build_escritorio_router() -> APIRouter:
     router = APIRouter(prefix="/api/escritorio", tags=["escritorio"])
 
@@ -182,7 +265,7 @@ def build_escritorio_router() -> APIRouter:
         store = _get_case_store(caso_id, index=index)
         return {
             "summary": summary,
-            "events": store.list_events(),
+            "events": [_serialize_event_for_frontend(event) for event in store.list_events()],
         }
 
     @router.get("/cases/{caso_id}/snapshots")

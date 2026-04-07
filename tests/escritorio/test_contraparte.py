@@ -2,6 +2,7 @@ import pytest
 
 from backend.escritorio.contraparte import (
     build_contraparte_prompt,
+    enrich_critique_with_contrary_jurisprudence,
     generate_critique_with_gemini,
     parse_critique_payload,
 )
@@ -207,3 +208,43 @@ def test_parse_critique_payload_defaults_missing_analise():
 
     assert isinstance(critique["analise_contestacao"], str)
     assert len(critique["analise_contestacao"]) > 0
+
+
+@pytest.mark.anyio
+async def test_enrich_critique_with_contrary_jurisprudence_searches_only_findings_with_query():
+    critique = {
+        "falhas_processuais": [
+            {
+                "secao_afetada": "dos_pedidos",
+                "descricao": "pedido sem lastro",
+                "query_jurisprudencia_contraria": "improcedencia ressarcimento concurso anulado",
+            }
+        ],
+        "argumentos_materiais_fracos": [
+            {
+                "secao_afetada": "do_direito",
+                "descricao": "fundamentacao generica",
+                "argumento_contrario": "falta nexo causal",
+                "query_jurisprudencia_contraria": "",
+            }
+        ],
+        "jurisprudencia_faltante": [],
+        "score_de_risco": 40,
+        "analise_contestacao": "ha risco",
+        "recomendacao": "revisar",
+    }
+    calls = []
+
+    async def fake_ratio_search(query: str, **kwargs):
+        calls.append((query, kwargs))
+        return {"docs": [{"doc_id": "doc-1", "processo": "REsp 1"}]}
+
+    enriched = await enrich_critique_with_contrary_jurisprudence(
+        critique,
+        ratio_search_fn=fake_ratio_search,
+    )
+
+    assert len(calls) == 1
+    assert calls[0][0] == "improcedencia ressarcimento concurso anulado"
+    assert enriched["falhas_processuais"][0]["jurisprudencia_encontrada"][0]["doc_id"] == "doc-1"
+    assert enriched["argumentos_materiais_fracos"][0].get("jurisprudencia_encontrada") in (None, [])

@@ -2,8 +2,10 @@ from __future__ import annotations
 
 from typing import Any
 
+import anyio
 from langchain_core.tools import tool
 
+from backend.escritorio.tools.google_search import search_google_legislation
 from backend.escritorio.tools import ratio_tools
 from backend.escritorio.tools.lancedb_access import LanceDBReadonlyRegistry
 from backend.escritorio.verifier import verify_citation_reference
@@ -50,12 +52,10 @@ async def buscar_legislacao(termos: str, codigo: str | None = None) -> list[dict
     """Busca legislacao pertinente na tool layer atual do Escritorio."""
 
     prefix = f"{codigo}: " if codigo else ""
-    result = await ratio_tools.ratio_search(
-        f"{prefix}{termos}",
-        prefer_recent=True,
-        persona="parecer",
-    )
-    return list(result.get("docs", []))[:10]
+    result = search_google_legislation(f"{prefix}{termos}", limit=10)
+    if callable(getattr(result, "__await__", None)):
+        return await result
+    return await anyio.to_thread.run_sync(lambda: result)
 
 
 @tool

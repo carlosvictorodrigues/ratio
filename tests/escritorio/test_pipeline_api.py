@@ -68,3 +68,27 @@ def test_case_history_endpoints_return_events_and_snapshots(monkeypatch, tmp_pat
     assert snapshots.status_code == 200
     assert events.json()["events"][0]["event_type"] == "case.created"
     assert snapshots.json()["snapshots"][0]["stage"] == "intake"
+
+
+def test_case_history_events_are_enriched_for_frontend_runtime(monkeypatch, tmp_path: Path):
+    monkeypatch.setenv("RATIO_ESCRITORIO_ROOT", str(tmp_path / "ratio_escritorio"))
+    client = TestClient(app)
+
+    client.post(
+        "/api/escritorio/cases",
+        json={"caso_id": "caso-1", "tipo_peca": "peticao_inicial"},
+    )
+    client.post(
+        "/api/escritorio/cases/caso-1/gates/gate1",
+        json={"approved": True},
+    )
+
+    events = client.get("/api/escritorio/cases/caso-1/events")
+
+    assert events.status_code == 200
+    payload = events.json()["events"][-1]
+    assert payload["event_type"] == "gate1.decision"
+    assert payload["type_name"] == "gate1.decision"
+    assert payload["agent"] == "intake"
+    assert "Triagem" in payload["text"]
+    assert payload["data"]["approved"] is True

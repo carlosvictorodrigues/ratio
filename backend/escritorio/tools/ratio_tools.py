@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import random
 from datetime import datetime
 from typing import Any, Awaitable, Callable
 
 import anyio
+
+log = logging.getLogger(__name__)
 
 
 def _parse_date_key(raw_value: str) -> tuple[int, int, int]:
@@ -44,11 +47,16 @@ async def run_with_retry(
     max_attempts = max(1, int(attempts))
     last_error: Exception | None = None
 
+    op_name = getattr(operation, "__name__", None) or repr(operation)
     for attempt_index in range(max_attempts):
         try:
             return await operation()
         except Exception as exc:
             last_error = exc
+            log.warning(
+                "run_with_retry: %s falhou tentativa %d/%d: %s",
+                op_name, attempt_index + 1, max_attempts, exc,
+            )
             if attempt_index >= max_attempts - 1:
                 break
 
@@ -74,6 +82,7 @@ async def ratio_search(
     run_query_fn: Callable[..., Any] | None = None,
     prefer_recent: bool = True,
     persona: str = "parecer",
+    reranker_backend: str | None = None,
     sources: list[str] | None = None,
     tribunais: list[str] | None = None,
     tipos: list[str] | None = None,
@@ -86,7 +95,7 @@ async def ratio_search(
     runner = run_query_fn or _get_run_query()
 
     def _invoke() -> dict[str, Any]:
-        answer, docs, meta = runner(
+        kwargs = dict(
             query=query,
             sources=sources,
             tribunais=tribunais,
@@ -100,6 +109,16 @@ async def ratio_search(
             persona=persona,
             return_meta=True,
         )
+        if reranker_backend:
+            kwargs["reranker_backend"] = reranker_backend
+        try:
+            answer, docs, meta = runner(**kwargs)
+        except RuntimeError as exc:
+            message = str(exc).lower()
+            if "reranker" not in message or reranker_backend == "gemini":
+                raise
+            kwargs["reranker_backend"] = "gemini"
+            answer, docs, meta = runner(**kwargs)
         return {
             "answer": answer,
             "docs": merge_ranked_results(list(docs or [])),
@@ -112,12 +131,27 @@ async def ratio_search(
 async def search_tese_bundle(
     *,
     favoravel_query: str,
-    contraria_query: str,
+    contraria_query: str | None,
     legislacao_operation: Callable[[], Awaitable[Any]],
     ratio_search_fn: Callable[..., Awaitable[dict[str, Any]]] = ratio_search,
 ) -> dict[str, Any]:
-    favoravel_coro = ratio_search_fn(favoravel_query, prefer_recent=True, persona="parecer")
-    contraria_coro = ratio_search_fn(contraria_query, prefer_recent=True, persona="parecer")
+    favoravel_coro = ratio_search_fn(
+        favoravel_query,
+        prefer_recent=True,
+        persona="parecer",
+        reranker_backend="gemini",
+    )
+    if contraria_query:
+        contraria_coro = ratio_search_fn(
+            contraria_query,
+            prefer_recent=True,
+            persona="parecer",
+            reranker_backend="gemini",
+        )
+    else:
+        async def _empty_contraria():
+            return {"answer": "", "docs": [], "meta": {}}
+        contraria_coro = _empty_contraria()
 
     favoravel, contraria, legislacao = await asyncio.gather(
         favoravel_coro,

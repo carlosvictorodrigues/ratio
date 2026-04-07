@@ -150,3 +150,33 @@ async def test_orchestrator_records_stage_completion_events():
 
     event_types = [event_type for event_type, _payload in store.events]
     assert "pipeline.stage_completed" in event_types
+
+
+@pytest.mark.anyio
+async def test_orchestrator_records_stage_started_before_long_running_step():
+    initial = RatioEscritorioState(
+        caso_id="caso-1",
+        tipo_peca="peticao_inicial",
+        gate1_aprovado=True,
+        gate2_aprovado=False,
+        status="pesquisa",
+        workflow_stage="pesquisa",
+    )
+    store = _FakeStore(initial)
+
+    async def fake_drafting(state, store):  # noqa: ARG001
+        updated = state.model_copy(deep=True)
+        updated.workflow_stage = "gate2"
+        updated.status = "gate2"
+        return updated
+
+    await run_escritorio_pipeline(
+        store=store,
+        run_intake_graph_fn=lambda state, store: state,
+        run_drafting_graph_fn=fake_drafting,
+        run_adversarial_graph_fn=lambda state, store: state,
+    )
+
+    assert store.events[0][0] == "pipeline.stage_started"
+    assert store.events[0][1]["stage"] == "drafting"
+    assert store.events[1][0] == "pipeline.stage_completed"

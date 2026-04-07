@@ -556,6 +556,7 @@
       const [editContent, setEditContent] = useState('');
       const [showGate2, setShowGate2] = useState(false);
       const [running, setRunning] = useState(false);
+      const [expandedCardKey, setExpandedCardKey] = useState(null);
 
       const currentPhase = STATUS_TO_PHASE[state?.status] ?? 1;
       const sections = state?.peca_sections || {};
@@ -617,7 +618,17 @@
         switch (phaseIdx) {
           case 0: /* Intake summary */
             if ((state?.fatos_estruturados || []).length === 0) return [];
-            return [{ title: `${(state.fatos_estruturados || []).length} fatos estruturados`, sub: (state.fatos_estruturados || []).slice(0,2).join('; '), color:'var(--agent-intake)' }];
+            return [{
+              key: 'intake-summary',
+              title: `${(state.fatos_estruturados || []).length} fatos estruturados`,
+              sub: (state.fatos_estruturados || []).slice(0,2).join('; ') + (((state.fatos_estruturados || []).length > 2) ? '…' : ''),
+              color: 'var(--agent-intake)',
+              intake: {
+                fatos: state.fatos_estruturados || [],
+                provas: state.provas_disponiveis || [],
+                pontos: state.pontos_atencao || [],
+              },
+            }];
           case 1: /* Research */
             return teses.map(t => ({
               title: t.descricao,
@@ -666,7 +677,6 @@
               const active = i === currentPhase;
               const past = i < currentPhase;
               const cards = buildCards(i);
-              const [expandedTese, setExpandedTese] = useState(null);
               return (
                 <div key={ph.id} className="flex-1 flex flex-col min-w-0 transition-all duration-300"
                   style={{ borderRight:'1px solid var(--stone-200)', opacity: !past && !active ? 0.2 : 1 }}>
@@ -687,15 +697,49 @@
 
                   {/* Cards */}
                   <div className="flex-1 p-2 overflow-y-auto space-y-2">
-                    {cards.map((c, ci) => (
-                      <div key={ci} onClick={c.onClick || (c.tese ? () => setExpandedTese(expandedTese === c.tese.id ? null : c.tese.id) : undefined)}
-                        className={`p-3 rounded-lg transition-all duration-200 ${c.onClick || c.tese ? 'cursor-pointer' : ''}`}
+                    {cards.map((c, ci) => {
+                      const cardKey = c.key || (c.tese && `tese-${c.tese.id}`) || `card-${i}-${ci}`;
+                      const isExpanded = expandedCardKey === cardKey;
+                      const expandable = c.tese || c.intake;
+                      const onCardClick = c.onClick || (expandable ? () => setExpandedCardKey(isExpanded ? null : cardKey) : undefined);
+                      return (
+                      <div key={cardKey} onClick={onCardClick}
+                        className={`p-3 rounded-lg transition-all duration-200 ${onCardClick ? 'cursor-pointer' : ''}`}
                         style={{ background:'var(--stone-200)', border:'1px solid var(--stone-300)', borderLeft:`3px solid ${c.color}` }}
                         onMouseEnter={e => e.currentTarget.style.transform='translateY(-1px)'} onMouseLeave={e => e.currentTarget.style.transform='none'}>
                         <h4 className="text-xs font-semibold mb-1" style={{ color:'var(--stone-900)' }}>{c.title}</h4>
                         <p className="leading-relaxed line-clamp-2" style={{ fontSize:10, color:'var(--stone-500)' }}>{c.sub}</p>
+                        {/* Expanded intake details */}
+                        {c.intake && isExpanded && (
+                          <div className="mt-2.5 pt-2 space-y-2" style={{ borderTop:'1px solid var(--stone-300)' }}>
+                            {c.intake.fatos.length > 0 && (
+                              <div>
+                                <div className="font-mono font-bold mb-1" style={{ fontSize:9, color:'var(--agent-intake)' }}>FATOS ({c.intake.fatos.length})</div>
+                                <ol className="list-decimal list-inside space-y-1" style={{ fontSize:10, color:'var(--stone-700)' }}>
+                                  {c.intake.fatos.map((f, fi) => (<li key={fi} className="leading-snug">{f}</li>))}
+                                </ol>
+                              </div>
+                            )}
+                            {c.intake.provas.length > 0 && (
+                              <div>
+                                <div className="font-mono font-bold mb-1" style={{ fontSize:9, color:'var(--agent-auditor)' }}>PROVAS ({c.intake.provas.length})</div>
+                                <ul className="list-disc list-inside space-y-1" style={{ fontSize:10, color:'var(--stone-700)' }}>
+                                  {c.intake.provas.map((p, pi) => (<li key={pi} className="leading-snug">{p}</li>))}
+                                </ul>
+                              </div>
+                            )}
+                            {c.intake.pontos.length > 0 && (
+                              <div>
+                                <div className="font-mono font-bold mb-1" style={{ fontSize:9, color:'var(--agent-contraparte)' }}>PONTOS DE ATENCAO ({c.intake.pontos.length})</div>
+                                <ul className="list-disc list-inside space-y-1" style={{ fontSize:10, color:'var(--stone-700)' }}>
+                                  {c.intake.pontos.map((p, pi) => (<li key={pi} className="leading-snug">{p}</li>))}
+                                </ul>
+                              </div>
+                            )}
+                          </div>
+                        )}
                         {/* Expanded tese details */}
-                        {c.tese && expandedTese === c.tese.id && (
+                        {c.tese && isExpanded && (
                           <div className="mt-2.5 pt-2 space-y-1.5" style={{ borderTop:'1px solid var(--stone-300)' }}>
                             {(c.tese.jurisprudencia_favoravel || []).map((d, di) => (
                               <div key={di} className="p-2 rounded" style={{ background:'var(--stone-100)', border:'1px solid var(--stone-200)' }}>
@@ -719,7 +763,8 @@
                           </button>
                         )}
                       </div>
-                    ))}
+                      );
+                    })}
 
                     {/* Adversarial round controls */}
                     {i === 3 && currentPhase >= 3 && critica && (
@@ -1061,9 +1106,9 @@
               {mode === 0 && <IntakeMode casoId={casoId} state={caseState} onStateUpdate={handleStateUpdate} />}
               {mode === 1 && <WorkspaceMode casoId={casoId} state={caseState} events={events} onStateUpdate={handleStateUpdate} />}
               {mode === 2 && <DeliveryMode casoId={casoId} state={caseState} />}
+              {agentDetail ? <AgentDetailModal agentId={agentDetail} state={caseState} events={events} onClose={() => setAgentDetail(null)} /> : null}
             </div>
           </div>
-          {agentDetail && <AgentDetailModal agentId={agentDetail} state={caseState} events={events} onClose={() => setAgentDetail(null)} />}
         </div>
       );
     }

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import asyncio
 from typing import Any
 
 import anyio
@@ -11,7 +12,8 @@ from backend.escritorio._llm_utils import (
     parse_json_payload,
 )
 from backend.escritorio.config import DEFAULT_LLM_TIMEOUT_MS, DEFAULT_REASONING_MODEL
-from backend.escritorio.models import RatioEscritorioState
+from backend.escritorio.models import CriticaContraparte, RatioEscritorioState
+from backend.escritorio.tools.ratio_tools import ratio_search
 
 # Allowed values for CriticaContraparte.recomendacao (Literal in models.py).
 _RECOMENDACAO_VALUES = {"aprovar", "revisar", "reestruturar"}
@@ -170,3 +172,34 @@ async def generate_critique_with_gemini(
         return parse_critique_payload(text)
 
     return await anyio.to_thread.run_sync(_invoke)
+
+
+async def enrich_critique_with_contrary_jurisprudence(
+    critique_payload: dict[str, Any],
+    *,
+    ratio_search_fn=ratio_search,
+    limit: int = 3,
+) -> dict[str, Any]:
+    critique = CriticaContraparte.model_validate(critique_payload).model_copy(deep=True)
+    findings = [*critique.falhas_processuais, *critique.argumentos_materiais_fracos]
+
+    async def _enrich(item):
+        query = str(item.query_jurisprudencia_contraria or "").strip()
+        if not query:
+            return item
+        try:
+            result = await ratio_search_fn(
+                query,
+                prefer_recent=True,
+                persona="parecer",
+                reranker_backend="gemini",
+            )
+            item.jurisprudencia_encontrada = list(result.get("docs", []))[:limit]
+        except Exception:
+            item.jurisprudencia_encontrada = []
+        return item
+
+    if findings:
+        await asyncio.gather(*[_enrich(item) for item in findings])
+
+    return critique.model_dump(mode="json")

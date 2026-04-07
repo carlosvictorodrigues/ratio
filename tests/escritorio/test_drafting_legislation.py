@@ -13,7 +13,8 @@ async def test_pesquisar_teses_executes_legislation_operation():
         teses=[TeseJuridica(id="t1", descricao="Responsabilidade civil por anulacao de concurso", tipo="principal")],
     )
 
-    async def fake_search_bundle(*, favoravel_query: str, contraria_query: str, legislacao_operation, ratio_search_fn=None):  # noqa: ARG001
+    async def fake_search_bundle(*, favoravel_query: str, contraria_query: str | None, legislacao_operation, ratio_search_fn=None):  # noqa: ARG001
+        assert contraria_query is None
         leis = await legislacao_operation()
         return {
             "jurisprudencia_favoravel": {"docs": []},

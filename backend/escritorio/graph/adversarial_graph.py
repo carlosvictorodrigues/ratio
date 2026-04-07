@@ -9,7 +9,10 @@ from langgraph.graph import END, START, StateGraph
 
 log = logging.getLogger(__name__)
 
-from backend.escritorio.contraparte import generate_critique_with_gemini
+from backend.escritorio.contraparte import (
+    enrich_critique_with_contrary_jurisprudence,
+    generate_critique_with_gemini,
+)
 from backend.escritorio.formatter import FormatadorPeticao
 from backend.escritorio.models import RatioEscritorioState
 from backend.escritorio.tools.lancedb_access import LanceDBReadonlyRegistry
@@ -21,6 +24,7 @@ from backend.escritorio.verifier import verify_sections
 
 async def contraparte_node(state: RatioEscritorioState) -> dict[str, Any]:
     critique = await generate_critique_with_gemini(state)
+    critique = await enrich_critique_with_contrary_jurisprudence(critique)
     return {
         "status": "adversarial",
         "workflow_stage": "adversarial",

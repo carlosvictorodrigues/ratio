@@ -116,22 +116,22 @@ async def test_drafting_graph_default_pesquisador_uses_real_decomposition_and_se
     async def fake_decompose_case_with_gemini(state: RatioEscritorioState):
         return [TeseJuridica(id="t1", descricao="CDC", tipo="principal")]
 
-    async def fake_search_tese_bundle(*, favoravel_query: str, contraria_query: str, legislacao_operation, ratio_search_fn=None):  # noqa: ARG001
+    async def fake_search_tese_bundle(*, favoravel_query: str, contraria_query: str | None, legislacao_operation, ratio_search_fn=None):  # noqa: ARG001
         assert favoravel_query == "CDC"
-        assert contraria_query == "CDC"
+        assert contraria_query is None
         return {
             "jurisprudencia_favoravel": {
                 "docs": [{"doc_id": "doc-1", "_final_score": 0.8, "data_julgamento": "2024-01-01"}]
             },
             "jurisprudencia_contraria": {
-                "docs": [{"doc_id": "doc-2", "_final_score": 0.7, "data_julgamento": "2023-01-01"}]
+                "docs": []
             },
             "legislacao": [{"doc_id": "lei-1", "_final_score": 0.5, "data_julgamento": "2020-01-01"}],
         }
 
     def fake_redator(state: RatioEscritorioState):
         assert state.teses[0].descricao == "CDC"
-        assert len(state.pesquisa_jurisprudencia) == 2
+        assert len(state.pesquisa_jurisprudencia) == 1
         assert len(state.pesquisa_legislacao) == 1
         return {
             "peca_sections": {"dos_fatos": "texto redigido"},

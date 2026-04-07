@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import logging
 from typing import Any, Callable
 
 from langgraph.graph import END, START, StateGraph
+
+log = logging.getLogger(__name__)
 
 from backend.escritorio.models import RatioEscritorioState, TeseJuridica
 from backend.escritorio.planning import decompose_case_with_gemini
@@ -11,7 +14,8 @@ from backend.escritorio.redaction import (
     generate_sections_with_gemini,
     infer_section_provenance,
 )
-from backend.escritorio.tools.ratio_tools import merge_ranked_results, ratio_search, search_tese_bundle
+from backend.escritorio.tools.google_search import search_google_legislation
+from backend.escritorio.tools.ratio_tools import merge_ranked_results, search_tese_bundle
 
 
 def _dedupe_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -69,6 +73,9 @@ async def pesquisar_teses(
         state,
         decompose_case_fn=decompose_case_fn,
     )
+    log.info("pesquisar_teses: %d teses decompostas", len(teses))
+    for _i, _t in enumerate(teses, start=1):
+        log.info("  tese %d [%s/%s]: %s", _i, _t.id, _t.tipo, (_t.descricao or "")[:120])
     active_search_bundle = search_bundle_fn or search_tese_bundle
     active_legislation_search = legislation_search_fn or _search_legislation
     enriched_teses: list[dict[str, Any]] = []
@@ -76,15 +83,17 @@ async def pesquisar_teses(
     legislacao: list[dict[str, Any]] = []
 
     for tese in teses:
-        async def _search_legislacao_tese():
-            result = active_legislation_search(tese.descricao)
+        log.info("pesquisar_teses: iniciando busca para tese %s", tese.id)
+
+        async def _search_legislacao_tese(_descricao=tese.descricao):
+            result = active_legislation_search(_descricao)
             if callable(getattr(result, "__await__", None)):
                 return await result
             return result
 
         bundle = await active_search_bundle(
             favoravel_query=tese.descricao,
-            contraria_query=tese.descricao,
+            contraria_query=None,
             legislacao_operation=_search_legislacao_tese,
         )
         docs_favor = list((bundle.get("jurisprudencia_favoravel") or {}).get("docs", []))
@@ -121,8 +130,7 @@ def make_pesquisador_node(search_bundle_fn: Callable[..., Any]) -> Callable[[Rat
 
 
 async def _search_legislation(query: str) -> list[dict[str, Any]]:
-    result = await ratio_search(query, prefer_recent=True, persona="parecer")
-    return list(result.get("docs", []))[:10]
+    return await anyio.to_thread.run_sync(lambda: search_google_legislation(query, limit=10))
 
 
 def curadoria_node(state: RatioEscritorioState) -> dict[str, Any]:
