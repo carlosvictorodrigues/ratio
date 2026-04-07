@@ -5053,6 +5053,10 @@ function bindEvents() {
   tipsBtn?.addEventListener("click", () => setTipsModalOpen(true));
   closeTipsModalBtn?.addEventListener("click", () => setTipsModalOpen(false));
   openInformativoBtn?.addEventListener("click", () => setInformativoOpen(!state.informativo.open));
+  $("openEscritorioBtn")?.addEventListener("click", () => {
+    const base = state.apiBaseUrl || "http://127.0.0.1:8000";
+    window.open(base + "/escritorio", "_blank");
+  });
   openUpdateBtn?.addEventListener("click", () => {
     state.informativo.open = false;
     state.autoUpdate.viewing = true;

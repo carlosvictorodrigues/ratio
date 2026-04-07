@@ -1,0 +1,829 @@
+<!DOCTYPE html>
+<html lang="pt-BR" data-theme="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Ratio Escritorio</title>
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://unpkg.com/lucide@latest"></script>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@500;600;700&family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&family=Merriweather:ital@0;1&display=swap');
+
+    :root {
+      --stone-50: #141210; --stone-100: #1c1917; --stone-200: #2e2a27;
+      --stone-300: #3a3633; --stone-400: #6b6662; --stone-500: #9a948f;
+      --stone-600: #b0aaa5; --stone-700: #c4bfba; --stone-800: #d6d1cc; --stone-900: #e8e5e2;
+      --accent: #c4a882; --accent-dim: rgba(196,168,130,0.10);
+      --agent-intake: #7c8db5; --agent-pesquisador: #8b7ec7; --agent-redator: #c4a882;
+      --agent-contraparte: #c47a6e; --agent-auditor: #7a9e8a; --agent-formatador: #8a9bae;
+      --glass: rgba(28,25,23,0.55);
+    }
+    [data-theme="light"] {
+      --stone-50: #fafaf9; --stone-100: #f5f5f4; --stone-200: #e7e5e4;
+      --stone-300: #d6d3d1; --stone-400: #a8a29e; --stone-500: #78716c;
+      --stone-600: #57534e; --stone-700: #44403c; --stone-800: #292524; --stone-900: #1c1917;
+      --glass: rgba(250,250,249,0.7);
+    }
+    *{box-sizing:border-box;margin:0;padding:0}
+    body{background:var(--stone-50);color:var(--stone-900);font-family:'Inter',system-ui,sans-serif;overflow:hidden;height:100vh}
+    .font-serif{font-family:'Cormorant Garamond',Georgia,serif}
+    .font-mono{font-family:'JetBrains Mono',monospace}
+    .font-cite{font-family:'Merriweather',Georgia,serif}
+    ::-webkit-scrollbar{width:5px}
+    ::-webkit-scrollbar-track{background:transparent}
+    ::-webkit-scrollbar-thumb{background:var(--stone-300);border-radius:4px}
+    ::-webkit-scrollbar-thumb:hover{background:var(--stone-400)}
+
+    @keyframes fadeIn{from{opacity:0;transform:translateY(5px)}to{opacity:1;transform:translateY(0)}}
+    @keyframes slideUp{from{opacity:0;transform:translateY(14px) scale(.98)}to{opacity:1;transform:translateY(0) scale(1)}}
+    @keyframes spin-arc{0%{transform:rotate(0deg)}100%{transform:rotate(360deg)}}
+    @keyframes pulse-dot{0%,100%{opacity:.25}50%{opacity:1}}
+    @keyframes glow{0%,100%{box-shadow:0 0 0 0 transparent}50%{box-shadow:0 0 12px -2px var(--accent)}}
+    @keyframes shimmer{0%{background-position:-200% 0}100%{background-position:200% 0}}
+    .anim-fade{animation:fadeIn .3s ease-out both}
+    .anim-slide{animation:slideUp .35s ease-out both}
+    .glow-active{animation:glow 2.2s ease-in-out infinite}
+
+    /* Noise texture overlay */
+    .noise::after{content:'';position:fixed;inset:0;pointer-events:none;opacity:.025;
+      background-image:url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+      background-repeat:repeat;mix-blend-mode:overlay;z-index:9999}
+
+    /* Thin gold accent line at top */
+    .gold-rule{height:1px;background:linear-gradient(90deg,transparent 0%,var(--accent) 20%,var(--accent) 80%,transparent 100%);opacity:.4}
+
+    /* Streaming shimmer effect */
+    .shimmer{background:linear-gradient(90deg,var(--stone-200) 0%,var(--stone-300) 50%,var(--stone-200) 100%);
+      background-size:200% 100%;animation:shimmer 1.8s ease-in-out infinite}
+  </style>
+</head>
+<body class="noise">
+  <div id="root"></div>
+  <script type="text/babel">
+    const { useState, useEffect, useRef, useCallback, Fragment } = React;
+
+    /* ══════════ API CLIENT ══════════ */
+    const API = '/api/escritorio';
+    const api = {
+      _f: async (path, opts = {}) => {
+        try {
+          const r = await fetch(`${API}${path}`, { headers: { 'Content-Type': 'application/json' }, ...opts });
+          if (!r.ok) throw new Error(`${r.status}`);
+          return await r.json();
+        } catch (e) { console.warn(`[escritorio-api] ${opts.method||'GET'} ${path}:`, e.message); return null; }
+      },
+      createCase: (id, tipo, area) => api._f('/cases', { method: 'POST', body: JSON.stringify({ caso_id: id, tipo_peca: tipo, area_direito: area }) }),
+      listCases: () => api._f('/cases'),
+      getCase: (id) => api._f(`/cases/${id}`),
+      getPipeline: (id) => api._f(`/cases/${id}/pipeline`),
+      getEvents: (id) => api._f(`/cases/${id}/events`),
+      sendIntake: (id, msg) => api._f(`/cases/${id}/intake`, { method: 'POST', body: JSON.stringify({ message: msg }) }),
+      approveGate: (id, gate, approved = true) => api._f(`/cases/${id}/gates/${gate}`, { method: 'POST', body: JSON.stringify({ approved }) }),
+      runPipeline: (id) => api._f(`/cases/${id}/run`, { method: 'POST' }),
+      submitDraft: (id, sections) => api._f(`/cases/${id}/draft`, { method: 'POST', body: JSON.stringify({ sections }) }),
+      runCritique: (id) => api._f(`/cases/${id}/adversarial/critique`, { method: 'POST' }),
+      dismissFindings: (id, ids, reason) => api._f(`/cases/${id}/adversarial/dismiss`, { method: 'POST', body: JSON.stringify({ finding_ids: ids, reason }) }),
+      submitRevision: (id, updates, notes, finalize) => api._f(`/cases/${id}/adversarial/revise`, { method: 'POST', body: JSON.stringify({ section_updates: updates, notes, finalize }) }),
+    };
+
+    /* ══════════ AGENTS & PHASES ══════════ */
+    const AGENTS = [
+      { id:'intake',       name:'Clara',      role:'Analista de Triagem',  color:'var(--agent-intake)',      icon:'message-circle', llm:true },
+      { id:'pesquisador',  name:'Theo',       role:'Pesquisador Juridico', color:'var(--agent-pesquisador)', icon:'search',         llm:true },
+      { id:'redator',      name:'Helena',     role:'Redatora de Pecas',    color:'var(--agent-redator)',     icon:'pen-tool',       llm:true },
+      { id:'contraparte',  name:'Marco',      role:'Adv. Parte Adversa',  color:'var(--agent-contraparte)', icon:'shield-alert',   llm:true },
+      { id:'auditor',      name:'Auditor',    role:'Codigo / Checagem',   color:'var(--agent-auditor)',     icon:'check-circle',   llm:false },
+      { id:'formatador',   name:'Formatador', role:'Codigo / python-docx',color:'var(--agent-formatador)',  icon:'file-text',      llm:false },
+    ];
+    const PHASES = [
+      { id:'intake',      label:'Intake',      num:'01', agent:'intake',      color:'var(--agent-intake)' },
+      { id:'research',    label:'Pesquisa',    num:'02', agent:'pesquisador', color:'var(--agent-pesquisador)' },
+      { id:'drafting',    label:'Redacao',     num:'03', agent:'redator',     color:'var(--agent-redator)' },
+      { id:'adversarial', label:'Revisao',      num:'04', agent:'contraparte', color:'var(--agent-contraparte)' },
+      { id:'delivery',    label:'Entrega',     num:'05', agent:'auditor',     color:'var(--agent-auditor)' },
+    ];
+
+    /* ══════════ MOCK DATA ══════════ */
+    const MOCK_SECTIONS = [
+      { id:'fatos',   title:'Dos Fatos',  content:'O autor celebrou contrato de financiamento imobiliario junto ao banco reu em 15/03/2023, comprometendo-se ao pagamento de 360 parcelas mensais. Apos o pagamento integral de todas as parcelas vencidas ate 10/01/2025, verificou-se a manutencao indevida de seu nome nos cadastros restritivos de credito.', status:'done' },
+      { id:'direito', title:'Do Direito',  content:'A responsabilidade objetiva esta caracterizada conforme o art. 14 do CDC, sendo desnecessaria a comprovacao de culpa por parte da instituicao financeira re.', status:'streaming' },
+      { id:'pedidos', title:'Dos Pedidos', content:'Requer-se a condenacao em danos morais no valor de R$ 30.000,00, bem como a exclusao definitiva do nome do autor dos cadastros de inadimplentes.', status:'pending' },
+    ];
+    const MOCK_TESES = [
+      { id:'t1', title:'Responsabilidade Objetiva e Dano in re ipsa', confidence:'Alta', docsCount:5,
+        docs:[ { id:'d1', process:'REsp 1.234.567/SP', court:'STJ', summary:'Manutencao indevida de negativacao gera dano moral presumido.' },
+               { id:'d2', process:'AREsp 2.345.678/RJ', court:'STJ', summary:'Quantum de R$20.000 para negativacao >30 dias.' } ],
+        queries:['manutencao negativacao apos quitacao','dano moral in re ipsa negativacao indevida'] },
+      { id:'t2', title:'Prazo de Exclusao — Sumula 548/STJ', confidence:'Media', docsCount:3,
+        docs:[ { id:'d3', process:'AgInt no AREsp 1.799.837/SP', court:'STJ', summary:'Prazo de 5 dias uteis para exclusao do cadastro.' } ],
+        queries:['sumula 548 STJ prazo exclusao cadastro'] },
+    ];
+    const MOCK_CRITICAS = [
+      { id:'c1', tipo:'material', gravidade:'alta', secao:'pedidos', desc:'Ausencia de fundamentacao sobre requisitos da tutela provisoria (art. 300 CPC).', argumento:'Juiz pode indeferir liminar por falta de fundamentacao.' },
+      { id:'c2', tipo:'jurisprudencia_fraca', gravidade:'media', secao:'pedidos', desc:'Quantum de R$30.000 acima da media do TJSP (~R$20.000) para casos analogos.', argumento:'Juiz pode reduzir o valor contestando excesso.' },
+    ];
+    const FEED_SCRIPT = [
+      { t:0,    agent:'intake',      type:'status', text:'Processando dossie preliminar...' },
+      { t:800,  agent:'intake',      type:'done',   text:'6 fatos extraidos, 4 documentos identificados' },
+      { t:1600, agent:'intake',      type:'done',   text:'Partes: Joao Silva vs. Banco X' },
+      { t:3000, agent:'pesquisador', type:'status', text:'Decompondo caso em teses juridicas...' },
+      { t:4000, agent:'pesquisador', type:'tool',   text:'ratio_search("manutencao negativacao quitacao") -> 22 docs' },
+      { t:5200, agent:'pesquisador', type:'tool',   text:'ratio_search("dano moral in re ipsa") -> 11 docs' },
+      { t:6400, agent:'pesquisador', type:'tool',   text:'ratio_search("sumula 548 prazo exclusao") -> 8 docs' },
+      { t:7200, agent:'pesquisador', type:'done',   text:'3 teses decompostas, 41 documentos coletados' },
+      { t:8500, agent:'redator',     type:'status', text:'Gerando secao "Dos Fatos"...' },
+      { t:10000,agent:'redator',     type:'status', text:'Gerando secao "Do Direito"...' },
+      { t:12000,agent:'redator',     type:'done',   text:'Peticao v1 gerada — 3 secoes, 14 citacoes' },
+      { t:13500,agent:'contraparte', type:'status', text:'Analisando peticao adversarialmente...' },
+      { t:14500,agent:'contraparte', type:'tool',   text:'ratio_search("excludente responsabilidade banco") -> 3 docs' },
+      { t:16000,agent:'contraparte', type:'warn',   text:'Anti-Sycophancy: verificando consistencia da critica...' },
+      { t:17000,agent:'contraparte', type:'done',   text:'Score de risco: 35/100 — 2 falhas identificadas' },
+    ];
+
+    /* ══════════ ICON HELPER ══════════ */
+    function Icon({ name, className = "w-5 h-5", style }) {
+      const ref = useRef(null);
+      useEffect(() => {
+        if (ref.current && lucide.icons[name]) {
+          ref.current.innerHTML = '';
+          const el = lucide.createElement(lucide.icons[name]);
+          if (className) el.setAttribute('class', className);
+          ref.current.appendChild(el);
+        }
+      }, [name, className]);
+      return <span ref={ref} style={{ display:'inline-flex', alignItems:'center', ...(style||{}) }} />;
+    }
+
+    /* ══════════ SHARED COMPONENTS ══════════ */
+
+    const BurnMeter = ({ cost }) => (
+      <div className="flex items-center space-x-2 font-mono text-xs rounded-md px-3 py-1.5"
+        style={{ border:'1px solid var(--stone-300)', background:'var(--stone-100)' }}>
+        <span style={{ color:'var(--stone-500)', fontSize:10 }}>Custo</span>
+        <span className="font-medium" style={{ color:'var(--accent)', fontSize:11 }}>R$ {cost.toFixed(2)}</span>
+      </div>
+    );
+
+    const AgentBadge = ({ agentId, size = 22, active, done }) => {
+      const a = AGENTS.find(x => x.id === agentId) || AGENTS[0];
+      const r = size * 0.42, circ = 2 * Math.PI * r;
+      return (
+        <div className="relative" style={{ width:size, height:size }}>
+          <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} className="absolute inset-0">
+            <circle cx={size/2} cy={size/2} r={r} fill="none" stroke={a.color} strokeWidth="1.2" opacity={done ? 0.5 : 0.15} />
+            {active && <circle cx={size/2} cy={size/2} r={r} fill="none" stroke={a.color} strokeWidth="1.8"
+              strokeDasharray={`${circ*0.28} ${circ*0.72}`} strokeLinecap="round"
+              style={{ animation:'spin-arc 1.2s linear infinite', transformOrigin:'center' }} />}
+          </svg>
+          {active && <div className="absolute inset-0 rounded-full" style={{ background:a.color, opacity:0.06, animation:'pulse-dot 2s ease-in-out infinite' }} />}
+          <div className="absolute inset-0 flex items-center justify-center">
+            {done && !active
+              ? <svg width={size*0.4} height={size*0.4} viewBox="0 0 8 8"><polyline points="1.5,4 3.5,6 6.5,2" fill="none" stroke={a.color} strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round"/></svg>
+              : <Icon name={a.icon} className={`w-${Math.round(size*0.4/4)} h-${Math.round(size*0.4/4)}`}
+                  style={{ color: active ? a.color : done ? a.color+'99' : 'var(--stone-400)', width:size*0.4, height:size*0.4 }} />}
+          </div>
+        </div>
+      );
+    };
+
+    const AgentAvatars = ({ activeAgents = [], completedAgents = [], onClickAgent }) => (
+      <div className="flex items-center space-x-1">
+        {AGENTS.map(a => {
+          const isAct = activeAgents.includes(a.id), isDone = completedAgents.includes(a.id);
+          const clickable = isDone || isAct;
+          return (
+            <div key={a.id} title={`${a.name} · ${a.role}${clickable ? ' (clique para ver)' : ''}`}
+              onClick={() => clickable && onClickAgent && onClickAgent(a.id)}
+              className={`flex items-center space-x-1.5 rounded-full px-2 py-0.5 transition-all duration-300 ${isAct ? 'glow-active' : ''} ${clickable ? 'cursor-pointer' : ''}`}
+              style={{ border:`1px solid ${isDone ? a.color+'55' : isAct ? a.color+'88' : 'var(--stone-300)'}`,
+                       background: isDone || isAct ? a.color+'0d' : 'transparent' }}>
+              <AgentBadge agentId={a.id} size={16} active={isAct} done={isDone} />
+              <span className="font-mono" style={{ fontSize:8, color: isAct ? a.color : isDone ? a.color+'88' : 'var(--stone-400)', whiteSpace:'nowrap' }}>{a.name}</span>
+            </div>
+          );
+        })}
+      </div>
+    );
+
+    /* ── Agent output summaries (mock — replaced by real API data in production) ── */
+    const AGENT_OUTPUTS = {
+      intake: { title:'Dossie de Triagem', items:[
+        { label:'Partes', value:'Joao Silva (autor) vs. Banco X S.A. (reu)' },
+        { label:'Tipo', value:'Peticao Inicial — Danos Morais' },
+        { label:'Fatos extraidos', value:'6 fatos estruturados' },
+        { label:'Documentos', value:'4 documentos identificados (contrato, comprovantes, extrato, notificacao)' },
+        { label:'Area', value:'Direito do Consumidor' },
+      ], detail:'Fatos: (1) Contrato de financiamento celebrado em 15/03/2023; (2) 360 parcelas mensais; (3) Pagamento integral ate 10/01/2025; (4) Manutencao indevida em cadastro restritivo; (5) Tentativa frustrada de resolucao administrativa; (6) Dano moral configurado.' },
+      pesquisador: { title:'Resultado da Pesquisa', items:[
+        { label:'Teses decompostas', value:'3' },
+        { label:'Docs favoraveis', value:'38 decisoes' },
+        { label:'Docs contrarios', value:'3 decisoes' },
+        { label:'Legislacao', value:'Art. 14 CDC, Art. 43 §1 CDC, Sumula 548/STJ, Sumula 385/STJ' },
+      ], detail:'Tese 1: Responsabilidade Objetiva e Dano in re ipsa (5 docs, confianca alta)\nTese 2: Prazo de Exclusao — Sumula 548/STJ (3 docs, confianca media)\nTese 3: Quantum indenizatorio — parametros TJSP (4 docs, confianca media)' },
+      redator: { title:'Peca Redigida', items:[
+        { label:'Secoes', value:'Dos Fatos, Do Direito, Dos Pedidos' },
+        { label:'Citacoes', value:'14 referencias jurisprudenciais' },
+        { label:'Versao', value:'v1 (pre-adversarial)' },
+      ], detail:'Dos Fatos: 3 paragrafos narrando cronologia.\nDo Direito: Fundamentacao em responsabilidade objetiva (art. 14 CDC), dano moral in re ipsa, jurisprudencia STJ consolidada.\nDos Pedidos: Condenacao em danos morais R$30.000, exclusao cadastral, tutela de urgencia.' },
+      contraparte: { title:'Analise Adversarial', items:[
+        { label:'Rodadas', value:'2' },
+        { label:'Score final', value:'8/100 (baixo risco)' },
+        { label:'Falhas criticas', value:'0' },
+        { label:'Pontos ajustados', value:'2 (quantum e tutela provisoria)' },
+      ], detail:'Critica 1 (resolvida): Ausencia de fundamentacao para tutela provisoria — adicionado art. 300 CPC.\nCritica 2 (resolvida): Quantum acima da media TJSP — ajustado para R$20.000 com fundamentacao.' },
+      auditor: { title:'Relatorio de Auditoria', items:[
+        { label:'Citacoes verificadas', value:'7/7 validas' },
+        { label:'Artigos conferidos', value:'4/4 vigentes' },
+        { label:'Sumulas', value:'2/2 ativas' },
+        { label:'Formatacao', value:'ABNT/CNJ conforme' },
+      ], detail:'Todas as referencias jurisprudenciais verificadas contra a base LanceDB. Nenhuma citacao fabricada detectada. Artigos de lei conferidos quanto a vigencia.' },
+      formatador: { title:'Documento Final', items:[
+        { label:'Formato', value:'.docx (Times New Roman 12pt)' },
+        { label:'Margens', value:'3cm esq/sup, 2cm dir/inf' },
+        { label:'Espacamento', value:'1.5 linhas' },
+        { label:'Paginas', value:'~8 paginas estimadas' },
+      ], detail:'Documento formatado conforme normas ABNT e CNJ. Cabecalho, enderecamento, secoes com heading, citacoes longas recuadas (4cm, fonte 10), numeracao de paginas.' },
+    };
+
+    /* ── Agent Detail Modal ── */
+    const AgentDetailModal = ({ agentId, events, onClose }) => {
+      const a = AGENTS.find(x => x.id === agentId);
+      if (!a) return null;
+      const output = AGENT_OUTPUTS[agentId];
+      const agentEvents = events.filter(e => e.agent === agentId);
+      return (
+        <div className="fixed inset-0 z-50 flex items-center justify-center anim-fade" style={{ background:'rgba(0,0,0,0.5)', backdropFilter:'blur(6px)' }} onClick={onClose}>
+          <div className="w-full max-w-lg max-h-[80vh] flex flex-col rounded-xl anim-slide" style={{ background:'var(--stone-100)', border:`1px solid ${a.color}44`, boxShadow:'0 24px 48px rgba(0,0,0,0.3)' }} onClick={e => e.stopPropagation()}>
+            {/* Header */}
+            <div className="flex items-center justify-between p-4" style={{ borderBottom:`1px solid var(--stone-200)` }}>
+              <div className="flex items-center space-x-3">
+                <AgentBadge agentId={agentId} size={28} active={false} done={true} />
+                <div>
+                  <h3 className="font-serif text-base font-bold" style={{ color: a.color }}>{a.name}</h3>
+                  <span className="font-mono" style={{ fontSize:9, color:'var(--stone-500)' }}>{a.role}</span>
+                </div>
+              </div>
+              <button onClick={onClose} className="p-1 rounded transition-colors" style={{ color:'var(--stone-400)' }}>
+                <Icon name="x" className="w-4 h-4" />
+              </button>
+            </div>
+            {/* Content */}
+            <div className="flex-1 overflow-y-auto p-4 space-y-4">
+              {output && <>
+                <h4 className="font-serif font-semibold" style={{ fontSize:14, color:'var(--stone-900)' }}>{output.title}</h4>
+                <div className="rounded-lg p-3 space-y-0.5" style={{ background:'var(--stone-50)', border:'1px solid var(--stone-200)' }}>
+                  {output.items.map((item, i) => (
+                    <div key={i} className="flex justify-between py-1.5 font-mono" style={{ fontSize:10, borderBottom: i < output.items.length-1 ? '1px solid var(--stone-200)' : 'none' }}>
+                      <span style={{ color:'var(--stone-500)' }}>{item.label}</span>
+                      <span className="text-right ml-3" style={{ color:'var(--stone-800)' }}>{item.value}</span>
+                    </div>
+                  ))}
+                </div>
+                {output.detail && (
+                  <div className="rounded-lg p-3" style={{ background:'var(--stone-50)', border:'1px solid var(--stone-200)' }}>
+                    <span className="font-mono" style={{ fontSize:9, color:'var(--stone-500)' }}>Detalhamento</span>
+                    <p className="mt-1 text-xs whitespace-pre-line leading-relaxed" style={{ color:'var(--stone-700)' }}>{output.detail}</p>
+                  </div>
+                )}
+              </>}
+              {/* Activity log */}
+              {agentEvents.length > 0 && (
+                <div>
+                  <span className="font-mono" style={{ fontSize:9, color:'var(--stone-500)' }}>Log de atividade</span>
+                  <div className="mt-1 space-y-1">
+                    {agentEvents.map((ev, i) => (
+                      <div key={i} className="flex items-start space-x-2 py-1" style={{ fontSize:10 }}>
+                        <span className="font-mono shrink-0" style={{ color: ev.type==='done' ? 'var(--agent-auditor)' : ev.type==='warn' ? '#d4874a' : a.color }}>
+                          {ev.type==='done'?'\u2713':ev.type==='tool'?'\u2699':ev.type==='warn'?'\u26A0':'\u25CF'}
+                        </span>
+                        <span style={{ color:'var(--stone-600)' }}>{ev.text}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      );
+    };
+
+    /* ── In-Column Status (only shows current state, not full history) ── */
+    const InColumnFeed = ({ agentId, color, events, active }) => {
+      const msgs = events.filter(e => e.agent === agentId);
+      if (!msgs.length && !active) return null;
+      const a = AGENTS.find(x => x.id === agentId) || AGENTS[0];
+      const last = msgs.length ? msgs[msgs.length - 1] : null;
+      const isDone = last && last.type === 'done';
+      return (
+        <div className="mx-2 mt-2 rounded-md shrink-0 transition-all duration-300" style={{ background:'var(--stone-100)', border:`1px solid ${color}33`, borderTop:`2px solid ${color}` }}>
+          <div className="flex items-center justify-between px-2.5 py-2" style={{ background:color+'08' }}>
+            <div className="flex items-center space-x-2 min-w-0">
+              <AgentBadge agentId={agentId} size={20} active={active} done={isDone} />
+              <div className="flex flex-col min-w-0">
+                <span className="font-semibold leading-none" style={{ fontSize:10, color }}>{a.name}</span>
+                {last ? (
+                  <span className="font-mono leading-none mt-1 truncate" style={{ fontSize:8, color: isDone ? 'var(--stone-600)' : 'var(--stone-500)' }}>
+                    {last.text}
+                  </span>
+                ) : active ? (
+                  <span className="font-mono leading-none mt-1" style={{ fontSize:8, color:'var(--stone-500)' }}>Aguardando...</span>
+                ) : null}
+              </div>
+            </div>
+            {isDone && !active && <span className="font-mono shrink-0 ml-1" style={{ fontSize:8, color:'var(--stone-500)' }}>{'\u2713'}</span>}
+            {active && <div className="flex items-center space-x-0.5 shrink-0 ml-1">
+              {[0,0.25,0.5].map(d => <div key={d} className="w-1 h-1 rounded-full" style={{ background:color, animation:`pulse-dot 1.4s ease-in-out infinite`, animationDelay:`${d}s` }} />)}
+            </div>}
+          </div>
+        </div>
+      );
+    };
+
+    /* ══════════ GATE OVERLAY ══════════ */
+    const GateOverlay = ({ gate, data, onApprove, onBack }) => (
+      <div className="fixed inset-0 z-50 flex items-center justify-center anim-fade" style={{ background:'rgba(0,0,0,0.5)', backdropFilter:'blur(6px)' }}>
+        <div className="w-full max-w-md rounded-xl p-6 space-y-4 anim-slide" style={{ background:'var(--stone-100)', border:'1px solid var(--stone-300)', boxShadow:'0 24px 48px rgba(0,0,0,0.3)' }}>
+          <div className="flex items-center space-x-3">
+            <div className="w-9 h-9 rounded-lg flex items-center justify-center" style={{ background:'var(--accent-dim)', border:'1px solid var(--accent)44' }}>
+              <Icon name="shield-check" className="w-4 h-4" style={{ color:'var(--accent)' }} />
+            </div>
+            <div>
+              <h3 className="font-serif text-lg font-bold" style={{ color:'var(--stone-900)' }}>Gate {gate}</h3>
+              <p className="font-mono" style={{ fontSize:10, color:'var(--stone-500)' }}>{gate===1?'Entendemos o problema?':'Base de pesquisa suficiente?'}</p>
+            </div>
+          </div>
+          <div className="space-y-0.5 text-xs rounded-lg p-3" style={{ background:'var(--stone-50)', border:'1px solid var(--stone-200)' }}>
+            {data.map((item, i) => (
+              <div key={i} className="flex justify-between py-2" style={{ borderBottom: i<data.length-1 ? '1px solid var(--stone-200)' : 'none' }}>
+                <span style={{ color:'var(--stone-500)' }}>{item.label}</span>
+                <span className="font-medium" style={{ color:'var(--stone-800)' }}>{item.value}</span>
+              </div>
+            ))}
+          </div>
+          <div className="flex space-x-3 pt-1">
+            <button onClick={onBack} className="flex-1 py-2.5 text-xs font-medium rounded-lg transition-colors duration-200"
+              style={{ border:'1px solid var(--stone-300)', color:'var(--stone-500)' }}
+              onMouseEnter={e => e.target.style.borderColor='var(--stone-400)'} onMouseLeave={e => e.target.style.borderColor='var(--stone-300)'}>
+              &#8592; Voltar
+            </button>
+            <button onClick={onApprove} className="flex-1 py-2.5 text-xs font-semibold rounded-lg transition-all duration-200"
+              style={{ background:'var(--accent)', color:'var(--stone-50)' }}
+              onMouseEnter={e => e.target.style.filter='brightness(1.1)'} onMouseLeave={e => e.target.style.filter='none'}>
+              Aprovar &#8594;
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+
+    /* ══════════ INTAKE MODE ══════════ */
+    const IntakeMode = ({ casoId, onGateApprove }) => {
+      const [msgs, setMsgs] = useState([{ role:'assistant', content:'Ola. Descreva os fatos do caso, as partes envolvidas e os documentos disponiveis. Quanto mais detalhado, melhor o resultado.' }]);
+      const [input, setInput] = useState('');
+      const [loading, setLoading] = useState(false);
+      const [showGate, setShowGate] = useState(false);
+      const btm = useRef(null);
+      useEffect(() => { btm.current?.scrollIntoView({ behavior:'smooth' }); }, [msgs.length]);
+
+      const send = async () => {
+        const txt = input.trim();
+        if (!txt || loading) return;
+        setMsgs(p => [...p, { role:'user', content: txt }]);
+        setInput('');
+        setLoading(true);
+        const resp = await api.sendIntake(casoId, txt);
+        if (resp && resp.assistant_message) {
+          setMsgs(p => [...p, { role:'assistant', content: resp.assistant_message }]);
+        } else {
+          /* fallback mock */
+          setTimeout(() => setMsgs(p => [...p, { role:'assistant', content:'Fatos processados. 6 fatos extraidos, 3 teses identificadas. Deseja aprovar o dossie?' }]), 600);
+        }
+        setLoading(false);
+      };
+
+      return (
+        <>
+          <div className="flex flex-col h-full max-w-2xl mx-auto w-full pt-8 pb-4 px-5">
+            <div className="text-center mb-6 anim-fade">
+              <h2 className="font-serif text-2xl font-bold" style={{ color:'var(--stone-900)' }}>Triagem do Caso</h2>
+              <p className="mt-1" style={{ fontSize:12, color:'var(--stone-500)' }}>Clara ira analisar os fatos e estruturar o dossie preliminar</p>
+            </div>
+            <div className="flex-1 overflow-y-auto space-y-3 mb-4 pr-1">
+              {msgs.map((m, i) => (
+                <div key={i} className={`flex ${m.role==='user'?'justify-end':'justify-start'} anim-fade`} style={{ animationDelay:`${i*0.05}s` }}>
+                  <div className="max-w-[85%] rounded-lg px-4 py-3" style={{
+                    background: m.role==='user' ? 'var(--stone-200)' : 'var(--stone-100)',
+                    border: m.role==='user' ? 'none' : '1px solid var(--stone-200)',
+                    borderLeft: m.role==='assistant' ? '2px solid var(--agent-intake)' : 'none',
+                  }}>
+                    <p className="text-sm whitespace-pre-wrap leading-relaxed" style={{ color: m.role==='user' ? 'var(--stone-900)' : 'var(--stone-700)' }}>{m.content}</p>
+                  </div>
+                </div>
+              ))}
+              {loading && <div className="flex justify-start"><div className="rounded-lg px-4 py-3 shimmer" style={{ width:180, height:40, borderLeft:'2px solid var(--agent-intake)' }} /></div>}
+              <div ref={btm} />
+            </div>
+            {msgs.length >= 3 && !showGate && (
+              <div className="flex justify-center mb-3 anim-fade">
+                <button onClick={() => setShowGate(true)} className="px-6 py-2 text-xs font-semibold rounded-lg transition-all duration-200"
+                  style={{ background:'var(--agent-intake)', color:'white' }}
+                  onMouseEnter={e => e.target.style.filter='brightness(1.15)'} onMouseLeave={e => e.target.style.filter='none'}>
+                  Aprovar Gate 1 &#8594;
+                </button>
+              </div>
+            )}
+            <div className="flex items-end rounded-lg p-2 transition-colors duration-200" style={{ background:'var(--stone-100)', border:'1px solid var(--stone-200)' }}>
+              <textarea value={input} onChange={e => setInput(e.target.value)}
+                onKeyDown={e => { if (e.key==='Enter' && !e.shiftKey) { e.preventDefault(); send(); } }}
+                placeholder="Descreva os fatos do caso..." rows={2}
+                className="flex-1 bg-transparent border-none outline-none resize-none px-2 text-sm" style={{ color:'var(--stone-900)' }} />
+              <button onClick={send} disabled={loading} className="p-2 rounded transition-opacity" style={{ color:'var(--agent-intake)', opacity: loading?0.4:1 }}>
+                <Icon name="send" className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
+          {showGate && <GateOverlay gate={1} data={[
+            { label:'Fatos extraidos', value:'6' }, { label:'Partes', value:'Joao Silva vs. Banco X' },
+            { label:'Tipo da peca', value:'Peticao Inicial' }, { label:'Area', value:'Dir. Consumidor' },
+            { label:'Teses identificadas', value:'3' },
+          ]} onApprove={async () => { await api.approveGate(casoId, 'gate1'); onGateApprove(); }} onBack={() => setShowGate(false)} />}
+        </>
+      );
+    };
+
+    /* ══════════ WORKSPACE MODE ══════════ */
+    const WorkspaceMode = ({ casoId, onFinish, feedEvents }) => {
+      const [sections, setSections] = useState(MOCK_SECTIONS);
+      const [phase, setPhase] = useState(0);
+      const [expandedTese, setExpandedTese] = useState('t1');
+      const [advRound, setAdvRound] = useState(1);
+      const [advScore, setAdvScore] = useState(35);
+      const [editSec, setEditSec] = useState(null);
+      const [showGate2, setShowGate2] = useState(false);
+
+      useEffect(() => {
+        if (phase >= 2) {
+          const t = setInterval(() => {
+            setSections(p => p.map(s => s.id==='direito' && s.content.length < 380
+              ? { ...s, content: s.content + ' independentemente de comprovacao de abalo psicologico, configurando dano in re ipsa.' }
+              : s));
+          }, 3200);
+          return () => clearInterval(t);
+        }
+      }, [phase]);
+
+      const advancePhase = () => {
+        if (phase === 0) { setShowGate2(true); return; }
+        if (phase < 3) setPhase(phase + 1);
+        else onFinish();
+      };
+      const doRound = async () => {
+        await api.runCritique(casoId);
+        setAdvRound(r => r + 1);
+        setAdvScore(s => Math.max(6, s - 14));
+      };
+
+      const phaseAgentMap = { 0:'pesquisador', 1:'pesquisador', 2:'redator', 3:'contraparte', 4:'auditor' };
+      const phaseCards = {
+        0: MOCK_TESES.map(t => ({ title:t.title, sub:`${t.docsCount} docs | ${t.confidence}`, status:'Concluido', color:'var(--agent-pesquisador)',
+          expand:() => setExpandedTese(expandedTese===t.id?null:t.id), expanded:expandedTese===t.id, tese:t })),
+        1: [],
+        2: sections.map(s => ({ title:s.title, sub:s.content.slice(0,80)+'...', status:s.status==='streaming'?'Gerando...':s.status==='done'?'Pronto':'Pendente',
+          color:'var(--agent-redator)', onClick:() => setEditSec(s) })),
+        3: MOCK_CRITICAS.map(c => ({ title:c.desc.slice(0,55)+'...', sub:c.argumento.slice(0,65), status:c.gravidade==='alta'?'Alta':'Media',
+          color:'var(--agent-contraparte)' })),
+        4: [],
+      };
+
+      return (
+        <div className="flex h-full w-full">
+          <div className="flex flex-1 min-w-0">
+            {PHASES.map((ph, i) => {
+              const active = i === phase + 1;
+              const past = i <= phase;
+              const cards = phaseCards[i] || [];
+              return (
+                <div key={ph.id} className="flex-1 flex flex-col min-w-0 transition-all duration-300"
+                  style={{ borderRight:'1px solid var(--stone-200)', opacity: !past && !active ? 0.2 : 1 }}>
+                  {/* Column header */}
+                  <div className="p-3 shrink-0" style={{ borderBottom:'1px solid var(--stone-200)', background:'var(--stone-100)' }}>
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center space-x-2">
+                        <span className="font-mono font-bold" style={{ fontSize:10, color:ph.color }}>{ph.num}</span>
+                        <span className="text-xs font-semibold" style={{ color: active ? ph.color : past ? 'var(--stone-700)' : 'var(--stone-500)' }}>{ph.label}</span>
+                      </div>
+                      {cards.length > 0 && <span className="font-mono" style={{ fontSize:9, color:'var(--stone-400)' }}>{cards.length}</span>}
+                    </div>
+                    {active && <div className="h-0.5 mt-2 rounded-full transition-all duration-500" style={{ background:ph.color }} />}
+                  </div>
+
+                  {/* Agent feed */}
+                  <InColumnFeed agentId={phaseAgentMap[i]} color={ph.color} events={feedEvents} active={active} />
+
+                  {/* Cards */}
+                  <div className="flex-1 p-2 overflow-y-auto space-y-2">
+                    {cards.map((c, ci) => (
+                      <div key={ci} onClick={c.onClick || c.expand || undefined}
+                        className="p-3 rounded-lg cursor-pointer transition-all duration-200"
+                        style={{ background:'var(--stone-200)', border:'1px solid var(--stone-300)', borderLeft:`3px solid ${c.color}` }}
+                        onMouseEnter={e => e.currentTarget.style.transform='translateY(-1px)'} onMouseLeave={e => e.currentTarget.style.transform='none'}>
+                        <h4 className="text-xs font-semibold mb-1" style={{ color:'var(--stone-900)' }}>{c.title}</h4>
+                        <p className="leading-relaxed line-clamp-2" style={{ fontSize:10, color:'var(--stone-500)' }}>{c.sub}</p>
+                        {c.status && <div className="flex items-center mt-1.5 space-x-1">
+                          <div className="w-1.5 h-1.5 rounded-full" style={{ background:c.color, animation:'pulse-dot 1.4s ease-in-out infinite' }} />
+                          <span className="font-mono" style={{ fontSize:9, color:c.color }}>{c.status}</span>
+                        </div>}
+                        {c.expanded && c.tese && (
+                          <div className="mt-2.5 pt-2 space-y-1.5" style={{ borderTop:'1px solid var(--stone-300)' }}>
+                            {c.tese.docs.map(d => (
+                              <div key={d.id} className="p-2 rounded" style={{ background:'var(--stone-100)', border:'1px solid var(--stone-200)' }}>
+                                <span className="font-mono font-medium" style={{ fontSize:9, color:'var(--agent-pesquisador)' }}>{d.process} · {d.court}</span>
+                                <p className="font-cite italic mt-0.5" style={{ fontSize:10, color:'var(--stone-500)' }}>{d.summary}</p>
+                              </div>
+                            ))}
+                            <div className="font-mono pt-1" style={{ fontSize:8, color:'var(--stone-400)' }}>
+                              Queries: {c.tese.queries.join(' | ')}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                    {/* Adversarial controls */}
+                    {i === 3 && phase >= 2 && (
+                      <div className="mt-1 p-3 rounded-lg" style={{ background:'var(--stone-100)', border:`1px dashed var(--agent-contraparte)55` }}>
+                        <div className="flex justify-between items-center mb-2.5">
+                          <span className="font-mono font-bold" style={{ fontSize:10, color:'var(--agent-contraparte)' }}>Rodada {advRound}</span>
+                          <span className="font-mono font-medium" style={{ fontSize:10, color: advScore > 25 ? 'var(--agent-contraparte)' : 'var(--agent-auditor)' }}>Score: {advScore}/100</span>
+                        </div>
+                        <div className="w-full h-1.5 rounded-full mb-3" style={{ background:'var(--stone-200)' }}>
+                          <div className="h-full rounded-full transition-all duration-700" style={{ width:`${advScore}%`, background: advScore > 25 ? 'var(--agent-contraparte)' : 'var(--agent-auditor)' }} />
+                        </div>
+                        <div className="flex space-x-2">
+                          <button onClick={doRound} className="flex-1 py-1.5 font-semibold rounded transition-all duration-200"
+                            style={{ fontSize:10, border:'1px solid var(--agent-contraparte)55', color:'var(--agent-contraparte)' }}
+                            onMouseEnter={e => e.target.style.background='var(--agent-contraparte)11'} onMouseLeave={e => e.target.style.background='transparent'}>+ Rodada</button>
+                          <button onClick={onFinish} className="flex-1 py-1.5 font-semibold rounded transition-all duration-200"
+                            style={{ fontSize:10, background:'var(--agent-auditor)', color:'white' }}>Finalizar</button>
+                        </div>
+                      </div>
+                    )}
+                    {cards.length === 0 && i > phase + 1 && (
+                      <div className="flex items-center justify-center h-16 font-mono" style={{ fontSize:10, color:'var(--stone-400)' }}>Aguardando...</div>
+                    )}
+                  </div>
+                  {active && (
+                    <div className="p-2" style={{ borderTop:'1px solid var(--stone-200)' }}>
+                      <button onClick={advancePhase} className="w-full py-2 font-semibold rounded-lg flex items-center justify-center transition-all duration-200"
+                        style={{ fontSize:10, background:ph.color, color:'white' }}
+                        onMouseEnter={e => e.target.style.filter='brightness(1.12)'} onMouseLeave={e => e.target.style.filter='none'}>
+                        Avancar <Icon name="arrow-right" className="w-3 h-3 ml-1" />
+                      </button>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+
+          {/* Editor modal */}
+          {editSec && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center anim-fade" style={{ background:'rgba(0,0,0,0.5)', backdropFilter:'blur(6px)' }}>
+              <div className="w-full max-w-2xl max-h-[80vh] flex flex-col rounded-xl anim-slide" style={{ background:'var(--stone-100)', border:'1px solid var(--stone-300)', boxShadow:'0 24px 48px rgba(0,0,0,0.3)' }}>
+                <div className="flex items-center justify-between p-4" style={{ borderBottom:'1px solid var(--stone-200)' }}>
+                  <h3 className="font-serif text-lg font-bold" style={{ color:'var(--stone-900)' }}>{editSec.title}</h3>
+                  <div className="flex items-center space-x-2">
+                    <button onClick={() => setEditSec(null)} className="px-4 py-1.5 text-xs font-semibold rounded-lg transition-all duration-200"
+                      style={{ background:'var(--accent)', color:'var(--stone-50)' }}>Salvar</button>
+                    <button onClick={() => setEditSec(null)} style={{ color:'var(--stone-400)' }}><Icon name="x" className="w-4 h-4" /></button>
+                  </div>
+                </div>
+                <textarea className="flex-1 p-5 bg-transparent border-none outline-none resize-none text-sm leading-relaxed"
+                  style={{ color:'var(--stone-800)' }} defaultValue={editSec.content} />
+              </div>
+            </div>
+          )}
+          {showGate2 && <GateOverlay gate={2} data={[
+            { label:'Teses decompostas', value:'3' }, { label:'Docs favoraveis', value:'38' },
+            { label:'Docs contrarios', value:'3' }, { label:'Legislacao', value:'4 artigos' },
+          ]} onApprove={async () => { await api.approveGate(casoId, 'gate2'); setShowGate2(false); setPhase(1); }} onBack={() => setShowGate2(false)} />}
+        </div>
+      );
+    };
+
+    /* ══════════ DELIVERY MODE ══════════ */
+    const DeliveryMode = ({ casoId }) => {
+      const checks = [
+        { l:'Citacoes verificadas',   v:'7/7',                          c:'var(--agent-auditor)' },
+        { l:'Adversarial',            v:'2 rodadas, score 8/100',       c:'var(--agent-contraparte)' },
+        { l:'Formatacao',             v:'ABNT/CNJ Conforme',            c:'var(--stone-700)' },
+        { l:'Custo total',            v:'R$ 4.25',                      c:'var(--accent)' },
+      ];
+      return (
+        <div className="flex items-center justify-center h-full p-8 anim-fade">
+          <div className="max-w-md w-full rounded-xl p-8 text-center space-y-5 anim-slide" style={{ background:'var(--stone-100)', border:'1px solid var(--stone-300)', boxShadow:'0 16px 40px rgba(0,0,0,0.15)' }}>
+            <div className="w-16 h-16 rounded-full mx-auto flex items-center justify-center" style={{ background:'var(--agent-auditor)18', border:'2px solid var(--agent-auditor)' }}>
+              <Icon name="check-circle" className="w-8 h-8" style={{ color:'var(--agent-auditor)' }} />
+            </div>
+            <div>
+              <h2 className="font-serif text-2xl font-bold" style={{ color:'var(--stone-900)' }}>Pipeline Concluido</h2>
+              <p className="font-cite italic text-sm mt-1" style={{ color:'var(--stone-500)' }}>Verificacao completa. Documento pronto para protocolo.</p>
+            </div>
+            <div className="text-left font-mono space-y-0.5 p-4 rounded-lg" style={{ fontSize:10, background:'var(--stone-50)', border:'1px solid var(--stone-200)' }}>
+              {checks.map((x, i) => (
+                <div key={i} className="flex justify-between py-2" style={{ borderBottom: i<checks.length-1 ? '1px solid var(--stone-200)' : 'none' }}>
+                  <span style={{ color:'var(--stone-500)' }}>{x.l}</span>
+                  <span className="font-medium" style={{ color:x.c }}>{x.v}</span>
+                </div>
+              ))}
+            </div>
+            <div className="space-y-2 pt-2">
+              <button className="w-full py-2.5 text-xs font-semibold rounded-lg flex items-center justify-center transition-all duration-200"
+                style={{ background:'var(--agent-auditor)', color:'white' }}
+                onMouseEnter={e => e.target.style.filter='brightness(1.15)'} onMouseLeave={e => e.target.style.filter='none'}>
+                <Icon name="download" className="w-4 h-4 mr-2" /> Baixar Peticao (.docx)
+              </button>
+              <button className="w-full py-2.5 text-xs font-medium rounded-lg flex items-center justify-center transition-colors duration-200"
+                style={{ border:'1px solid var(--stone-300)', color:'var(--stone-500)' }}>
+                <Icon name="file-text" className="w-4 h-4 mr-2" /> Trilha de Auditoria (.json)
+              </button>
+            </div>
+          </div>
+        </div>
+      );
+    };
+
+    /* ══════════ MAIN APP ══════════ */
+    function App() {
+      const [theme, setTheme] = useState('dark');
+      const [mode, setMode] = useState(-1); // -1=welcome, 0=intake, 1=workspace, 2=delivery
+      const [casoId, setCasoId] = useState('');
+      const [tipoPeca, setTipoPeca] = useState('peticao_inicial');
+      const [cost, setCost] = useState(0);
+      const [feedEvents, setFeedEvents] = useState([]);
+      const [activeAgents, setActiveAgents] = useState([]);
+      const [completedAgents, setCompletedAgents] = useState([]);
+      const [agentDetail, setAgentDetail] = useState(null); // which agent's output to view
+
+      const toggleTheme = () => {
+        const next = theme === 'dark' ? 'light' : 'dark';
+        setTheme(next);
+        document.documentElement.setAttribute('data-theme', next);
+      };
+
+      const startCase = async (tipo) => {
+        const id = `caso_${Date.now()}`;
+        setTipoPeca(tipo);
+        setCasoId(id);
+        await api.createCase(id, tipo, '');
+        setMode(0);
+        setCost(0.45);
+      };
+
+      const goWorkspace = () => {
+        setMode(1);
+        setCost(2.15);
+        setFeedEvents([]);
+        setCompletedAgents(['intake']);
+      };
+
+      /* Simulate feed when in workspace */
+      useEffect(() => {
+        if (mode === 1) {
+          const timers = FEED_SCRIPT.map(ev =>
+            setTimeout(() => {
+              setFeedEvents(p => [...p, ev]);
+              setActiveAgents([ev.agent]);
+              if (ev.type === 'done') setCompletedAgents(p => p.includes(ev.agent) ? p : [...p, ev.agent]);
+            }, ev.t)
+          );
+          const ct = setInterval(() => setCost(c => c + 0.02), 4000);
+          return () => { timers.forEach(clearTimeout); clearInterval(ct); };
+        }
+      }, [mode]);
+
+      /* Poll backend events when pipeline is running */
+      useEffect(() => {
+        if (mode !== 1 || !casoId) return;
+        const iv = setInterval(async () => {
+          const evts = await api.getEvents(casoId);
+          if (evts && Array.isArray(evts) && evts.length) {
+            setFeedEvents(evts);
+          }
+        }, 3000);
+        return () => clearInterval(iv);
+      }, [mode, casoId]);
+
+      return (
+        <div className="flex h-screen w-full overflow-hidden" style={{ background:'var(--stone-50)', color:'var(--stone-900)' }}>
+          {/* ── LEFT RAIL ── */}
+          <div className="w-14 h-full flex flex-col items-center py-5 space-y-5 shrink-0"
+            style={{ background:'var(--stone-100)', borderRight:'1px solid var(--stone-200)' }}>
+            <div className="w-8 h-8 rounded flex items-center justify-center font-serif font-bold text-sm mb-2"
+              style={{ background: theme==='dark'?'var(--stone-900)':'var(--accent)', color:'var(--stone-50)' }}>R</div>
+            {['search','clock','bookmark'].map(ic =>
+              <button key={ic} className="p-1 rounded transition-colors duration-200" style={{ color:'var(--stone-400)' }}
+                onMouseEnter={e => e.target.style.color='var(--stone-700)'} onMouseLeave={e => e.target.style.color='var(--stone-400)'}>
+                <Icon name={ic} className="w-[18px] h-[18px]" />
+              </button>
+            )}
+            <div className="w-6 h-px" style={{ background:'var(--stone-300)' }} />
+            <div className="relative flex items-center justify-center w-full">
+              <div className="absolute left-0 w-1 h-7 rounded-r" style={{ background:'var(--accent)' }} />
+              <Icon name="briefcase" className="w-[18px] h-[18px]" style={{ color:'var(--accent)' }} />
+            </div>
+            <button className="p-1 rounded transition-colors duration-200" style={{ color:'var(--stone-400)' }}>
+              <Icon name="folder" className="w-[18px] h-[18px]" />
+            </button>
+            <div className="flex-1" />
+            <button onClick={toggleTheme} className="p-1 rounded transition-colors duration-200" style={{ color:'var(--stone-400)' }}>
+              <Icon name={theme==='dark'?'sun':'moon'} className="w-[18px] h-[18px]" />
+            </button>
+            <button className="p-1 rounded" style={{ color:'var(--stone-400)' }}>
+              <Icon name="settings" className="w-[18px] h-[18px]" />
+            </button>
+          </div>
+
+          {/* ── MAIN ── */}
+          <div className="flex-1 flex flex-col h-full min-w-0">
+            {/* Gold rule */}
+            <div className="gold-rule" />
+
+            {/* Top bar */}
+            <div className="h-14 flex items-center justify-between px-5 shrink-0" style={{ borderBottom:'1px solid var(--stone-200)', background:'var(--stone-100)' }}>
+              <div className="flex items-center space-x-4">
+                <h1 className="font-serif text-lg font-bold tracking-wide" style={{ color:'var(--stone-900)' }}>
+                  Ratio <span style={{ color:'var(--accent)' }}>Escritorio</span>
+                </h1>
+                {mode >= 0 && <>
+                  <div className="h-4 w-px" style={{ background:'var(--stone-300)' }} />
+                  <AgentAvatars activeAgents={activeAgents} completedAgents={completedAgents} onClickAgent={setAgentDetail} />
+                </>}
+              </div>
+              <div className="flex items-center space-x-3">
+                {mode >= 0 && <BurnMeter cost={cost} />}
+              </div>
+            </div>
+
+            {/* Content */}
+            <div className="flex-1 overflow-hidden">
+              {mode === -1 && (
+                <div className="flex items-center justify-center h-full anim-fade">
+                  <div className="max-w-lg w-full text-center space-y-8 px-6">
+                    <div>
+                      <div className="w-16 h-16 rounded-xl mx-auto flex items-center justify-center mb-5"
+                        style={{ background:'var(--accent-dim)', border:'1px solid var(--accent)33' }}>
+                        <Icon name="briefcase" className="w-7 h-7" style={{ color:'var(--accent)' }} />
+                      </div>
+                      <h2 className="font-serif text-3xl font-bold" style={{ color:'var(--stone-900)' }}>Ratio Escritorio</h2>
+                      <p className="mt-2 text-sm" style={{ color:'var(--stone-500)', maxWidth:380, margin:'8px auto 0' }}>
+                        Pipeline multi-agente para redacao de pecas juridicas com pesquisa automatizada e revisao adversarial.
+                      </p>
+                    </div>
+                    <div className="flex justify-center space-x-4">
+                      <button onClick={() => startCase('peticao_inicial')}
+                        className="px-6 py-3 rounded-lg font-semibold text-sm transition-all duration-200"
+                        style={{ background:'var(--accent)', color:'var(--stone-50)' }}
+                        onMouseEnter={e => e.target.style.filter='brightness(1.12)'} onMouseLeave={e => e.target.style.filter='none'}>
+                        <Icon name="file-plus" className="w-4 h-4 inline mr-2" style={{ verticalAlign:'-2px' }} />
+                        Nova Peticao Inicial
+                      </button>
+                      <button onClick={() => startCase('contestacao')}
+                        className="px-6 py-3 rounded-lg font-semibold text-sm transition-all duration-200"
+                        style={{ border:'1px solid var(--stone-300)', color:'var(--stone-700)' }}
+                        onMouseEnter={e => e.target.style.borderColor='var(--accent)'} onMouseLeave={e => e.target.style.borderColor='var(--stone-300)'}>
+                        <Icon name="shield" className="w-4 h-4 inline mr-2" style={{ verticalAlign:'-2px' }} />
+                        Nova Contestacao
+                      </button>
+                    </div>
+                    <div className="pt-4">
+                      <div className="flex items-center justify-center space-x-6 font-mono" style={{ fontSize:10, color:'var(--stone-400)' }}>
+                        {AGENTS.map(a => (
+                          <div key={a.id} className="flex items-center space-x-1.5">
+                            <div className="w-2 h-2 rounded-full" style={{ background:a.color }} />
+                            <span>{a.name}</span>
+                            {!a.llm && <span style={{ fontSize:7, color:'var(--stone-500)', border:'1px solid var(--stone-300)', borderRadius:3, padding:'0 3px' }}>codigo</span>}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+              {mode === 0 && <IntakeMode casoId={casoId} onGateApprove={goWorkspace} />}
+              {mode === 1 && <WorkspaceMode casoId={casoId} onFinish={() => setMode(2)} feedEvents={feedEvents} />}
+              {mode === 2 && <DeliveryMode casoId={casoId} />}
+            </div>
+          </div>
+          {agentDetail && <AgentDetailModal agentId={agentDetail} events={feedEvents} onClose={() => setAgentDetail(null)} />}
+        </div>
+      );
+    }
+
+    ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+  </script>
+</body>
+</html>
