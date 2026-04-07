@@ -29,7 +29,7 @@ from typing import Any, Callable, Literal, Optional
 
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import FileResponse, StreamingResponse
 import httpx
 try:
     import lancedb
@@ -347,6 +347,26 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+# ── Escritorio (multi-agent) ──
+_ESCRITORIO_LOGGER = logging.getLogger("ratio.escritorio")
+try:
+    from backend.escritorio.api import build_escritorio_router
+    app.include_router(build_escritorio_router())
+    _ESCRITORIO_LOGGER.info("Escritorio router registered at /api/escritorio")
+except ImportError as exc:
+    _ESCRITORIO_LOGGER.warning("Escritorio router not loaded: %s", exc)
+
+_ESCRITORIO_HTML = _resolve_project_root() / "frontend" / "Escritorio" / "escritorio.html"
+_ESCRITORIO_HTML_INTERNAL = _resolve_project_root() / "_internal" / "frontend" / "Escritorio" / "escritorio.html"
+
+@app.get("/escritorio")
+def serve_escritorio():
+    for p in (_ESCRITORIO_HTML, _ESCRITORIO_HTML_INTERNAL):
+        if p.is_file():
+            return FileResponse(str(p), media_type="text/html")
+    raise HTTPException(status_code=404, detail="escritorio.html not found")
 
 
 RATE_LIMIT_QUERY_PER_MIN = max(0, int(os.getenv("RATE_LIMIT_QUERY_PER_MIN", "60")))

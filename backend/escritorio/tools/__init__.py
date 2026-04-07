@@ -1,0 +1,1 @@
+"""Tools do Ratio Escritorio."""
