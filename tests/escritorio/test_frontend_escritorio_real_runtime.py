@@ -18,6 +18,6 @@ def test_escritorio_frontend_no_longer_contains_mock_runtime_data():
 def test_escritorio_frontend_uses_named_confirmations_instead_of_gate_labels():
     html = _read("frontend/Escritorio/escritorio.html")
 
-    assert "Confirmacao da Triagem" in html
-    assert "Confirmacao da Pesquisa" in html
+    assert "Confirmação da Triagem" in html
+    assert "Confirmação da Pesquisa" in html
     assert "Gate {gate}" not in html

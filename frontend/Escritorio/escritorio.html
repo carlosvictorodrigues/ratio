@@ -3,7 +3,10 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Ratio / Escritorio</title>
+  <title>Ratio / Escritório</title>
+  <link rel="icon" type="image/x-icon" href="/escritorio/assets/favicon.ico" />
+  <link rel="icon" type="image/png" sizes="32x32" href="/escritorio/assets/favicon-32x32.png" />
+  <link rel="icon" type="image/png" sizes="48x48" href="/escritorio/assets/favicon-48x48.png" />
   <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
   <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
@@ -91,7 +94,7 @@
 
     /* ══════════ AGENTS & PHASES ══════════ */
     const AGENTS = [
-      { id:'intake',       name:'Clara',      role:'Analista de Triagem',  color:'var(--agent-intake)',      icon:'message-circle', llm:true },
+      { id:'intake',       name:'Clara',      role:'Analista de Triagem (IA)',  color:'var(--agent-intake)',      icon:'message-circle', llm:true },
       { id:'pesquisador',  name:'Theo',       role:'Pesquisador Juridico', color:'var(--agent-pesquisador)', icon:'search',         llm:true },
       { id:'redator',      name:'Helena',     role:'Redatora de Pecas',    color:'var(--agent-redator)',     icon:'pen-tool',       llm:true },
       { id:'contraparte',  name:'Marco',      role:'Adv. Parte Adversa',  color:'var(--agent-contraparte)', icon:'shield-alert',   llm:true },
@@ -101,8 +104,8 @@
     const PHASES = [
       { id:'intake',      label:'Intake',      num:'01', agent:'intake',      color:'var(--agent-intake)' },
       { id:'research',    label:'Pesquisa',    num:'02', agent:'pesquisador', color:'var(--agent-pesquisador)' },
-      { id:'drafting',    label:'Redacao',     num:'03', agent:'redator',     color:'var(--agent-redator)' },
-      { id:'adversarial', label:'Revisao',     num:'04', agent:'contraparte', color:'var(--agent-contraparte)' },
+      { id:'drafting',    label:'Redação',     num:'03', agent:'redator',     color:'var(--agent-redator)' },
+      { id:'adversarial', label:'Revisão',     num:'04', agent:'contraparte', color:'var(--agent-contraparte)' },
       { id:'delivery',    label:'Entrega',     num:'05', agent:'auditor',     color:'var(--agent-auditor)' },
     ];
 
@@ -189,13 +192,13 @@
         if (!state) return null;
         switch (agentId) {
           case 'intake': return {
-            title: 'Dossie de Triagem',
+            title: 'Dossiê de Triagem',
             items: [
-              { label: 'Fatos estruturados', value: `${(state.fatos_estruturados || []).length}` },
-              { label: 'Provas disponiveis', value: `${(state.provas_disponiveis || []).length}` },
-              { label: 'Pontos de atencao', value: `${(state.pontos_atencao || []).length}` },
-              { label: 'Tipo', value: state.tipo_peca === 'peticao_inicial' ? 'Peticao Inicial' : 'Contestacao' },
-              { label: 'Area', value: state.area_direito || '(nao definida)' },
+              { label: 'Fatos Estruturados', value: `${(state.fatos_estruturados || []).length}` },
+              { label: 'Provas Disponíveis', value: `${(state.provas_disponiveis || []).length}` },
+              { label: 'Pontos de Atenção', value: `${(state.pontos_atencao || []).length}` },
+              { label: 'Tipo', value: state.tipo_peca === 'peticao_inicial' ? 'Petição Inicial' : 'Contestação' },
+              { label: 'Area', value: state.area_direito || '(não definida)' },
             ],
             detail: (state.fatos_estruturados || []).map((f, i) => `(${i+1}) ${f}`).join('\n') || null,
           };
@@ -219,7 +222,7 @@
           case 'contraparte': {
             const crit = state.critica_atual;
             return {
-              title: 'Analise Adversarial',
+              title: 'Análise Adversarial',
               items: [
                 { label: 'Rodadas', value: `${state.rodada_atual || 0}` },
                 { label: 'Score de risco', value: crit ? `${crit.score_de_risco}/100` : '(sem critica)' },
@@ -387,7 +390,7 @@
         if (state && state.intake_history && state.intake_history.length > 0) {
           setMsgs(state.intake_history);
         } else if (msgs.length === 0) {
-          setMsgs([{ role:'assistant', content:'Ola. Descreva os fatos do caso, as partes envolvidas e os documentos disponiveis. Quanto mais detalhado, melhor o resultado.\n\nQuando terminar, clique em "Analisar com Clara" para que eu estruture o dossie.' }]);
+          setMsgs([{ role:'assistant', content:'Olá! Descreva os fatos do caso, as partes envolvidas e os documentos disponíveis. Quanto mais detalhado, melhor o resultado.\n\nQuando terminar, clique em "Analisar com Clara" para que eu estruture o dossiê.' }]);
         }
       }, [state?.intake_history?.length]);
 
@@ -411,14 +414,14 @@
 
       const handleAnalyze = async () => {
         setAnalyzing(true);
-        setMsgs(p => [...p, { role:'assistant', content:'Analisando os fatos com a Clara... Aguarde.' }]);
+        setMsgs(p => [...p, { role:'assistant', content:'Analisando os fatos com a Clara… Aguarde.' }]);
         try {
           const resp = await api.runPipeline(casoId);
           if (resp && resp.state) {
             onStateUpdate(resp.state);
           }
         } catch (err) {
-          setMsgs(p => [...p, { role:'assistant', content:'Erro ao analisar: ' + (err.message || 'falha na conexao') }]);
+          setMsgs(p => [...p, { role:'assistant', content:'Erro ao analisar: ' + (err.message || 'falha na conexão') }]);
         }
         setAnalyzing(false);
       };
@@ -443,11 +446,11 @@
       const hasMessages = state?.intake_history?.length > 0;
 
       const gateData = state ? [
-        { label: 'Fatos estruturados', value: `${fatos.length}` },
-        { label: 'Provas disponiveis', value: `${provas.length}` },
-        { label: 'Pontos de atencao', value: `${pontos.length}` },
-        { label: 'Tipo da peca', value: state.tipo_peca === 'peticao_inicial' ? 'Peticao Inicial' : 'Contestacao' },
-        { label: 'Area', value: state.area_direito || '(nao definida)' },
+        { label: 'Fatos Estruturados', value: `${fatos.length}` },
+        { label: 'Provas Disponíveis', value: `${provas.length}` },
+        { label: 'Pontos de Atenção', value: `${pontos.length}` },
+        { label: 'Tipo da Peça', value: state.tipo_peca === 'peticao_inicial' ? 'Petição Inicial' : 'Contestação' },
+        { label: 'Area', value: state.area_direito || '(não definida)' },
       ] : [];
 
       return (
@@ -455,7 +458,7 @@
           <div className="flex flex-col h-full max-w-2xl mx-auto w-full pt-8 pb-4 px-5">
             <div className="text-center mb-6 anim-fade">
               <h2 className="font-serif text-2xl font-bold" style={{ color:'var(--stone-900)' }}>Triagem do Caso</h2>
-              <p className="mt-1" style={{ fontSize:12, color:'var(--stone-500)' }}>Descreva os fatos e clique em "Analisar com Clara" para estruturar o dossie</p>
+              <p className="mt-1" style={{ fontSize:12, color:'var(--stone-500)' }}>Descreva os fatos e clique em "Analisar com Clara" para estruturar o dossiê</p>
             </div>
             <div className="flex-1 overflow-y-auto space-y-3 mb-4 pr-1">
               {msgs.map((m, i) => (
@@ -474,7 +477,7 @@
               {/* Clara's analysis results */}
               {hasAnalysis && (
                 <div className="rounded-lg p-4 anim-fade" style={{ background:'var(--stone-50)', border:'1px solid var(--stone-200)', borderLeft:'3px solid var(--agent-intake)' }}>
-                  <p className="text-xs font-semibold mb-3" style={{ color:'var(--agent-intake)' }}>Analise da Clara</p>
+                  <p className="text-xs font-semibold mb-3" style={{ color:'var(--agent-intake)' }}>Análise da Clara</p>
                   {fatos.length > 0 && (
                     <div className="mb-3">
                       <p className="text-xs font-semibold mb-1" style={{ color:'var(--stone-600)' }}>Fatos Estruturados ({fatos.length})</p>
@@ -537,8 +540,8 @@
           </div>
           {showGate && <GateOverlay
             gateName="gate1"
-            gateLabel="Confirmacao da Triagem"
-            gateDesc="Os fatos e o dossie estruturado pela Clara estao completos?"
+            gateLabel="Confirmação da Triagem"
+            gateDesc="Os fatos e o dossiê estruturado pela Clara estão completos?"
             data={gateData}
             onApprove={handleGateApprove}
             onReject={handleGateReject}
@@ -639,7 +642,7 @@
             }));
           case 4: /* Delivery */
             return verificacoes.map(v => ({
-              title: v.item || v.check || 'Verificacao',
+              title: v.item || v.check || 'Verificação',
               sub: v.result || v.status || 'ok',
               color: 'var(--agent-auditor)',
             }));
@@ -796,7 +799,7 @@
 
           {showGate2 && <GateOverlay
             gateName="gate2"
-            gateLabel="Confirmacao da Pesquisa"
+            gateLabel="Confirmação da Pesquisa"
             gateDesc="Base de pesquisa suficiente para redigir?"
             data={gate2Data}
             onApprove={handleGate2Approve}
@@ -832,7 +835,7 @@
             <div>
               <h2 className="font-serif text-2xl font-bold" style={{ color:'var(--stone-900)' }}>Pipeline Concluido</h2>
               <p className="font-cite italic text-sm mt-1" style={{ color:'var(--stone-500)' }}>
-                {state?.output_docx_path ? 'Documento pronto para protocolo.' : 'Verificacao em andamento...'}
+                {state?.output_docx_path ? 'Documento pronto para protocolo!' : 'Verificação em andamento...'}
               </p>
             </div>
             <div className="text-left font-mono space-y-0.5 p-4 rounded-lg" style={{ fontSize:10, background:'var(--stone-50)', border:'1px solid var(--stone-200)' }}>
@@ -1022,7 +1025,7 @@
                       </div>
                       <h2 style={{ margin:0, fontSize:22, fontWeight:600, letterSpacing:'0.08em', textTransform:'uppercase', color:'var(--stone-900)', fontFamily:'"Inter",sans-serif' }}>RATIO <span style={{ fontWeight:500, color:'var(--stone-400)', letterSpacing:'0.03em' }}>/ ESCRITORIO</span></h2>
                       <p className="mt-2 text-sm" style={{ color:'var(--stone-500)', maxWidth:380, margin:'8px auto 0' }}>
-                        Pipeline multi-agente para redacao de pecas juridicas com pesquisa automatizada e revisao adversarial.
+                        Pipeline multi-agente para redação de peças jurídicas com pesquisa automatizada e revisão adversarial.
                       </p>
                     </div>
                     <div className="flex justify-center space-x-4">
@@ -1031,14 +1034,14 @@
                         style={{ background:'var(--accent)', color:'var(--stone-50)' }}
                         onMouseEnter={e => e.target.style.filter='brightness(1.12)'} onMouseLeave={e => e.target.style.filter='none'}>
                         <Icon name="file-plus" className="w-4 h-4 inline mr-2" style={{ verticalAlign:'-2px' }} />
-                        Nova Peticao Inicial
+                        Nova Petição Inicial
                       </button>
                       <button onClick={() => startCase('contestacao')}
                         className="px-6 py-3 rounded-lg font-semibold text-sm transition-all duration-200"
                         style={{ border:'1px solid var(--stone-300)', color:'var(--stone-700)' }}
                         onMouseEnter={e => e.target.style.borderColor='var(--accent)'} onMouseLeave={e => e.target.style.borderColor='var(--stone-300)'}>
                         <Icon name="shield" className="w-4 h-4 inline mr-2" style={{ verticalAlign:'-2px' }} />
-                        Nova Contestacao
+                        Nova Contestação
                       </button>
                     </div>
                     <div className="pt-4">
@@ -1047,7 +1050,7 @@
                           <div key={a.id} className="flex items-center space-x-1.5">
                             <div className="w-2 h-2 rounded-full" style={{ background:a.color }} />
                             <span>{a.name}</span>
-                            {!a.llm && <span style={{ fontSize:7, color:'var(--stone-500)', border:'1px solid var(--stone-300)', borderRadius:3, padding:'0 3px' }}>codigo</span>}
+                            {!a.llm && <span style={{ fontSize:7, color:'var(--stone-500)', border:'1px solid var(--stone-300)', borderRadius:3, padding:'0 3px' }}>código</span>}
                           </div>
                         ))}
                       </div>
