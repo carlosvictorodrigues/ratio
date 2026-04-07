@@ -49,9 +49,10 @@ async def test_generate_sections_with_gemini_defaults_to_reasoning_model():
     captured = {}
 
     class _FakeModels:
-        def generate_content(self, *, model, contents):
+        def generate_content(self, *, model, contents, config=None):
             captured["model"] = model
             captured["contents"] = contents
+            captured["config"] = config
             return type(
                 "Resp",
                 (),
@@ -71,6 +72,7 @@ async def test_generate_sections_with_gemini_defaults_to_reasoning_model():
 
     assert captured["model"] == "gemini-3.1-pro-preview"
     assert sections["dos_fatos"] == "Texto dos fatos."
+    assert getattr(getattr(captured["config"], "http_options", None), "timeout", None) == 45000
 
 
 def test_build_revision_prompt_mentions_preserve_human_anchors_and_edited_sections():
@@ -98,9 +100,10 @@ async def test_generate_revision_with_gemini_uses_reasoning_model():
     captured = {}
 
     class _FakeModels:
-        def generate_content(self, *, model, contents):
+        def generate_content(self, *, model, contents, config=None):
             captured["model"] = model
             captured["contents"] = contents
+            captured["config"] = config
             return type("Resp", (), {"text": '{"dos_fatos":"Texto revisado."}'})()
 
     class _FakeClient:
@@ -119,6 +122,89 @@ async def test_generate_revision_with_gemini_uses_reasoning_model():
 
     assert captured["model"] == "gemini-3.1-pro-preview"
     assert sections["dos_fatos"] == "Texto revisado."
+    assert getattr(getattr(captured["config"], "http_options", None), "timeout", None) == 45000
+
+
+def test_parse_sections_payload_strips_fences_and_trailing():
+    payload = """```json
+    {
+      "dos_fatos": "Texto dos fatos.",
+      "do_direito": "Texto do direito."
+    }
+    ```
+    Espero que ajude.
+    """
+
+    sections = parse_sections_payload(payload)
+
+    assert sections["dos_fatos"] == "Texto dos fatos."
+    assert sections["do_direito"] == "Texto do direito."
+
+
+def test_parse_sections_payload_flattens_nested_dict_values():
+    """CRITICAL: Gemini sometimes returns each section as a nested dict.
+
+    We must extract the content — never drop it or call str() naively.
+    """
+    payload = """
+    {
+      "dos_fatos": {"titulo": "Dos Fatos", "conteudo": "O autor compareceu ao exame..."},
+      "do_direito": {"titulo": "Do Direito", "texto": "Nos termos do art. 186 CC..."}
+    }
+    """
+
+    sections = parse_sections_payload(payload)
+
+    assert "O autor compareceu ao exame" in sections["dos_fatos"]
+    assert "Nos termos do art. 186 CC" in sections["do_direito"]
+
+
+def test_parse_sections_payload_flattens_list_values():
+    """Gemini may return a section as a list of paragraphs."""
+    payload = """
+    {
+      "dos_fatos": ["Primeiro paragrafo.", "Segundo paragrafo."],
+      "do_direito": "Texto simples."
+    }
+    """
+
+    sections = parse_sections_payload(payload)
+
+    assert "Primeiro paragrafo." in sections["dos_fatos"]
+    assert "Segundo paragrafo." in sections["dos_fatos"]
+    assert sections["do_direito"] == "Texto simples."
+
+
+def test_parse_sections_payload_unwraps_envelope():
+    """Gemini may wrap sections inside ``{"peca_sections": {...}}``."""
+    payload = """
+    {
+      "peca_sections": {
+        "dos_fatos": "Texto dos fatos.",
+        "do_direito": "Texto do direito."
+      }
+    }
+    """
+
+    sections = parse_sections_payload(payload)
+
+    assert sections["dos_fatos"] == "Texto dos fatos."
+    assert sections["do_direito"] == "Texto do direito."
+
+
+def test_parse_sections_payload_preserves_all_dict_fields_when_no_canonical_key():
+    """A section dict without conteudo/texto/descricao must still produce content."""
+    payload = """
+    {
+      "dos_fatos": {"fundamento": "art. 186 CC", "argumento": "nexo causal comprovado"}
+    }
+    """
+
+    sections = parse_sections_payload(payload)
+
+    # Both fields must survive in the output
+    assert "art. 186 CC" in sections["dos_fatos"]
+    assert "nexo causal comprovado" in sections["dos_fatos"]
 
 
 def test_infer_section_provenance_extracts_canonical_keys_from_section_text():

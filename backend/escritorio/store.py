@@ -283,6 +283,14 @@ class CaseIndex:
                 )
                 """
             )
+            # Lightweight migration: add `archived` column for older databases.
+            existing_cols = {
+                row[1] for row in conn.execute("PRAGMA table_info(cases_index)").fetchall()
+            }
+            if "archived" not in existing_cols:
+                conn.execute(
+                    "ALTER TABLE cases_index ADD COLUMN archived INTEGER NOT NULL DEFAULT 0"
+                )
 
     def resolve_case_dir(self, caso_id: str) -> Path:
         entry = self.get_case(caso_id)
@@ -327,7 +335,7 @@ class CaseIndex:
         with self._connect() as conn:
             row = conn.execute(
                 """
-                SELECT caso_id, tipo_peca, area_direito, status, path, created_at, updated_at
+                SELECT caso_id, tipo_peca, area_direito, status, path, created_at, updated_at, archived
                 FROM cases_index
                 WHERE caso_id = ?
                 """,
@@ -343,13 +351,14 @@ class CaseIndex:
             "path": row["path"],
             "created_at": row["created_at"],
             "updated_at": row["updated_at"],
+            "archived": bool(row["archived"]),
         }
 
     def list_cases(self) -> list[dict[str, Any]]:
         with self._connect() as conn:
             rows = conn.execute(
                 """
-                SELECT caso_id, tipo_peca, area_direito, status, path, created_at, updated_at
+                SELECT caso_id, tipo_peca, area_direito, status, path, created_at, updated_at, archived
                 FROM cases_index
                 ORDER BY updated_at DESC, caso_id ASC
                 """
@@ -363,9 +372,44 @@ class CaseIndex:
                 "path": row["path"],
                 "created_at": row["created_at"],
                 "updated_at": row["updated_at"],
+                "archived": bool(row["archived"]),
             }
             for row in rows
         ]
+
+    def set_archived(self, caso_id: str, *, archived: bool) -> bool:
+        with self._connect() as conn:
+            cur = conn.execute(
+                """
+                UPDATE cases_index
+                SET archived = ?, updated_at = CURRENT_TIMESTAMP
+                WHERE caso_id = ?
+                """,
+                (1 if archived else 0, caso_id),
+            )
+            return cur.rowcount > 0
+
+    def rename_case(self, caso_id: str, *, new_name: str) -> bool:
+        """Update the display name (area_direito) of a case. Returns False if not found."""
+        with self._connect() as conn:
+            cur = conn.execute(
+                """
+                UPDATE cases_index
+                SET area_direito = ?, updated_at = CURRENT_TIMESTAMP
+                WHERE caso_id = ?
+                """,
+                (new_name.strip(), caso_id),
+            )
+            return cur.rowcount > 0
+
+    def delete_case(self, caso_id: str) -> bool:
+        """Remove a case from the index. Returns False if not found."""
+        with self._connect() as conn:
+            cur = conn.execute(
+                "DELETE FROM cases_index WHERE caso_id = ?",
+                (caso_id,),
+            )
+            return cur.rowcount > 0
 
 
 class EscritorioStore:

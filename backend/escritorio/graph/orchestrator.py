@@ -9,6 +9,7 @@ log = logging.getLogger(__name__)
 
 
 async def run_intake_graph(state: RatioEscritorioState, store) -> RatioEscritorioState:
+    """Run intake analysis once and stop at the triage confirmation."""
     from backend.escritorio.graph.intake_graph import build_intake_graph
 
     log.info("orchestrator: running intake graph for caso=%s", state.caso_id)
@@ -39,6 +40,7 @@ async def run_drafting_graph(state: RatioEscritorioState, store) -> RatioEscrito
 
 
 async def run_adversarial_graph(state: RatioEscritorioState, store) -> RatioEscritorioState:
+    """Run one critique/verificacao/finalizacao pass after the draft exists."""
     from backend.escritorio.graph.adversarial_graph import build_adversarial_graph
 
     log.info("orchestrator: running adversarial graph for caso=%s", state.caso_id)
@@ -90,7 +92,14 @@ async def run_escritorio_pipeline(
                 {"stage": "drafting", "workflow_stage": state.workflow_stage, "status": state.status},
             )
 
-        if state.gate2_aprovado and not state.usuario_finaliza:
+        if state.gate2_aprovado and not state.peca_sections:
+            state = await _invoke_stage(run_drafting_graph_fn, state)
+            _append_event(
+                "pipeline.stage_completed",
+                {"stage": "redaction", "workflow_stage": state.workflow_stage, "status": state.status},
+            )
+
+        if state.gate2_aprovado and state.peca_sections and not state.usuario_finaliza:
             state = await _invoke_stage(run_adversarial_graph_fn, state)
             _append_event(
                 "pipeline.stage_completed",

@@ -61,10 +61,7 @@ def build_intake_graph(
     graph.add_conditional_edges(
         "gate1",
         gate1_router_fn or gate1_router,
-        {
-            "intake": "intake",
-            "drafting": END,
-        },
+        {"intake": "intake", "drafting": END},
     )
     interrupt_before = ["gate1"] if enable_interrupts else []
     return graph.compile(interrupt_before=interrupt_before)

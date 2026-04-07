@@ -360,6 +360,20 @@ except ImportError as exc:
 
 _ESCRITORIO_HTML = _resolve_project_root() / "frontend" / "Escritorio" / "escritorio.html"
 _ESCRITORIO_HTML_INTERNAL = _resolve_project_root() / "_internal" / "frontend" / "Escritorio" / "escritorio.html"
+_ESCRITORIO_ASSET_DIRS = (
+    _resolve_project_root() / "frontend" / "Escritorio",
+    _resolve_project_root() / "frontend",
+    _resolve_project_root() / "_internal" / "frontend" / "Escritorio",
+    _resolve_project_root() / "_internal" / "frontend",
+)
+_ESCRITORIO_ASSET_MIME = {
+    ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".svg": "image/svg+xml",
+    ".ico": "image/x-icon",
+    ".webp": "image/webp",
+}
 
 @app.get("/escritorio")
 def serve_escritorio():
@@ -367,6 +381,26 @@ def serve_escritorio():
         if p.is_file():
             return FileResponse(str(p), media_type="text/html")
     raise HTTPException(status_code=404, detail="escritorio.html not found")
+
+
+@app.get("/escritorio/assets/{filename:path}")
+def serve_escritorio_asset(filename: str):
+    # Whitelist by extension and reject any traversal attempt.
+    safe_name = filename.replace("\\", "/").lstrip("/")
+    if ".." in safe_name.split("/"):
+        raise HTTPException(status_code=400, detail="invalid asset path")
+    suffix = Path(safe_name).suffix.lower()
+    if suffix not in _ESCRITORIO_ASSET_MIME:
+        raise HTTPException(status_code=404, detail="asset not found")
+    for base in _ESCRITORIO_ASSET_DIRS:
+        candidate = (base / safe_name).resolve()
+        try:
+            candidate.relative_to(base.resolve())
+        except ValueError:
+            continue
+        if candidate.is_file():
+            return FileResponse(str(candidate), media_type=_ESCRITORIO_ASSET_MIME[suffix])
+    raise HTTPException(status_code=404, detail="asset not found")
 
 
 RATE_LIMIT_QUERY_PER_MIN = max(0, int(os.getenv("RATE_LIMIT_QUERY_PER_MIN", "60")))

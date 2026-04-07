@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Ratio Escritorio</title>
+  <title>Ratio / Escritorio</title>
   <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
   <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
@@ -988,12 +988,12 @@
           <div className="flex-1 flex flex-col h-full min-w-0">
             <div className="gold-rule" />
 
-            {/* Top bar */}
-            <div className="h-14 flex items-center justify-between px-5 shrink-0" style={{ borderBottom:'1px solid var(--stone-200)', background:'var(--stone-100)' }}>
-              <div className="flex items-center space-x-4">
-                <h1 className="font-serif text-lg font-bold tracking-wide" style={{ color:'var(--stone-900)' }}>
-                  Ratio <span style={{ color:'var(--accent)' }}>Escritorio</span>
-                </h1>
+            {/* Top bar — matches main app identity */}
+            <div className="h-16 flex items-center justify-between px-7 shrink-0" style={{ borderBottom:'1px solid var(--stone-200)', background: theme==='dark' ? 'rgba(20,18,16,0.85)' : 'rgba(250,250,249,0.85)', backdropFilter:'blur(6px)' }}>
+              <div className="flex items-center" style={{ gap:0 }}>
+                <span style={{ margin:0, fontSize:14, fontWeight:600, letterSpacing:'0.08em', textTransform:'uppercase', color:'var(--stone-900)', fontFamily:'"Inter",sans-serif' }}>RATIO</span>
+                <span style={{ margin:0, fontSize:14, fontWeight:500, textTransform:'uppercase', letterSpacing:'0.03em', color:'var(--stone-400)', fontFamily:'"Inter",sans-serif' }}>/ ESCRITORIO</span>
+              </div>
                 {mode >= 0 && <>
                   <div className="h-4 w-px" style={{ background:'var(--stone-300)' }} />
                   <AgentAvatars activeAgents={activeAgents} completedAgents={completedAgents} onClickAgent={setAgentDetail} />
@@ -1021,7 +1021,7 @@
                         style={{ background:'var(--accent-dim)', border:'1px solid var(--accent)33' }}>
                         <Icon name="briefcase" className="w-7 h-7" style={{ color:'var(--accent)' }} />
                       </div>
-                      <h2 className="font-serif text-3xl font-bold" style={{ color:'var(--stone-900)' }}>Ratio Escritorio</h2>
+                      <h2 style={{ margin:0, fontSize:22, fontWeight:600, letterSpacing:'0.08em', textTransform:'uppercase', color:'var(--stone-900)', fontFamily:'"Inter",sans-serif' }}>RATIO <span style={{ fontWeight:500, color:'var(--stone-400)', letterSpacing:'0.03em' }}>/ ESCRITORIO</span></h2>
                       <p className="mt-2 text-sm" style={{ color:'var(--stone-500)', maxWidth:380, margin:'8px auto 0' }}>
                         Pipeline multi-agente para redacao de pecas juridicas com pesquisa automatizada e revisao adversarial.
                       </p>

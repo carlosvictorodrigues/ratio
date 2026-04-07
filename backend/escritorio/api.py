@@ -67,6 +67,14 @@ class RevisionRequest(BaseModel):
     finalize: bool = False
 
 
+class ArchiveCaseRequest(BaseModel):
+    archived: bool = True
+
+
+class RenameCaseRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=200)
+
+
 def _load_case_or_404(index: CaseIndex, caso_id: str):
     case_summary = index.get_case(caso_id)
     state = _get_case_store(caso_id, index=index).load_latest_state()
@@ -117,6 +125,39 @@ def build_escritorio_router() -> APIRouter:
     @router.get("/cases")
     def list_cases() -> list[dict[str, Any]]:
         return _get_case_index().list_cases()
+
+    @router.post("/cases/{caso_id}/archive")
+    def archive_case(caso_id: str, payload: ArchiveCaseRequest) -> dict[str, Any]:
+        index = _get_case_index()
+        if not index.set_archived(caso_id, archived=bool(payload.archived)):
+            raise HTTPException(status_code=404, detail={"code": "case_not_found", "caso_id": caso_id})
+        entry = index.get_case(caso_id) or {}
+        return {"summary": entry}
+
+    @router.post("/cases/{caso_id}/rename")
+    def rename_case(caso_id: str, payload: RenameCaseRequest) -> dict[str, Any]:
+        index = _get_case_index()
+        if not index.rename_case(caso_id, new_name=payload.name):
+            raise HTTPException(status_code=404, detail={"code": "case_not_found", "caso_id": caso_id})
+        entry = index.get_case(caso_id) or {}
+        return {"summary": entry}
+
+    @router.delete("/cases/{caso_id}")
+    def delete_case(caso_id: str) -> dict[str, Any]:
+        index = _get_case_index()
+        entry = index.get_case(caso_id)
+        if entry is None:
+            raise HTTPException(status_code=404, detail={"code": "case_not_found", "caso_id": caso_id})
+        index.delete_case(caso_id)
+        return {"deleted": True, "caso_id": caso_id}
+
+    @router.get("/cases/{caso_id}/folder")
+    def get_case_folder(caso_id: str) -> dict[str, Any]:
+        index = _get_case_index()
+        entry = index.get_case(caso_id)
+        if entry is None:
+            raise HTTPException(status_code=404, detail={"code": "case_not_found", "caso_id": caso_id})
+        return {"path": entry.get("path", "")}
 
     @router.get("/cases/{caso_id}")
     def get_case(caso_id: str) -> dict[str, Any]:

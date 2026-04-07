@@ -1,11 +1,34 @@
 from __future__ import annotations
 
-import json
+import re
+from typing import Any
 
 import anyio
 
-from backend.escritorio.config import DEFAULT_REASONING_MODEL
+from backend.escritorio._llm_utils import (
+    coerce_to_string,
+    make_json_response_config,
+    parse_json_payload,
+)
+from backend.escritorio.config import DEFAULT_LLM_TIMEOUT_MS, DEFAULT_REASONING_MODEL
 from backend.escritorio.models import RatioEscritorioState
+
+# Allowed values for CriticaContraparte.recomendacao (Literal in models.py).
+_RECOMENDACAO_VALUES = {"aprovar", "revisar", "reestruturar"}
+_RECOMENDACAO_ALIASES = {
+    "aprovado": "aprovar",
+    "approve": "aprovar",
+    "ok": "aprovar",
+    "revise": "revisar",
+    "revisao": "revisar",
+    "reestruturacao": "reestruturar",
+    "reescrever": "reestruturar",
+    "rewrite": "reestruturar",
+}
+
+# Field names whose values are list[FalhaCritica] in the schema.
+_FALHA_LIST_FIELDS = ("falhas_processuais", "argumentos_materiais_fracos")
+_JURIS_FALTANTE_FIELD = "jurisprudencia_faltante"
 
 
 def build_contraparte_prompt(state: RatioEscritorioState) -> str:
@@ -23,10 +46,100 @@ def build_contraparte_prompt(state: RatioEscritorioState) -> str:
     )
 
 
+def _coerce_score(value: Any) -> int:
+    """Extract an integer 0-100 from whatever the model returned."""
+    if isinstance(value, bool):
+        return 0
+    if isinstance(value, (int, float)):
+        score = int(value)
+    else:
+        text = str(value or "").strip()
+        if not text:
+            return 0
+        match = re.search(r"-?\d+", text)
+        if not match:
+            return 0
+        score = int(match.group(0))
+    return max(0, min(100, score))
+
+
+def _coerce_recomendacao(value: Any) -> str:
+    text = str(value or "").strip().lower()
+    text = re.sub(r"[^a-z]", "", text)
+    if text in _RECOMENDACAO_VALUES:
+        return text
+    if text in _RECOMENDACAO_ALIASES:
+        return _RECOMENDACAO_ALIASES[text]
+    # Default to "revisar" so the pipeline keeps moving instead of crashing
+    # when the model invents a synonym.
+    return "revisar"
+
+
+def _coerce_falha_item(item: Any) -> dict[str, Any]:
+    """Normalize a falha entry into a dict accepted by FalhaCritica.
+
+    The schema accepts extra keys but requires str fields. We never drop
+    information: any unrecognized payload becomes the ``descricao`` text.
+    """
+    if isinstance(item, dict):
+        result = dict(item)
+        # Coerce known string fields so pydantic does not bail on dict values.
+        for key in (
+            "finding_id",
+            "secao_afetada",
+            "descricao",
+            "argumento_contrario",
+            "query_jurisprudencia_contraria",
+        ):
+            if key in result and not isinstance(result[key], str):
+                result[key] = coerce_to_string(result[key])
+        # Ensure descricao is non-empty: if missing, fold the rest of the dict.
+        if not str(result.get("descricao") or "").strip():
+            fallback = coerce_to_string(
+                {k: v for k, v in item.items() if k not in {"finding_id", "secao_afetada"}}
+            )
+            if fallback:
+                result["descricao"] = fallback
+        return result
+    text = coerce_to_string(item)
+    return {"descricao": text} if text else {"descricao": ""}
+
+
 def parse_critique_payload(raw_payload: str) -> dict:
-    data = json.loads(str(raw_payload or "").strip())
+    data = parse_json_payload(raw_payload, expect="object")
     if not isinstance(data, dict):
         raise ValueError("Payload de critica deve ser um objeto JSON.")
+
+    for field in _FALHA_LIST_FIELDS:
+        raw_list = data.get(field)
+        if raw_list is None:
+            data[field] = []
+            continue
+        if not isinstance(raw_list, list):
+            raw_list = [raw_list]
+        coerced = [_coerce_falha_item(item) for item in raw_list]
+        data[field] = [item for item in coerced if str(item.get("descricao") or "").strip()]
+
+    raw_juris = data.get(_JURIS_FALTANTE_FIELD)
+    if raw_juris is None:
+        data[_JURIS_FALTANTE_FIELD] = []
+    else:
+        if not isinstance(raw_juris, list):
+            raw_juris = [raw_juris]
+        coerced_juris = [coerce_to_string(item) for item in raw_juris]
+        data[_JURIS_FALTANTE_FIELD] = [s for s in coerced_juris if s]
+
+    if "score_de_risco" in data:
+        data["score_de_risco"] = _coerce_score(data["score_de_risco"])
+    else:
+        data["score_de_risco"] = 0
+
+    if "analise_contestacao" in data and not isinstance(data["analise_contestacao"], str):
+        data["analise_contestacao"] = coerce_to_string(data["analise_contestacao"])
+    if not str(data.get("analise_contestacao") or "").strip():
+        data["analise_contestacao"] = "Sem analise estruturada retornada pelo modelo."
+
+    data["recomendacao"] = _coerce_recomendacao(data.get("recomendacao"))
     return data
 
 
@@ -46,10 +159,11 @@ async def generate_critique_with_gemini(
 
             active_client = get_gemini_client()
 
-        response = active_client.models.generate_content(
-            model=configured_model,
-            contents=prompt,
-        )
+        config = make_json_response_config(timeout_ms=DEFAULT_LLM_TIMEOUT_MS)
+        kwargs = {"model": configured_model, "contents": prompt}
+        if config is not None:
+            kwargs["config"] = config
+        response = active_client.models.generate_content(**kwargs)
         text = getattr(response, "text", None)
         if not text:
             raise ValueError("Resposta vazia na geracao de critica adversarial.")

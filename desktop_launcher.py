@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import contextlib
+import io
 import os
 import socket
 import sys
@@ -19,6 +20,61 @@ FRONTEND_HOST = "127.0.0.1"
 FRONTEND_PORT = 5500
 BACKEND_URL = f"http://{BACKEND_HOST}:{BACKEND_PORT}"
 FRONTEND_URL = f"http://{FRONTEND_HOST}:{FRONTEND_PORT}"
+
+
+class _NullTextIO(io.TextIOBase):
+    def write(self, s):  # type: ignore[override]
+        return len(str(s or ""))
+
+    def flush(self):  # type: ignore[override]
+        return None
+
+    def isatty(self):  # type: ignore[override]
+        return False
+
+
+class _SafeTextIO(io.TextIOBase):
+    def __init__(self, wrapped):
+        self._wrapped = wrapped
+
+    def write(self, s):  # type: ignore[override]
+        try:
+            return self._wrapped.write(s)
+        except Exception:
+            return len(str(s or ""))
+
+    def flush(self):  # type: ignore[override]
+        try:
+            return self._wrapped.flush()
+        except Exception:
+            return None
+
+    def isatty(self):  # type: ignore[override]
+        try:
+            return bool(self._wrapped.isatty())
+        except Exception:
+            return False
+
+
+def _ensure_safe_stdio() -> None:
+    for name in ("stdout", "stderr"):
+        stream = getattr(sys, name, None)
+        if stream is None:
+            setattr(sys, name, _NullTextIO())
+            continue
+        setattr(sys, name, _SafeTextIO(stream))
+
+
+class QuietSimpleHTTPRequestHandler(SimpleHTTPRequestHandler):
+    """SimpleHTTPRequestHandler variant safe for frozen apps without stderr.
+
+    When the packaged EXE is started without a usable console, ``sys.stderr``
+    may be ``None``. The stdlib handler writes an access log for every
+    request and crashes before responding if ``stderr`` is unavailable.
+    """
+
+    def log_message(self, format: str, *args) -> None:  # noqa: A003 - stdlib signature
+        return
 
 
 def _runtime_root() -> Path:
@@ -119,7 +175,7 @@ def _wait_port(host: str, port: int, timeout_s: float) -> bool:
 
 
 def _start_frontend_server(frontend_dir: Path) -> ThreadingHTTPServer:
-    handler = partial(SimpleHTTPRequestHandler, directory=str(frontend_dir))
+    handler = partial(QuietSimpleHTTPRequestHandler, directory=str(frontend_dir))
     server = ThreadingHTTPServer((FRONTEND_HOST, FRONTEND_PORT), handler)
     worker = threading.Thread(target=server.serve_forever, daemon=True, name="ratio-frontend")
     worker.start()
@@ -163,6 +219,7 @@ def _resolve_lancedb_dir() -> Path | None:
 
 
 def main() -> int:
+    _ensure_safe_stdio()
     os.chdir(PROJECT_ROOT)
 
     frontend_dir = _resolve_frontend_dir()

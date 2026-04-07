@@ -51,6 +51,8 @@ async def test_orchestrator_runs_drafting_and_adversarial_when_gates_allow():
         tipo_peca="peticao_inicial",
         gate1_aprovado=True,
         gate2_aprovado=True,
+        status="redacao",
+        workflow_stage="redacao",
     )
     store = _FakeStore(initial)
 
@@ -80,12 +82,49 @@ async def test_orchestrator_runs_drafting_and_adversarial_when_gates_allow():
 
 
 @pytest.mark.anyio
+async def test_orchestrator_stops_at_research_confirmation_before_redaction():
+    initial = RatioEscritorioState(
+        caso_id="caso-1",
+        tipo_peca="peticao_inicial",
+        gate1_aprovado=True,
+        gate2_aprovado=False,
+        status="pesquisa",
+        workflow_stage="pesquisa",
+    )
+    store = _FakeStore(initial)
+
+    async def fake_drafting(state, store):  # noqa: ARG001
+        updated = state.model_copy(deep=True)
+        updated.status = "gate2"
+        updated.workflow_stage = "gate2"
+        return updated
+
+    adversarial_called = {"value": False}
+
+    async def fake_adversarial(state, store):  # noqa: ARG001
+        adversarial_called["value"] = True
+        return state
+
+    result = await run_escritorio_pipeline(
+        store=store,
+        run_intake_graph_fn=lambda state, store: state,
+        run_drafting_graph_fn=fake_drafting,
+        run_adversarial_graph_fn=fake_adversarial,
+    )
+
+    assert result.workflow_stage == "gate2"
+    assert adversarial_called["value"] is False
+
+
+@pytest.mark.anyio
 async def test_orchestrator_records_stage_completion_events():
     initial = RatioEscritorioState(
         caso_id="caso-1",
         tipo_peca="peticao_inicial",
         gate1_aprovado=True,
         gate2_aprovado=True,
+        status="redacao",
+        workflow_stage="redacao",
     )
     store = _FakeStore(initial)
 
