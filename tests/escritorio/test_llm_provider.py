@@ -237,6 +237,57 @@ def test_openrouter_slug_passthrough(monkeypatch):
 
 
 # ---------------------------------------------------------------------------
+# Tests — Alibaba DashScope provider
+# ---------------------------------------------------------------------------
+
+def test_generate_text_uses_alibaba_when_provider_set(monkeypatch):
+    """When GENERATION_PROVIDER=alibaba, calls _call_alibaba."""
+    captured = {}
+
+    import rag.query as rq
+    import backend.escritorio.llm_provider as lp
+    importlib.reload(lp)
+
+    monkeypatch.setattr(rq, "GENERATION_PROVIDER", "alibaba")
+    monkeypatch.setattr(lp, "_call_alibaba", lambda prompt, model: (
+        captured.update({"prompt": prompt, "model": model}) or "Resposta Alibaba"
+    ))
+
+    result = lp.generate_text("Redija uma peticao.", "gemini-3.1-pro-preview")
+
+    assert result == "Resposta Alibaba"
+    assert captured["model"] == "qwen-plus"  # pro maps to qwen-plus default
+
+
+def test_alibaba_model_resolution_flash(monkeypatch):
+    """Flash tier maps to qwen-turbo."""
+    import backend.escritorio.llm_provider as lp
+    importlib.reload(lp)
+
+    monkeypatch.delenv("ALIBABA_MODEL", raising=False)
+    assert lp._alibaba_model_for("gemini-3-flash") == "qwen-turbo"
+
+
+def test_alibaba_model_env_override(monkeypatch):
+    """ALIBABA_MODEL env var overrides model mapping."""
+    import backend.escritorio.llm_provider as lp
+    importlib.reload(lp)
+
+    monkeypatch.setenv("ALIBABA_MODEL", "qwen-max")
+    assert lp._alibaba_model_for("gemini-3.1-pro-preview") == "qwen-max"
+
+
+def test_alibaba_raises_when_key_absent(monkeypatch):
+    """_call_alibaba raises RuntimeError when ALIBABA_DASHSCOPE_API_KEY not set."""
+    import backend.escritorio.llm_provider as lp
+    importlib.reload(lp)
+
+    monkeypatch.delenv("ALIBABA_DASHSCOPE_API_KEY", raising=False)
+    with pytest.raises(RuntimeError, match="ALIBABA_DASHSCOPE_API_KEY"):
+        lp._call_alibaba("prompt", "qwen-plus")
+
+
+# ---------------------------------------------------------------------------
 # Tests — integration: existing call sites still accept explicit client
 # ---------------------------------------------------------------------------
 

@@ -1,9 +1,9 @@
 """Provider-agnostic text generation for the Escritório pipeline.
 
-Routes to Claude, Gemini, or OpenRouter based on the GENERATION_PROVIDER
-env var (already declared in .env.example and wired in rag/query.py for
-the main RAG pipeline — this module extends that support to the Escritório
-nodes).
+Routes to Gemini, Claude, OpenRouter, or Alibaba DashScope based on the
+``GENERATION_PROVIDER`` env var already declared in ``.env.example`` and
+wired in ``rag/query.py`` for the main RAG pipeline — this module extends
+that support to the Escritório nodes.
 
 Usage::
 
@@ -11,35 +11,53 @@ Usage::
 
     text = generate_text(prompt="...", model="gemini-3.1-pro-preview")
 
-Provider resolution:
+Provider resolution order:
 
-* ``GENERATION_PROVIDER=gemini`` (default) — Google Gemini via GEMINI_API_KEY.
-* ``GENERATION_PROVIDER=claude`` — Anthropic Claude via ANTHROPIC_API_KEY.
-  Gemini model names are auto-mapped to Claude equivalents; falls back to
-  Gemini with a stderr warning when the key is absent.
-* ``GENERATION_PROVIDER=openrouter`` — Any model on OpenRouter via
-  OPENROUTER_API_KEY.  Uses the OpenAI-compatible chat-completions endpoint
-  so users can choose free or cost-effective models (Qwen3.6 Plus free tier,
-  DeepSeek V3, MiniMax, Kimi K2.5, etc.) with a single API key.
+1. ``GENERATION_PROVIDER=openrouter``  → OpenRouter (200+ models, one key)
+2. ``GENERATION_PROVIDER=alibaba``     → Alibaba DashScope (Qwen family)
+3. ``GENERATION_PROVIDER=claude``      → Anthropic Claude (best PT-BR quality)
+   * Falls back to Gemini if ``ANTHROPIC_API_KEY`` is absent
+4. ``GENERATION_PROVIDER=gemini``      → Google Gemini (default)
 
-OpenRouter quick-start
-----------------------
-1. Create a free account at https://openrouter.ai
-2. Generate an API key at https://openrouter.ai/keys
-3. Add to your .env::
+Quick-start per provider
+------------------------
 
-       OPENROUTER_API_KEY="sk-or-v1-..."
-       GENERATION_PROVIDER="openrouter"
-       OPENROUTER_MODEL="qwen/qwen3-235b-a22b:free"  # optional override
+**OpenRouter** — one key, free and paid models:
 
-Recommended free/cheap models on OpenRouter
--------------------------------------------
-* ``qwen/qwen3-235b-a22b:free``     — Qwen3.6 Plus, 1M context, FREE (limited)
-* ``deepseek/deepseek-r1:free``     — DeepSeek R1 distill, reasoning, FREE
-* ``minimax/minimax-01``            — MiniMax M2.7, $0.30/$1.20 per 1M tokens
-* ``moonshot/kimi-k2``              — Kimi K2.5, $0.60/$3.00 per 1M tokens
-* ``deepseek/deepseek-v3``          — DeepSeek V3, $0.27/$0.41 per 1M tokens
-* ``anthropic/claude-sonnet-4``     — Claude Sonnet 4.6 via OpenRouter
+.. code-block:: bash
+
+    OPENROUTER_API_KEY="sk-or-v1-..."
+    GENERATION_PROVIDER="openrouter"
+    # OPENROUTER_MODEL="qwen/qwen3-235b-a22b:free"   # optional
+
+Recommended models:
+  * ``qwen/qwen3-235b-a22b:free``            — free tier, 1M context
+  * ``deepseek/deepseek-chat-v3-0324:free``  — free tier, excellent quality
+  * ``deepseek/deepseek-r1:free``            — free tier, reasoning
+  * ``minimax/minimax-01``                   — $0.30/$1.20 per 1M tokens
+  * ``moonshot/kimi-k2``                     — $0.60/$3.00 per 1M tokens
+
+**Alibaba DashScope** — Qwen models, OpenAI-compatible:
+
+.. code-block:: bash
+
+    ALIBABA_DASHSCOPE_API_KEY="sk-..."
+    ALIBABA_DASHSCOPE_BASE_URL="https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
+    GENERATION_PROVIDER="alibaba"
+    # ALIBABA_MODEL="qwen-plus"   # optional override
+
+Recommended models:
+  * ``qwen-plus``       — best quality/cost (default)
+  * ``qwen-turbo``      — fastest, cheapest
+  * ``qwen-max``        — maximum quality
+  * ``qwen3-235b-a22b`` — largest open-weight Qwen3
+
+**Claude** — Anthropic, best quality for Brazilian legal text:
+
+.. code-block:: bash
+
+    ANTHROPIC_API_KEY="sk-ant-..."
+    GENERATION_PROVIDER="claude"
 """
 from __future__ import annotations
 
@@ -48,6 +66,8 @@ import sys
 
 # ---------------------------------------------------------------------------
 # Claude model name overrides
+# Defaults reference rag.query.SUPPORTED_CLAUDE_MODELS — same values kept
+# in sync here as module-level constants for zero-import startup cost.
 # ---------------------------------------------------------------------------
 
 _DEFAULT_CLAUDE_REASONING = os.getenv(
@@ -63,14 +83,21 @@ _DEFAULT_CLAUDE_PESQUISADOR = os.getenv(
 # OpenRouter defaults
 # ---------------------------------------------------------------------------
 
-# Default model when GENERATION_PROVIDER=openrouter and no explicit model
-# override is given.  DeepSeek V3 offers excellent quality at very low cost.
 _DEFAULT_OPENROUTER_MODEL = os.getenv(
     "OPENROUTER_MODEL",
     "deepseek/deepseek-chat-v3-0324:free",
 )
-
 _OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1/chat/completions"
+
+# ---------------------------------------------------------------------------
+# Alibaba DashScope defaults
+# ---------------------------------------------------------------------------
+
+_DEFAULT_ALIBABA_MODEL = os.getenv("ALIBABA_MODEL", "qwen-plus")
+_DEFAULT_ALIBABA_BASE_URL = os.getenv(
+    "ALIBABA_DASHSCOPE_BASE_URL",
+    "https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
+)
 
 
 # ---------------------------------------------------------------------------
@@ -95,24 +122,33 @@ def _claude_model_for(gemini_model: str) -> str:
 def _openrouter_model_for(gemini_model: str) -> str:
     """Resolve the OpenRouter model slug to use.
 
-    If OPENROUTER_MODEL env var is set it takes full precedence.
-    Otherwise maps common Gemini model names to good cost-effective defaults
-    so existing call sites work without extra configuration.
+    Explicit ``OPENROUTER_MODEL`` env var takes full precedence.
+    Otherwise maps common Gemini model names to cost-effective defaults.
     """
-    # Explicit env override always wins
     explicit = os.getenv("OPENROUTER_MODEL", "").strip()
     if explicit:
         return explicit
-
     name = gemini_model.lower()
-    # Already an OpenRouter slug (contains "/")
     if "/" in name:
-        return gemini_model
-    # Flash-tier → free DeepSeek distill (reasoning-light, fast)
+        return gemini_model  # already an OpenRouter slug
     if "flash" in name:
         return "deepseek/deepseek-r1-distill-qwen-7b:free"
-    # Pro/preview/reasoning → DeepSeek V3 (best open quality at $0.27/$0.41)
     return "deepseek/deepseek-chat-v3-0324:free"
+
+
+def _alibaba_model_for(gemini_model: str) -> str:
+    """Resolve the Alibaba DashScope model to use.
+
+    Explicit ``ALIBABA_MODEL`` env var takes full precedence.
+    Otherwise maps Gemini tiers to Qwen equivalents.
+    """
+    explicit = os.getenv("ALIBABA_MODEL", "").strip()
+    if explicit:
+        return explicit
+    name = gemini_model.lower()
+    if "flash" in name:
+        return "qwen-turbo"
+    return "qwen-plus"
 
 
 def _call_openrouter(prompt: str, model: str) -> str:
@@ -126,23 +162,19 @@ def _call_openrouter(prompt: str, model: str) -> str:
 
     import httpx  # already in requirements.txt  # noqa: PLC0415
 
-    headers = {
-        "Authorization": f"Bearer {api_key}",
-        "Content-Type": "application/json",
-        # OpenRouter uses these for usage tracking / leaderboard
-        "HTTP-Referer": "https://github.com/carlosvictorodrigues/ratio",
-        "X-Title": "Ratio Escritório",
-    }
-    payload = {
-        "model": model,
-        "messages": [{"role": "user", "content": prompt}],
-        "max_tokens": 4096,
-    }
-
     response = httpx.post(
         _OPENROUTER_BASE_URL,
-        headers=headers,
-        json=payload,
+        headers={
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+            "HTTP-Referer": "https://github.com/carlosvictorodrigues/ratio",
+            "X-Title": "Ratio Escritório",
+        },
+        json={
+            "model": model,
+            "messages": [{"role": "user", "content": prompt}],
+            "max_tokens": 4096,
+        },
         timeout=120.0,
     )
     response.raise_for_status()
@@ -160,6 +192,47 @@ def _call_openrouter(prompt: str, model: str) -> str:
     return text
 
 
+def _call_alibaba(prompt: str, model: str) -> str:
+    """Call Alibaba DashScope via its OpenAI-compatible endpoint using httpx."""
+    api_key = os.getenv("ALIBABA_DASHSCOPE_API_KEY", "").strip()
+    if not api_key:
+        raise RuntimeError(
+            "ALIBABA_DASHSCOPE_API_KEY não configurado. "
+            "Obtenha em https://dashscope.console.aliyun.com/apiKey "
+            "e adicione ao .env."
+        )
+
+    import httpx  # noqa: PLC0415
+
+    base_url = _DEFAULT_ALIBABA_BASE_URL.rstrip("/")
+    response = httpx.post(
+        f"{base_url}/chat/completions",
+        headers={
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+        },
+        json={
+            "model": model,
+            "messages": [{"role": "user", "content": prompt}],
+            "max_tokens": 4096,
+        },
+        timeout=120.0,
+    )
+    response.raise_for_status()
+
+    data = response.json()
+    try:
+        text = (data["choices"][0]["message"]["content"] or "").strip()
+    except (KeyError, IndexError) as exc:
+        raise ValueError(
+            f"Alibaba DashScope ({model}) retornou estrutura inesperada: {data}"
+        ) from exc
+
+    if not text:
+        raise ValueError(f"Alibaba DashScope ({model}) retornou resposta vazia.")
+    return text
+
+
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
@@ -168,31 +241,37 @@ def generate_text(prompt: str, model: str) -> str:
     """Generate text using the active LLM provider.
 
     Provider resolution order:
-    1. GENERATION_PROVIDER=openrouter + OPENROUTER_API_KEY present → OpenRouter
-    2. GENERATION_PROVIDER=claude + ANTHROPIC_API_KEY present       → Claude
-    3. GENERATION_PROVIDER=claude + ANTHROPIC_API_KEY absent        → Gemini (warn)
-    4. GENERATION_PROVIDER=gemini (default)                         → Gemini
+    1. GENERATION_PROVIDER=openrouter → OpenRouter
+    2. GENERATION_PROVIDER=alibaba   → Alibaba DashScope (Qwen)
+    3. GENERATION_PROVIDER=claude + ANTHROPIC_API_KEY present → Claude
+    4. GENERATION_PROVIDER=claude + ANTHROPIC_API_KEY absent  → Gemini (warn)
+    5. GENERATION_PROVIDER=gemini (default)                   → Gemini
 
     Args:
         prompt: Full prompt text (system + user merged, or user-only).
-        model:  Model name in the *current* provider's notation.
-                Gemini model names are auto-mapped when using Claude or
-                OpenRouter — no call-site changes needed.
+        model:  Model name in Gemini notation; auto-mapped to provider
+                equivalents when using Claude, OpenRouter, or Alibaba.
 
     Returns:
-        Generated text string. Never empty (raises ValueError if the
-        provider returns an empty response after all retries).
+        Generated text string. Never empty (raises ValueError on empty response).
 
     Raises:
         ValueError:   Provider returned an empty/null response.
-        RuntimeError: Provider client could not be initialised (missing key).
+        RuntimeError: Provider key not configured.
     """
-    from rag.query import GENERATION_PROVIDER, has_anthropic_api_key  # noqa: PLC0415
+    from rag.query import (  # noqa: PLC0415
+        GENERATION_MAX_OUTPUT_TOKENS,
+        GENERATION_PROVIDER,
+        has_anthropic_api_key,
+    )
 
     # ── OpenRouter ────────────────────────────────────────────────────────────
     if GENERATION_PROVIDER == "openrouter":
-        or_model = _openrouter_model_for(model)
-        return _call_openrouter(prompt, or_model)
+        return _call_openrouter(prompt, _openrouter_model_for(model))
+
+    # ── Alibaba DashScope ─────────────────────────────────────────────────────
+    if GENERATION_PROVIDER == "alibaba":
+        return _call_alibaba(prompt, _alibaba_model_for(model))
 
     # ── Claude ────────────────────────────────────────────────────────────────
     if GENERATION_PROVIDER == "claude":
@@ -203,13 +282,18 @@ def generate_text(prompt: str, model: str) -> str:
             client = get_anthropic_client()
             response = client.messages.create(
                 model=claude_model,
-                max_tokens=4096,
+                max_tokens=max(300, int(GENERATION_MAX_OUTPUT_TOKENS)),
+                temperature=0.1,
                 messages=[{"role": "user", "content": prompt}],
             )
-            text = (response.content[0].text or "").strip()
+            # Safe extraction: join all text blocks, guard against safety filters
+            text = "".join(
+                b.text for b in response.content if hasattr(b, "text")
+            ).strip()
             if not text:
                 raise ValueError(
-                    f"Claude ({claude_model}) retornou resposta vazia."
+                    f"Claude ({claude_model}) retornou resposta vazia "
+                    "(possível filtro de segurança ou bloco não-texto)."
                 )
             return text
 
