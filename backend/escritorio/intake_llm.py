@@ -35,19 +35,19 @@ async def generate_intake_with_gemini(
     configured_model = (model or DEFAULT_PESQUISADOR_MODEL).strip()
 
     def _invoke() -> dict:
-        active_client = client
-        if active_client is None:
-            from rag.query import get_gemini_client
+        if client is not None:
+            # Explicit client injected (e.g. in tests) — use it directly.
+            response = client.models.generate_content(
+                model=configured_model,
+                contents=prompt,
+            )
+            text = getattr(response, "text", None)
+            if not text:
+                raise ValueError("Resposta vazia no intake.")
+            return parse_intake_payload(text)
 
-            active_client = get_gemini_client()
+        from backend.escritorio.llm_provider import generate_text  # noqa: PLC0415
 
-        response = active_client.models.generate_content(
-            model=configured_model,
-            contents=prompt,
-        )
-        text = getattr(response, "text", None)
-        if not text:
-            raise ValueError("Resposta vazia no intake.")
-        return parse_intake_payload(text)
+        return parse_intake_payload(generate_text(prompt, configured_model))
 
     return await anyio.to_thread.run_sync(_invoke)
