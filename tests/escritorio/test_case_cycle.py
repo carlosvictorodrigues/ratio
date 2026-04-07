@@ -20,7 +20,7 @@ def test_case_cycle_can_create_case_progress_intake_and_approve_gate(monkeypatch
         json={"message": "Sou autora e tenho contrato, boletos e historico da cobranca indevida."},
     )
     assert intake.status_code == 200
-    assert intake.json()["state"]["status"] in {"intake", "gate1"}
+    assert intake.json()["state"]["status"] == "intake"  # Never gate1 from intake alone
 
     gate = client.post(
         "/api/escritorio/cases/caso-1/gates/gate1",

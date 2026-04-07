@@ -78,6 +78,8 @@ def process_intake_message(
         part for part in [updated.fatos_brutos, clean_message] if part
     ).strip()
     updated.intake_checklist = compute_checklist(updated)
-    updated.status = "gate1" if checklist_ready(updated.intake_checklist) else "intake"
-    updated.workflow_stage = updated.status
+    # Status stays "intake" — gate1 is only set by intake_graph (POST /run)
+    # The checklist is informational for the UI, not a gate trigger.
+    updated.status = "intake"
+    updated.workflow_stage = "intake"
     return updated

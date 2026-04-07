@@ -169,13 +169,14 @@ async def test_full_e2e_pipeline_flow(tmp_path):
     """
     Full E2E flow:
       1. Create case
-      2. Intake messages → status reaches gate1
-      3. Approve gate1 → status becomes pesquisa
-      4. Run pipeline → research fills teses, status becomes gate2
-      5. Approve gate2 → status becomes redacao
-      6. Run pipeline → redaction fills peca_sections
-      7. Run pipeline → adversarial fills critica_atual, output_docx_path
-      8. Final state is 'finalizado' with document generated
+      2. Intake messages → status stays 'intake' (checklist is informational)
+      3. Run pipeline → intake_graph (mocked) produces fatos_estruturados → gate1
+      4. Approve gate1 → status becomes pesquisa
+      5. Run pipeline → research fills teses, status becomes gate2
+      6. Approve gate2 → status becomes redacao
+      7. Run pipeline → redaction fills peca_sections
+      8. Run pipeline → adversarial fills critica_atual, output_docx_path
+      9. Final state is 'finalizado' with document generated
     """
     caso_id = "e2e_test_caso"
     store = _make_store(tmp_path, caso_id)
@@ -192,30 +193,35 @@ async def test_full_e2e_pipeline_flow(tmp_path):
     assert state.gate1_aprovado is False
     assert state.gate2_aprovado is False
 
-    # ── Step 2: Intake messages ──
-    # Message 1: parties
+    # ── Step 2: Intake messages — status stays 'intake' ──
     state = process_intake_message(state, user_message="O cliente Joao Silva contratou financiamento com o banco reu Banco X em 2023.")
     store.save_snapshot(state, stage=state.status)
     assert state.intake_checklist.partes_identificadas is True
+    assert state.status == "intake"  # Never gate1 from regex
 
-    # Message 2: facts
     state = process_intake_message(state, user_message="Pagou todas as parcelas ate janeiro 2025, mas o banco manteve o nome dele negativado indevidamente. Contrato de 360 parcelas.")
     store.save_snapshot(state, stage=state.status)
-    assert state.intake_checklist.fatos_principais_cobertos is True
 
-    # Message 3: documents
     state = process_intake_message(state, user_message="Tenho o contrato original, comprovantes de pagamento e extrato bancario como documentos.")
     store.save_snapshot(state, stage=state.status)
-    assert state.intake_checklist.documentos_listados is True
+    assert state.status == "intake"  # Still intake — gate1 comes from intake_graph
 
-    # After all 3 messages, checklist is complete → status should be gate1
-    assert state.status == "gate1", f"Expected gate1, got {state.status}"
-
-    # next_question should indicate everything is ready
+    # next_question should indicate everything is ready (informational)
     next_q = build_next_question(state)
     assert "partes" not in next_q.lower() or "detectamos" in next_q.lower()
 
-    # ── Step 3: Approve gate1 ──
+    # ── Step 3: Run pipeline → intake_graph produces structured data → gate1 ──
+    state = await run_escritorio_pipeline(
+        store=store,
+        run_intake_graph_fn=mock_intake_graph,
+        run_drafting_graph_fn=_build_drafting_fn(mock_drafting_research, mock_drafting_redaction),
+        run_adversarial_graph_fn=mock_adversarial_graph,
+    )
+    assert state.status == "gate1", f"Expected gate1 after intake_graph, got {state.status}"
+    assert len(state.fatos_estruturados) == 4
+    assert len(state.provas_disponiveis) == 3
+
+    # ── Step 4: Approve gate1 ──
     state.gate1_aprovado = True
     state.status = "pesquisa"
     state.workflow_stage = "pesquisa"
@@ -321,9 +327,10 @@ async def test_gate2_pauses_before_redaction(tmp_path):
 
 
 @pytest.mark.anyio
-async def test_intake_checklist_controls_gate1(tmp_path):
+async def test_intake_checklist_is_informational_not_gate_trigger(tmp_path):
     """
-    Verify that gate1 status is only reached when all 3 checklist items are met.
+    Verify that the regex checklist populates but NEVER promotes status to gate1.
+    gate1 is only set by intake_graph (POST /run), not by process_intake_message.
     """
     caso_id = "checklist_test"
     store = _make_store(tmp_path, caso_id)
@@ -332,19 +339,17 @@ async def test_intake_checklist_controls_gate1(tmp_path):
 
     # Only short facts, no parties or docs
     state = process_intake_message(state, user_message="Houve cobranca indevida de taxas mensais desde janeiro de 2024 ate dezembro de 2024.")
-    assert state.status == "intake"  # Not ready yet — no parties, no docs
-
-    # Add parties — but still no documents
-    state = process_intake_message(state, user_message="O autor e o cliente lesado. A empresa reu e a operadora de telefonia.")
-    assert state.intake_checklist.partes_identificadas is True
-    # Without document hints, should still be intake
-    assert state.intake_checklist.documentos_listados is False, "No document hints should be detected yet"
     assert state.status == "intake"
 
-    # Add documents
+    # Add parties
+    state = process_intake_message(state, user_message="O autor e o cliente lesado. A empresa reu e a operadora de telefonia.")
+    assert state.intake_checklist.partes_identificadas is True
+    assert state.status == "intake"
+
+    # Add documents — checklist complete but status STAYS intake
     state = process_intake_message(state, user_message="Possuo o contrato e comprovantes como documentos anexos.")
     assert state.intake_checklist.documentos_listados is True
-    assert state.status == "gate1"  # NOW ready
+    assert state.status == "intake"  # NOT gate1 — that comes from intake_graph
 
 
 @pytest.mark.anyio
