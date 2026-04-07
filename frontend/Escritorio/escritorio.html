@@ -990,10 +990,9 @@
 
             {/* Top bar — matches main app identity */}
             <div className="h-16 flex items-center justify-between px-7 shrink-0" style={{ borderBottom:'1px solid var(--stone-200)', background: theme==='dark' ? 'rgba(20,18,16,0.85)' : 'rgba(250,250,249,0.85)', backdropFilter:'blur(6px)' }}>
-              <div className="flex items-center" style={{ gap:0 }}>
+              <div className="flex items-center space-x-4">
                 <span style={{ margin:0, fontSize:14, fontWeight:600, letterSpacing:'0.08em', textTransform:'uppercase', color:'var(--stone-900)', fontFamily:'"Inter",sans-serif' }}>RATIO</span>
-                <span style={{ margin:0, fontSize:14, fontWeight:500, textTransform:'uppercase', letterSpacing:'0.03em', color:'var(--stone-400)', fontFamily:'"Inter",sans-serif' }}>/ ESCRITORIO</span>
-              </div>
+                <span style={{ margin:0, fontSize:14, fontWeight:500, textTransform:'uppercase', letterSpacing:'0.03em', color:'var(--stone-400)', fontFamily:'"Inter",sans-serif' }}>{'\u00A0'}/ ESCRITORIO</span>
                 {mode >= 0 && <>
                   <div className="h-4 w-px" style={{ background:'var(--stone-300)' }} />
                   <AgentAvatars activeAgents={activeAgents} completedAgents={completedAgents} onClickAgent={setAgentDetail} />
