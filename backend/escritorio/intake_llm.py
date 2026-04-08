@@ -20,16 +20,32 @@ def build_intake_prompt(state: RatioEscritorioState) -> str:
         '    NAO use objetos, NAO use chaves como "evento"/"data"/"descricao". Apenas uma frase em texto puro por item.\n'
         '  - "provas_disponiveis": lista de STRINGS, cada uma descrevendo um documento ou prova mencionada (texto puro).\n'
         '  - "pontos_atencao": lista de STRINGS com riscos, lacunas ou pontos que merecem cuidado (texto puro).\n\n'
+        '  - "resposta_conversacional_clara": STRING curta, como se a Clara estivesse respondendo ao usuario em tom profissional.\n'
+        '  - "perguntas_pendentes": lista de STRINGS com 1 a 3 perguntas-chave objetivas sobre as lacunas restantes.\n'
+        '  - "triagem_suficiente": BOOLEAN indicando se ja existe material minimo razoavel para o usuario prosseguir assim mesmo.\n\n'
+        "A Clara deve soar como uma analista juridica conversando com o usuario.\n"
+        "Nao faca interrogatorio longo. Pergunte apenas o que realmente muda a peca.\n"
+        "Sempre deixe claro que o usuario pode complementar ou prosseguir assim mesmo.\n\n"
         "Exemplo do formato esperado (apenas formato, ignore o conteudo):\n"
         '{"fatos_estruturados":["Em 21/09/2025 o autor compareceu ao exame.","O onibus apresentou pane mecanica em Mossoro/RN."],'
         '"provas_disponiveis":["Ordem de servico da agencia","Comprovante de pagamento Uber"],'
-        '"pontos_atencao":["Necessario comprovar nexo entre dano e fraude"]}\n\n'
+        '"pontos_atencao":["Necessario comprovar nexo entre dano e fraude"],'
+        '"resposta_conversacional_clara":"Entendi o nucleo do caso. Antes de fechar a triagem, preciso confirmar dois pontos.",'
+        '"perguntas_pendentes":["Quem e exatamente o reu?","Quais documentos ja estao em maos?"],'
+        '"triagem_suficiente":true}\n\n'
         f"Caso:\n{facts}"
     )
 
 
 # Campos que aceitamos apenas como list[str] no estado do escritorio.
 _STRING_LIST_FIELDS = ("fatos_estruturados", "provas_disponiveis", "pontos_atencao")
+
+
+def _coerce_bool(value: object) -> bool:
+    if isinstance(value, bool):
+        return value
+    text = str(value or "").strip().lower()
+    return text in {"1", "true", "sim", "yes"}
 
 
 def parse_intake_payload(raw_payload: str) -> dict:
@@ -47,6 +63,14 @@ def parse_intake_payload(raw_payload: str) -> dict:
             raw_list = [raw_list]
         coerced = [coerce_to_string(item) for item in raw_list]
         data[field] = [s for s in coerced if s]
+    data["resposta_conversacional_clara"] = coerce_to_string(data.get("resposta_conversacional_clara"))
+    raw_questions = data.get("perguntas_pendentes")
+    if raw_questions is None:
+        raw_questions = []
+    if not isinstance(raw_questions, list):
+        raw_questions = [raw_questions]
+    data["perguntas_pendentes"] = [s for s in (coerce_to_string(item) for item in raw_questions) if s]
+    data["triagem_suficiente"] = _coerce_bool(data.get("triagem_suficiente"))
     return data
 
 

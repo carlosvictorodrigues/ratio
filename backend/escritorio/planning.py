@@ -28,6 +28,7 @@ _TIPO_ALIASES = {
     "alternativa": "subsidiaria",
     "subsidiary": "subsidiaria",
 }
+_LEGISLATION_CATEGORIES = {"processual", "material", "pedidos"}
 
 
 def build_case_decomposition_prompt(state: RatioEscritorioState) -> str:
@@ -42,6 +43,23 @@ def build_case_decomposition_prompt(state: RatioEscritorioState) -> str:
         "Retorne SOMENTE uma lista JSON de objetos com campos: id, descricao, tipo.\n"
         "Use tipo = principal ou subsidiaria.\n\n"
         f"Caso:\n{facts}"
+    )
+
+
+def build_legislation_query_prompt(state: RatioEscritorioState, teses: list[TeseJuridica]) -> str:
+    facts = (state.fatos_brutos or "").strip() or "Sem fatos informados."
+    teses_text = "\n".join(f"- [{t.tipo}] {t.descricao}" for t in teses) or "- Sem teses estruturadas"
+    return (
+        "Voce e um pesquisador juridico senior focado em fundamentos legais.\n"
+        "Monte 3 a 5 consultas objetivas para pesquisar legislacao brasileira relevante ao caso.\n"
+        "Cubra, quando pertinente, base processual, base material e pedidos/acessorios da peca.\n"
+        "Retorne SOMENTE uma lista JSON de objetos com campos: categoria, consulta.\n"
+        "categoria deve ser um de: processual, material, pedidos.\n"
+        "NAO retorne artigos inventados; retorne apenas consultas de busca.\n\n"
+        f"Tipo de peca: {state.tipo_peca}\n"
+        f"Area do direito: {state.area_direito or 'nao informada'}\n"
+        f"Fatos:\n{facts}\n\n"
+        f"Teses:\n{teses_text}"
     )
 
 
@@ -80,6 +98,22 @@ def _coerce_tese_item(item: Any, index: int) -> dict[str, Any] | None:
     if not text:
         return None
     return {"id": f"t{index + 1}", "descricao": text, "tipo": "principal"}
+
+
+def _normalize_legislation_query_item(item: Any, index: int) -> dict[str, str] | None:
+    if isinstance(item, dict):
+        categoria = str(item.get("categoria") or "").strip().lower()
+        if categoria not in _LEGISLATION_CATEGORIES:
+            categoria = "material"
+        consulta = coerce_to_string(item.get("consulta") or item.get("query") or item.get("descricao"))
+    else:
+        categoria = "material"
+        consulta = coerce_to_string(item)
+
+    consulta = " ".join(str(consulta or "").split()).strip()
+    if not consulta:
+        return None
+    return {"id": f"q{index + 1}", "categoria": categoria, "consulta": consulta}
 
 
 def parse_teses_payload(raw_payload: str) -> list[TeseJuridica]:
@@ -125,6 +159,89 @@ def parse_teses_payload(raw_payload: str) -> list[TeseJuridica]:
     return coerced
 
 
+def parse_legislation_queries_payload(raw_payload: str) -> list[dict[str, str]]:
+    text = str(raw_payload or "").strip()
+    try:
+        data = parse_json_payload(text, expect="array")
+    except (ValueError, Exception):
+        try:
+            wrapped = parse_json_payload(text, expect="object")
+        except Exception:
+            balanced = extract_first_json_array(text)
+            if balanced is None:
+                raise ValueError("Payload de consultas legislativas deve ser uma lista JSON.")
+            import json as _json
+
+            data = _json.loads(balanced)
+        else:
+            data = unwrap_envelope(wrapped)
+
+    if isinstance(data, dict):
+        data = unwrap_envelope(data)
+    if not isinstance(data, list):
+        raise ValueError("Payload de consultas legislativas deve ser uma lista JSON.")
+
+    queries: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for index, item in enumerate(data):
+        normalized = _normalize_legislation_query_item(item, index)
+        if normalized is None:
+            continue
+        dedupe_key = f"{normalized['categoria']}::{normalized['consulta'].lower()}"
+        if dedupe_key in seen:
+            continue
+        seen.add(dedupe_key)
+        queries.append(normalized)
+    if not queries:
+        raise ValueError("Payload de consultas legislativas nao contem consultas validas.")
+    return queries
+
+
+def fallback_legislation_queries(state: RatioEscritorioState, teses: list[TeseJuridica]) -> list[dict[str, str]]:
+    combined = " ".join(
+        part for part in [
+            state.tipo_peca,
+            state.area_direito,
+            state.fatos_brutos,
+            *[t.descricao for t in teses],
+        ]
+        if part
+    ).lower()
+
+    queries: list[dict[str, str]] = []
+    if state.tipo_peca == "peticao_inicial":
+        queries.append({
+            "id": "q1",
+            "categoria": "processual",
+            "consulta": "peticao inicial requisitos cpc art 319 art 320 valor da causa art 291",
+        })
+    if any(token in combined for token in ("gratuidade", "hipossuf", "justica gratuita")):
+        queries.append({
+            "id": f"q{len(queries) + 1}",
+            "categoria": "processual",
+            "consulta": "gratuidade de justica cpc art 98 art 99 declaracao de hipossuficiencia",
+        })
+    if any(token in combined for token in ("consumidor", "cdc", "fornecedor", "servico")):
+        queries.append({
+            "id": f"q{len(queries) + 1}",
+            "categoria": "material",
+            "consulta": "codigo de defesa do consumidor art 6 inciso viii art 14 responsabilidade pelo fato do servico",
+        })
+    if any(token in combined for token in ("responsabilidade", "danos", "dano moral", "dano material")):
+        queries.append({
+            "id": f"q{len(queries) + 1}",
+            "categoria": "material",
+            "consulta": "codigo civil art 186 art 187 art 927 responsabilidade civil danos materiais danos morais",
+        })
+    if not queries:
+        queries.append({
+            "id": "q1",
+            "categoria": "material",
+            "consulta": f"legislacao brasileira fundamentos legais {state.tipo_peca} {state.area_direito or 'caso concreto'}",
+        })
+    return queries[:5]
+
+
 async def decompose_case_with_gemini(
     state: RatioEscritorioState,
     *,
@@ -152,3 +269,36 @@ async def decompose_case_with_gemini(
         return parse_teses_payload(text)
 
     return await anyio.to_thread.run_sync(_invoke)
+
+
+async def plan_legislation_queries_with_gemini(
+    state: RatioEscritorioState,
+    teses: list[TeseJuridica],
+    *,
+    client=None,
+    model: str | None = None,
+) -> list[dict[str, str]]:
+    prompt = build_legislation_query_prompt(state, teses)
+    configured_model = (model or DEFAULT_PESQUISADOR_MODEL).strip()
+
+    def _invoke() -> list[dict[str, str]]:
+        active_client = client
+        if active_client is None:
+            from rag.query import get_gemini_client
+
+            active_client = get_gemini_client()
+
+        config = make_json_response_config(timeout_ms=DEFAULT_LLM_TIMEOUT_MS)
+        kwargs = {"model": configured_model, "contents": prompt}
+        if config is not None:
+            kwargs["config"] = config
+        response = active_client.models.generate_content(**kwargs)
+        text = getattr(response, "text", None)
+        if not text:
+            raise ValueError("Resposta vazia no planejamento de consultas legislativas.")
+        return parse_legislation_queries_payload(text)
+
+    try:
+        return await anyio.to_thread.run_sync(_invoke)
+    except Exception:
+        return fallback_legislation_queries(state, teses)

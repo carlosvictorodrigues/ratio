@@ -10,7 +10,10 @@ from langgraph.graph import END, START, StateGraph
 log = logging.getLogger(__name__)
 
 from backend.escritorio.models import RatioEscritorioState, TeseJuridica
-from backend.escritorio.planning import decompose_case_with_gemini
+from backend.escritorio.planning import (
+    decompose_case_with_gemini,
+    plan_legislation_queries_with_gemini,
+)
 from backend.escritorio.redaction import (
     build_section_evidence_pack,
     generate_sections_with_gemini,
@@ -85,6 +88,7 @@ async def pesquisar_teses(
     decompose_case_fn: Callable[[RatioEscritorioState], Any] | None = None,
     search_bundle_fn: Callable[..., Any] | None = None,
     legislation_search_fn: Callable[[str], Any] | None = None,
+    legislation_query_plan_fn: Callable[[RatioEscritorioState, list[TeseJuridica]], Any] | None = None,
     on_tese_result: Callable[[dict[str, Any]], Any] | None = None,
 ) -> dict[str, Any]:
     teses = await decompose_case_into_teses(
@@ -96,9 +100,11 @@ async def pesquisar_teses(
         log.info("  tese %d [%s/%s]: %s", _i, _t.id, _t.tipo, (_t.descricao or "")[:120])
     active_search_bundle = search_bundle_fn or search_tese_bundle
     active_legislation_search = legislation_search_fn or _search_legislation
+    active_legislation_query_plan = legislation_query_plan_fn or plan_legislation_queries_with_gemini
     enriched_teses: list[dict[str, Any]] = []
     jurisprudencia: list[dict[str, Any]] = []
     legislacao: list[dict[str, Any]] = []
+    legislacao_complementar: list[dict[str, Any]] = []
 
     for tese in teses:
         log.info("pesquisar_teses: iniciando busca para tese %s", tese.id)
@@ -134,6 +140,7 @@ async def pesquisar_teses(
                 "teses": list(enriched_teses),
                 "pesquisa_jurisprudencia": list(jurisprudencia),
                 "pesquisa_legislacao": list(legislacao),
+                "pesquisa_legislacao_complementar": list(legislacao_complementar),
                 "status": "pesquisa",
                 "workflow_stage": "pesquisa",
             }
@@ -141,10 +148,33 @@ async def pesquisar_teses(
             if inspect.isawaitable(callback_result):
                 await callback_result
 
+    planned_queries = active_legislation_query_plan(state, teses)
+    if inspect.isawaitable(planned_queries):
+        planned_queries = await planned_queries
+
+    for query_item in list(planned_queries or []):
+        consulta = " ".join(str(query_item.get("consulta") or "").split()).strip()
+        categoria = str(query_item.get("categoria") or "material").strip().lower() or "material"
+        if not consulta:
+            continue
+        rows = active_legislation_search(consulta)
+        if callable(getattr(rows, "__await__", None)):
+            rows = await rows
+        normalized_rows = []
+        for row in list(rows or []):
+            normalized = dict(row)
+            normalized.setdefault("categoria", categoria)
+            normalized.setdefault("query_origem", consulta)
+            normalized.setdefault("estrategia", "complementar")
+            normalized_rows.append(normalized)
+        legislacao_complementar.extend(normalized_rows)
+        legislacao.extend(normalized_rows)
+
     return {
         "teses": enriched_teses,
         "pesquisa_jurisprudencia": jurisprudencia,
         "pesquisa_legislacao": legislacao,
+        "pesquisa_legislacao_complementar": legislacao_complementar,
         "status": "pesquisa",
         "workflow_stage": "pesquisa",
     }
@@ -169,6 +199,7 @@ def curadoria_node(state: RatioEscritorioState) -> dict[str, Any]:
     return {
         "pesquisa_jurisprudencia": _dedupe_rows(state.pesquisa_jurisprudencia),
         "pesquisa_legislacao": _dedupe_rows(state.pesquisa_legislacao),
+        "pesquisa_legislacao_complementar": _dedupe_rows(state.pesquisa_legislacao_complementar),
         "status": "gate2",
         "workflow_stage": "gate2",
     }

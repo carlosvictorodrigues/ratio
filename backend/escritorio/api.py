@@ -16,6 +16,7 @@ from backend.escritorio.adversarial import (
 )
 from backend.escritorio.graph.orchestrator import run_escritorio_pipeline
 from backend.escritorio.intake import process_intake_message
+from backend.escritorio.models import RatioEscritorioState
 from backend.escritorio.store import CaseIndex, CaseStore
 
 
@@ -74,6 +75,10 @@ class ArchiveCaseRequest(BaseModel):
 
 class RenameCaseRequest(BaseModel):
     name: str = Field(min_length=1, max_length=200)
+
+
+class RestoreSnapshotRequest(BaseModel):
+    snapshot_id: int = Field(gt=0)
 
 
 def _load_case_or_404(index: CaseIndex, caso_id: str):
@@ -181,6 +186,34 @@ def _serialize_event_for_frontend(event: dict[str, Any]) -> dict[str, Any]:
         "agent": agent,
         "text": text,
         "data": data,
+    }
+
+
+def _summarize_snapshot(snapshot: dict[str, Any]) -> dict[str, Any]:
+    state = snapshot.get("state") or {}
+    stage = str(snapshot.get("stage") or state.get("status") or "").strip()
+    stage_lower = stage.lower()
+
+    if stage_lower in {"intake", "gate1"}:
+        summary = f"{len(state.get('fatos_estruturados') or [])} fatos estruturados"
+    elif stage_lower in {"pesquisa", "gate2", "curadoria"}:
+        summary = f"{len(state.get('teses') or [])} teses pesquisadas"
+    elif stage_lower == "redacao":
+        summary = f"{len((state.get('peca_sections') or {}).keys())} secoes redigidas"
+    elif stage_lower in {"adversarial", "revisao_humana"}:
+        summary = f"Rodada {int(state.get('rodada_atual') or 0)} de revisao"
+    elif stage_lower in {"verificacao", "entrega", "finalizado"}:
+        summary = f"{len(state.get('verificacoes') or [])} verificacoes"
+    else:
+        summary = stage or "Snapshot"
+
+    return {
+        "snapshot_id": snapshot.get("id"),
+        "stage": stage,
+        "created_at": snapshot.get("created_at"),
+        "status": state.get("status"),
+        "workflow_stage": state.get("workflow_stage"),
+        "summary": summary,
     }
 
 
@@ -317,6 +350,53 @@ def build_escritorio_router() -> APIRouter:
         return {
             "summary": summary,
             "snapshots": store.list_snapshots(),
+        }
+
+    @router.get("/cases/{caso_id}/history")
+    def get_case_history(caso_id: str) -> dict[str, Any]:
+        index = _get_case_index()
+        summary, _state = _load_case_or_404(index, caso_id)
+        store = _get_case_store(caso_id, index=index)
+        return {
+            "summary": summary,
+            "history": [_summarize_snapshot(snapshot) for snapshot in store.list_snapshots()],
+        }
+
+    @router.post("/cases/{caso_id}/restore")
+    def restore_case_snapshot(caso_id: str, payload: RestoreSnapshotRequest) -> dict[str, Any]:
+        index = _get_case_index()
+        store = _get_case_store(caso_id, index=index)
+        summary, _state = _load_case_or_404(index, caso_id)
+        snapshot = store.load_snapshot(payload.snapshot_id)
+        if snapshot is None:
+            raise HTTPException(
+                status_code=404,
+                detail={"code": "snapshot_not_found", "snapshot_id": payload.snapshot_id},
+            )
+
+        restored = RatioEscritorioState.model_validate(snapshot["state"])
+
+        store.save_snapshot(restored, stage=restored.status)
+        index.upsert_case(
+            caso_id=restored.caso_id,
+            tipo_peca=restored.tipo_peca,
+            area_direito=restored.area_direito,
+            status=restored.status,
+            case_dir=store.case_dir,
+        )
+        store.append_event(
+            "case.restored",
+            {
+                "snapshot_id": payload.snapshot_id,
+                "stage": restored.status,
+                "workflow_stage": restored.workflow_stage,
+                "status": restored.status,
+            },
+        )
+        refreshed_summary = index.get_case(caso_id) or {**summary, "status": restored.status}
+        return {
+            "summary": refreshed_summary,
+            "state": restored.model_dump(mode="json"),
         }
 
     @router.post("/cases/{caso_id}/run")

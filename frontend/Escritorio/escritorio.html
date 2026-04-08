@@ -41,6 +41,38 @@
     ::-webkit-scrollbar-thumb{background:var(--stone-300);border-radius:4px}
     ::-webkit-scrollbar-thumb:hover{background:var(--stone-400)}
 
+    /* ── Left Rail — matches main app pattern ── */
+    .left-rail {
+      width: 56px; height: 100%; display: flex; flex-direction: column;
+      align-items: center; flex-shrink: 0; padding: 24px 0 20px; gap: 18px;
+      background: var(--stone-100); border-right: 1px solid var(--stone-200);
+    }
+    .rail-brand {
+      width: 32px; height: 32px; border-radius: 4px; display: grid; place-items: center;
+      background: var(--stone-900); color: var(--stone-50);
+      box-shadow: 0 1px 4px rgba(0,0,0,0.3);
+    }
+    [data-theme="light"] .rail-brand { box-shadow: 0 1px 4px rgba(0,0,0,0.12); }
+    .rail-brand svg, .rail-btn svg { width: 16px; height: 16px; stroke-width: 1.75; }
+    .rail-nav {
+      display: flex; flex-direction: column; align-items: center;
+      gap: 14px; flex: 1; margin-top: 8px;
+    }
+    .rail-btn {
+      width: 32px; height: 32px; border: 0; background: transparent;
+      color: var(--stone-400); border-radius: 6px; display: grid; place-items: center;
+      cursor: pointer; position: relative; transition: color 140ms ease, background-color 140ms ease;
+    }
+    .rail-btn:hover { color: var(--stone-900); background: rgba(255,255,255,0.06); }
+    [data-theme="light"] .rail-btn:hover { background: rgba(214,211,209,0.45); }
+    .rail-btn.active { color: var(--stone-900); }
+    .rail-btn.active::before {
+      content: ""; position: absolute; left: -12px; top: 6px; bottom: 6px;
+      width: 2px; border-radius: 0 2px 2px 0; background: var(--accent);
+    }
+    [data-theme="light"] .rail-btn.active::before { background: var(--stone-900); }
+    .rail-bottom { margin-top: auto; display: flex; flex-direction: column; align-items: center; gap: 14px; }
+
     @keyframes fadeIn{from{opacity:0;transform:translateY(5px)}to{opacity:1;transform:translateY(0)}}
     @keyframes slideUp{from{opacity:0;transform:translateY(14px) scale(.98)}to{opacity:1;transform:translateY(0) scale(1)}}
     @keyframes spin-arc{0%{transform:rotate(0deg)}100%{transform:rotate(360deg)}}
@@ -89,6 +121,9 @@
       getCase: (id) => api._f(`/cases/${id}`),
       getPipeline: (id) => api._f(`/cases/${id}/pipeline`),
       getEvents: (id) => api._f(`/cases/${id}/events`),
+      getHistory: (id) => api._f(`/cases/${id}/history`),
+      getSnapshots: (id) => api._f(`/cases/${id}/snapshots`),
+      restoreSnapshot: (id, snapshotId) => api._f(`/cases/${id}/restore`, { method: 'POST', body: JSON.stringify({ snapshot_id: snapshotId }) }),
       sendIntake: (id, msg) => api._f(`/cases/${id}/intake`, { method: 'POST', body: JSON.stringify({ message: msg }) }),
       approveGate: (id, gate, approved = true) => api._f(`/cases/${id}/gates/${gate}`, { method: 'POST', body: JSON.stringify({ approved }) }),
       runPipeline: (id) => api._f(`/cases/${id}/run`, { method: 'POST' }),
@@ -396,6 +431,7 @@
       const [analyzing, setAnalyzing] = useState(false);
       const [showGate, setShowGate] = useState(false);
       const btm = useRef(null);
+      const inputRef = useRef(null);
 
       /* Sync messages from backend state */
       useEffect(() => {
@@ -454,6 +490,9 @@
       const fatos = state?.fatos_estruturados || [];
       const provas = state?.provas_disponiveis || [];
       const pontos = state?.pontos_atencao || [];
+      const respostaClara = state?.resposta_conversacional_clara || '';
+      const perguntasPendentes = state?.perguntas_pendentes || [];
+      const triagemSuficiente = !!state?.triagem_suficiente;
       const hasAnalysis = fatos.length > 0;
       const hasMessages = state?.intake_history?.length > 0;
 
@@ -489,7 +528,13 @@
               {/* Clara's analysis results */}
               {hasAnalysis && (
                 <div className="rounded-lg p-4 anim-fade" style={{ background:'var(--stone-50)', border:'1px solid var(--stone-200)', borderLeft:'3px solid var(--agent-intake)' }}>
-                  <p className="text-xs font-semibold mb-3" style={{ color:'var(--agent-intake)' }}>Análise da Clara</p>
+                  <p className="text-xs font-semibold mb-3" style={{ color:'var(--agent-intake)' }}>TRIAGEM DA CLARA</p>
+                  {respostaClara && (
+                    <div className="mb-3 p-3 rounded-lg" style={{ background:'var(--stone-100)', border:'1px solid var(--stone-200)' }}>
+                      <p className="text-xs font-semibold mb-1" style={{ color:'var(--agent-intake)' }}>Clara</p>
+                      <p className="text-xs leading-relaxed" style={{ color:'var(--stone-700)' }}>{respostaClara}</p>
+                    </div>
+                  )}
                   {fatos.length > 0 && (
                     <div className="mb-3">
                       <p className="text-xs font-semibold mb-1" style={{ color:'var(--stone-600)' }}>Fatos Estruturados ({fatos.length})</p>
@@ -503,11 +548,26 @@
                     </div>
                   )}
                   {pontos.length > 0 && (
-                    <div>
+                    <div className="mb-3">
                       <p className="text-xs font-semibold mb-1" style={{ color:'var(--stone-600)' }}>Pontos de Atencao ({pontos.length})</p>
                       <ul className="space-y-1">{pontos.map((pt, i) => <li key={i} className="text-xs pl-3" style={{ color:'var(--amber-600, #d97706)', borderLeft:'2px solid var(--amber-400, #fbbf24)' }}>{typeof pt === 'string' ? pt : JSON.stringify(pt)}</li>)}</ul>
                     </div>
                   )}
+                  {perguntasPendentes.length > 0 && (
+                    <div className="mt-3">
+                      <p className="text-xs font-semibold mb-1" style={{ color:'var(--stone-600)' }}>Perguntas pendentes ({perguntasPendentes.length})</p>
+                      <ul className="space-y-1">
+                        {perguntasPendentes.map((pergunta, i) => (
+                          <li key={i} className="text-xs pl-3" style={{ color:'var(--stone-700)', borderLeft:'2px solid var(--accent)' }}>{pergunta}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                  <div className="mt-3 flex items-center gap-2">
+                    <span className="font-mono px-2 py-1 rounded" style={{ fontSize:9, color: triagemSuficiente ? 'var(--agent-auditor)' : 'var(--stone-500)', border:'1px solid var(--stone-300)' }}>
+                      {triagemSuficiente ? 'Triagem suficiente' : 'Triagem com lacunas'}
+                    </span>
+                  </div>
                 </div>
               )}
               <div ref={btm} />
@@ -526,6 +586,11 @@
               )}
               {hasAnalysis && !showGate && (
                 <div className="flex justify-center gap-3 anim-fade">
+                  <button onClick={() => inputRef.current?.focus()} className="px-4 py-2 text-xs font-medium rounded-lg transition-all duration-200"
+                    style={{ background:'var(--stone-100)', color:'var(--agent-intake)', border:'1px solid var(--agent-intake)44' }}
+                    onMouseEnter={e => e.target.style.filter='brightness(0.98)'} onMouseLeave={e => e.target.style.filter='none'}>
+                    Responder perguntas da Clara
+                  </button>
                   <button onClick={handleAnalyze} disabled={analyzing} className="px-4 py-2 text-xs font-medium rounded-lg transition-all duration-200"
                     style={{ background:'var(--stone-200)', color:'var(--stone-700)' }}
                     onMouseEnter={e => e.target.style.filter='brightness(0.95)'} onMouseLeave={e => e.target.style.filter='none'}>
@@ -534,14 +599,14 @@
                   <button onClick={() => setShowGate(true)} className="px-6 py-2 text-xs font-semibold rounded-lg transition-all duration-200"
                     style={{ background:'var(--agent-intake)', color:'white' }}
                     onMouseEnter={e => e.target.style.filter='brightness(1.15)'} onMouseLeave={e => e.target.style.filter='none'}>
-                    Confirmar Triagem &#8594;
+                    Prosseguir assim mesmo &#8594;
                   </button>
                 </div>
               )}
             </div>
 
             <div className="flex items-end rounded-lg p-2 transition-colors duration-200" style={{ background:'var(--stone-100)', border:'1px solid var(--stone-200)' }}>
-              <textarea value={input} onChange={e => setInput(e.target.value)}
+              <textarea ref={inputRef} value={input} onChange={e => setInput(e.target.value)}
                 onKeyDown={e => { if (e.key==='Enter' && !e.shiftKey) { e.preventDefault(); send(); } }}
                 placeholder="Descreva os fatos do caso..." rows={2}
                 className="flex-1 bg-transparent border-none outline-none resize-none px-2 text-sm" style={{ color:'var(--stone-900)' }} />
@@ -662,13 +727,24 @@
               },
             }];
           case 1: /* Research */
-            return teses.map((t, idx) => ({
+            const teseCards = teses.map((t, idx) => ({
               key: `tese-${t.id || idx}`,
               title: t.descricao,
               sub: (t.resposta_pesquisa || 'Theo ainda nao concluiu esta tese.').slice(0, 120),
               color: 'var(--agent-pesquisador)',
               tese: t,
             }));
+            const legislationComplementary = state?.pesquisa_legislacao_complementar || [];
+            if (legislationComplementary.length > 0) {
+              teseCards.push({
+                key: 'legislation-complementary',
+                title: 'Legislacao complementar',
+                sub: legislationComplementary.slice(0, 3).map(row => row.diploma || row.title || row.doc_id || 'Norma').join(' | '),
+                color: 'var(--agent-auditor)',
+                legislationComplementary,
+              });
+            }
+            return teseCards;
           case 2: /* Drafting */
             if (Object.keys(sections).length === 0) return [];
             return [{
@@ -743,7 +819,7 @@
                       const isExpanded = c.verification ? isVerificationExpanded : expandedCardKey === cardKey;
                       const isFindingCollapsed = !!collapsedFindingKeys[cardKey];
                       const isVerificationExpanded = expandedVerificationKeys[cardKey] ?? true;
-                      const expandable = c.tese || c.intake;
+                      const expandable = c.tese || c.intake || c.legislationComplementary;
                       const onCardClick = c.onClick || (expandable ? () => setExpandedCardKey(isExpanded ? null : cardKey) : undefined);
                       return (
                       <div key={cardKey} onClick={onCardClick}
@@ -810,6 +886,33 @@
                                 <span style={{ fontSize:10, color:'var(--stone-600)' }}>{(c.tese.legislacao || []).length} referencias</span>
                               </div>
                             </div>
+                          </div>
+                        )}
+                        {c.legislationComplementary && isExpanded && (
+                          <div className="mt-2.5 pt-2 space-y-2" style={{ borderTop:'1px solid var(--stone-300)' }}>
+                            <div className="font-mono font-bold" style={{ fontSize:9, color:'var(--agent-auditor)' }}>LEGISLACAO COMPLEMENTAR</div>
+                            {['processual', 'material', 'pedidos'].map((categoria) => {
+                              const grouped = c.legislationComplementary.filter(row => (row.categoria || 'material') === categoria);
+                              if (!grouped.length) return null;
+                              return (
+                                <div key={categoria} className="space-y-1">
+                                  <div className="font-mono font-bold" style={{ fontSize:9, color:'var(--stone-500)' }}>{categoria.toUpperCase()}</div>
+                                  {grouped.map((row, idx) => (
+                                    <div key={`${categoria}-${idx}`} className="p-2 rounded" style={{ background:'var(--stone-100)', border:'1px solid var(--stone-200)' }}>
+                                      <div style={{ fontSize:10, color:'var(--stone-800)', fontWeight:600 }}>
+                                        {row.article ? `art. ${row.article}` : (row.diploma || row.title || row.doc_id || 'Norma')}
+                                      </div>
+                                      <div style={{ fontSize:10, color:'var(--stone-500)' }}>
+                                        {row.diploma || row.title || row.doc_id || 'Norma sem identificacao'}
+                                      </div>
+                                      {row.query_origem && (
+                                        <div style={{ fontSize:9, color:'var(--stone-400)' }}>{row.query_origem}</div>
+                                      )}
+                                    </div>
+                                  ))}
+                                </div>
+                              );
+                            })}
                           </div>
                         )}
                         {c.draft && (
@@ -1088,6 +1191,9 @@
       const [casoId, setCasoId] = useState('');
       const [caseState, setCaseState] = useState(null); // RatioEscritorioState from backend
       const [events, setEvents] = useState([]);
+      const [historyOpen, setHistoryOpen] = useState(false);
+      const [historyItems, setHistoryItems] = useState([]);
+      const [snapshots, setSnapshots] = useState([]);
       const [agentDetail, setAgentDetail] = useState(null);
       const [caseList, setCaseList] = useState([]);
       const [sidebarOpen, setSidebarOpen] = useState(true);
@@ -1096,14 +1202,24 @@
       const [renameValue, setRenameValue] = useState('');
 
       /* ── Persist & restore active case ── */
+      const reloadCaseData = useCallback(async (id) => {
+        const [full, evts, historyResp, snapshotsResp] = await Promise.all([
+          api.getCase(id),
+          api.getEvents(id),
+          api.getHistory(id),
+          api.getSnapshots(id),
+        ]);
+        if (full && full.state) setCaseState(full.state);
+        if (evts && evts.events) setEvents(evts.events);
+        if (historyResp && historyResp.history) setHistoryItems(historyResp.history);
+        if (snapshotsResp && snapshotsResp.snapshots) setSnapshots(snapshotsResp.snapshots);
+      }, []);
+
       const switchToCase = useCallback(async (id) => {
         setCasoId(id);
         localStorage.setItem('ratio_escritorio_caso_id', id);
-        const full = await api.getCase(id);
-        if (full && full.state) setCaseState(full.state);
-        const evts = await api.getEvents(id);
-        if (evts && evts.events) setEvents(evts.events);
-      }, []);
+        await reloadCaseData(id);
+      }, [reloadCaseData]);
 
       const refreshCaseList = useCallback(async () => {
         const list = await api.listCases();
@@ -1177,8 +1293,7 @@
         localStorage.setItem('ratio_escritorio_caso_id', id);
         const resp = await api.createCase(id, tipo, '');
         if (resp) {
-          const full = await api.getCase(id);
-          if (full && full.state) setCaseState(full.state);
+          await reloadCaseData(id);
         }
         await refreshCaseList();
       };
@@ -1187,19 +1302,68 @@
         setCaseState(newState);
       };
 
+      const restoreCaseToSnapshot = async (snapshotId) => {
+        if (!casoId) return;
+        const resp = await api.restoreSnapshot(casoId, snapshotId);
+        if (resp && resp.state) {
+          setCaseState(resp.state);
+          await reloadCaseData(casoId);
+          await refreshCaseList();
+          setHistoryOpen(false);
+        }
+      };
+
+      const snapshotMap = Object.fromEntries((snapshots || []).map(snapshot => [snapshot.id, snapshot]));
+      const latestSnapshotId = snapshots.length ? snapshots[snapshots.length - 1].id : null;
+
+      const renderSnapshotResponse = (snapshot) => (
+        <div className="space-y-2">
+          {snapshot.state?.teses && snapshot.state?.teses.length > 0 && (
+            <div className="space-y-1">
+              <div className="font-mono font-bold" style={{ fontSize:9, color:'var(--agent-pesquisador)' }}>PESQUISA</div>
+              {snapshot.state?.teses.slice(0, 2).map((tese, idx) => (
+                <div key={tese.id || idx} className="rounded px-2 py-1.5" style={{ background:'var(--stone-100)', border:'1px solid var(--stone-200)' }}>
+                  <div style={{ fontSize:10, color:'var(--stone-800)', fontWeight:600 }}>{tese.descricao}</div>
+                  <div style={{ fontSize:10, color:'var(--stone-500)' }}>{(tese.resposta_pesquisa || '').slice(0, 120)}</div>
+                </div>
+              ))}
+            </div>
+          )}
+          {snapshot.state?.peca_sections && Object.keys(snapshot.state?.peca_sections || {}).length > 0 && (
+            <div className="space-y-1">
+              <div className="font-mono font-bold" style={{ fontSize:9, color:'var(--agent-redator)' }}>MINUTA</div>
+              {Object.entries(snapshot.state?.peca_sections || {}).slice(0, 3).map(([sectionKey, sectionText]) => (
+                <div key={sectionKey} className="rounded px-2 py-1.5" style={{ background:'var(--stone-100)', border:'1px solid var(--stone-200)' }}>
+                  <div style={{ fontSize:10, color:'var(--stone-800)', fontWeight:600 }}>{sectionKey}</div>
+                  <div style={{ fontSize:10, color:'var(--stone-500)' }}>{(sectionText || '').slice(0, 120)}</div>
+                </div>
+              ))}
+            </div>
+          )}
+          {snapshot.state?.critica_atual && (
+            <div className="space-y-1">
+              <div className="font-mono font-bold" style={{ fontSize:9, color:'var(--agent-contraparte)' }}>REVISAO</div>
+              <div className="rounded px-2 py-1.5" style={{ background:'var(--stone-100)', border:'1px solid var(--stone-200)' }}>
+                <div style={{ fontSize:10, color:'var(--stone-800)', fontWeight:600 }}>
+                  Score {snapshot.state?.critica_atual?.score_de_risco || 0}/100
+                </div>
+                <div style={{ fontSize:10, color:'var(--stone-500)' }}>
+                  {snapshot.state?.critica_atual?.analise_contestacao || snapshot.state?.critica_atual?.recomendacao || 'Sem resumo da rodada.'}
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      );
+
       /* Poll backend state and events periodically */
       useEffect(() => {
         if (!casoId || mode === -1) return;
         const iv = setInterval(async () => {
-          const [caseResp, evtResp] = await Promise.all([
-            api.getCase(casoId),
-            api.getEvents(casoId),
-          ]);
-          if (caseResp && caseResp.state) setCaseState(caseResp.state);
-          if (evtResp && evtResp.events) setEvents(evtResp.events);
+          await reloadCaseData(casoId);
         }, 3000);
         return () => clearInterval(iv);
-      }, [casoId, mode]);
+      }, [casoId, mode, reloadCaseData]);
 
       /* Close case context menu on outside click */
       useEffect(() => {
@@ -1213,69 +1377,34 @@
         <div className="flex h-screen w-full overflow-hidden" style={{ background:'var(--stone-50)', color:'var(--stone-900)' }}>
           {/* ── LEFT RAIL + CASE SIDEBAR ── */}
           <div className="h-full flex shrink-0">
-            {/* Icon rail — matches main app .left-rail exactly */}
-            <div className="h-full flex flex-col items-center shrink-0"
-              style={{ width:56, padding:'24px 0 20px', gap:18, background:'var(--stone-100)', borderRight:'1px solid var(--stone-200)' }}>
-              {/* Brand mark — .rail-brand */}
-              <div style={{ width:32, height:32, borderRadius:4, display:'grid', placeItems:'center',
-                background: theme==='dark' ? '#e8e5e2' : 'var(--stone-900)',
-                color: theme==='dark' ? '#141210' : 'var(--stone-50)',
-                boxShadow: theme==='dark' ? '0 1px 4px rgba(0,0,0,0.3)' : '0 1px 4px rgba(0,0,0,0.12)' }}>
+            {/* Icon rail — uses same CSS classes as main app */}
+            <div className="left-rail">
+              <div className="rail-brand">
                 <Icon name="scale" size={16} strokeWidth={1.75} />
               </div>
-              {/* Nav — .rail-nav */}
-              <div className="flex flex-col items-center" style={{ gap:14, flex:1, marginTop:8 }}>
-                {/* Meus Casos */}
-                {(() => {
-                  const hoverBg = theme==='dark' ? 'rgba(255,255,255,0.06)' : 'rgba(214,211,209,0.45)';
-                  const activeBg = theme==='dark' ? 'rgba(255,255,255,0.08)' : 'rgba(214,211,209,0.45)';
-                  const indicatorBg = theme==='dark' ? 'var(--accent)' : 'var(--stone-900)';
-                  const RailBtn = ({ icon, active, onClick, title, color, mt }) => (
-                    <button onClick={onClick} className="relative"
-                      style={{ width:32, height:32, border:0, borderRadius:6, display:'grid', placeItems:'center', cursor:'pointer',
-                        background: active ? activeBg : 'transparent',
-                        color: color || (active ? 'var(--stone-900)' : 'var(--stone-400)'),
-                        transition:'color 140ms ease, background-color 140ms ease',
-                        ...(mt ? { marginTop:'auto' } : {}) }}
-                      title={title}
-                      onMouseEnter={e => { e.currentTarget.style.background=hoverBg; if (!color) e.currentTarget.style.color='var(--stone-900)'; }}
-                      onMouseLeave={e => { if (!active) { e.currentTarget.style.background='transparent'; if (!color) e.currentTarget.style.color='var(--stone-400)'; }}}>
-                      {active && <div style={{ position:'absolute', left:-12, top:6, bottom:6, width:2, borderRadius:'0 2px 2px 0', background: indicatorBg }} />}
-                      <Icon name={icon} size={16} strokeWidth={1.75} />
-                    </button>
-                  );
-                  return (<>
-                    <RailBtn icon="folder" active={sidebarOpen} onClick={() => { setSidebarOpen(!sidebarOpen); refreshCaseList(); }} title="Meus Casos" />
-                    <RailBtn icon="file-plus" onClick={() => startCase('peticao_inicial')} title="Novo Caso" />
-                    {casoId && (
-                      <div className="relative" style={{ width:32, height:32, display:'grid', placeItems:'center' }}>
-                        <div style={{ position:'absolute', left:-12, top:6, bottom:6, width:2, borderRadius:'0 2px 2px 0', background:'var(--accent)' }} />
-                        <Icon name="briefcase" size={16} strokeWidth={1.75} style={{ color:'var(--accent)' }} />
-                      </div>
-                    )}
-                  </>);
-                })()}
-              </div>
-              {/* Bottom — .rail-settings */}
-              {(() => {
-                const hoverBg = theme==='dark' ? 'rgba(255,255,255,0.06)' : 'rgba(214,211,209,0.45)';
-                const RailBtnBottom = ({ icon, onClick, title, mt }) => (
-                  <button onClick={onClick}
-                    style={{ width:32, height:32, border:0, borderRadius:6, display:'grid', placeItems:'center', cursor:'pointer',
-                      background:'transparent', color:'var(--stone-400)',
-                      transition:'color 140ms ease, background-color 140ms ease',
-                      ...(mt ? { marginTop:'auto' } : {}) }}
-                    title={title}
-                    onMouseEnter={e => { e.currentTarget.style.background=hoverBg; e.currentTarget.style.color='var(--stone-900)'; }}
-                    onMouseLeave={e => { e.currentTarget.style.background='transparent'; e.currentTarget.style.color='var(--stone-400)'; }}>
-                    <Icon name={icon} size={16} strokeWidth={1.75} />
+              <nav className="rail-nav">
+                <button className={`rail-btn${sidebarOpen ? ' active' : ''}`}
+                  onClick={() => { setSidebarOpen(!sidebarOpen); refreshCaseList(); }} title="Meus Casos">
+                  <Icon name="folder" size={16} strokeWidth={1.75} />
+                </button>
+                <button className="rail-btn" onClick={() => startCase('peticao_inicial')} title="Novo Caso">
+                  <Icon name="file-plus" size={16} strokeWidth={1.75} />
+                </button>
+                {casoId && (
+                  <button className="rail-btn active" style={{ cursor:'default', color:'var(--accent)' }}>
+                    <Icon name="briefcase" size={16} strokeWidth={1.75} style={{ color:'var(--accent)' }} />
                   </button>
-                );
-                return (<>
-                  <RailBtnBottom icon={theme==='dark'?'sun':'moon'} onClick={toggleTheme} title={theme==='dark'?'Tema claro':'Tema escuro'} mt />
-                  <RailBtnBottom icon="settings" title="Configuracoes" />
-                </>);
-              })()}
+                )}
+              </nav>
+              <div className="rail-bottom">
+                <button className="rail-btn" onClick={toggleTheme}
+                  title={theme==='dark'?'Tema claro':'Tema escuro'}>
+                  <Icon name={theme==='dark'?'sun':'moon'} size={16} strokeWidth={1.75} />
+                </button>
+                <button className="rail-btn" title="Configuracoes">
+                  <Icon name="settings" size={16} strokeWidth={1.75} />
+                </button>
+              </div>
             </div>
 
             {/* Case sidebar panel */}
@@ -1456,6 +1585,12 @@
               <div className="flex items-center space-x-3">
                 {mode >= 0 && caseState && (
                   <>
+                    <button
+                      onClick={() => setHistoryOpen(true)}
+                      className="font-mono px-2 py-1 rounded transition-all duration-200"
+                      style={{ fontSize:9, color:'var(--stone-500)', border:'1px solid var(--stone-300)' }}>
+                      Histórico do fluxo
+                    </button>
                     <span className="font-mono px-2 py-1 rounded" style={{ fontSize:9, color:'var(--stone-500)', border:'1px solid var(--stone-300)' }}>
                       {caseState.status}
                     </span>
@@ -1513,6 +1648,46 @@
               {mode === 0 && <IntakeMode casoId={casoId} state={caseState} onStateUpdate={handleStateUpdate} />}
               {mode === 1 && <WorkspaceMode casoId={casoId} state={caseState} events={events} onStateUpdate={handleStateUpdate} />}
               {mode === 2 && <DeliveryMode casoId={casoId} state={caseState} />}
+              {historyOpen && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center anim-fade" style={{ background:'rgba(0,0,0,0.45)', backdropFilter:'blur(6px)' }}>
+                  <div className="w-full max-w-5xl max-h-[88vh] flex flex-col rounded-xl anim-slide" style={{ background:'var(--stone-100)', border:'1px solid var(--stone-300)', boxShadow:'0 24px 48px rgba(0,0,0,0.3)' }}>
+                    <div className="flex items-center justify-between p-4" style={{ borderBottom:'1px solid var(--stone-200)' }}>
+                      <div>
+                        <h3 className="font-serif text-lg font-bold" style={{ color:'var(--stone-900)' }}>Histórico do fluxo</h3>
+                        <p style={{ fontSize:10, color:'var(--stone-500)' }}>Visualize o caminho completo do caso e volte para uma etapa anterior quando necessário.</p>
+                      </div>
+                      <button onClick={() => setHistoryOpen(false)} style={{ color:'var(--stone-400)' }}>
+                        <Icon name="x" className="w-4 h-4" />
+                      </button>
+                    </div>
+                    <div className="flex-1 overflow-y-auto p-4 space-y-3">
+                      {historyItems.map((item) => {
+                        const snapshot = snapshotMap[item.snapshot_id] || {};
+                        const isCurrent = latestSnapshotId === item.snapshot_id;
+                        return (
+                          <div key={item.snapshot_id} className="rounded-xl p-4 space-y-3" style={{ background:'var(--stone-50)', border:'1px solid var(--stone-200)' }}>
+                            <div className="flex items-start justify-between gap-4">
+                              <div>
+                                <div className="font-mono font-bold" style={{ fontSize:10, color:'var(--stone-500)' }}>{item.stage}</div>
+                                <div style={{ fontSize:13, color:'var(--stone-900)', fontWeight:600 }}>{item.summary}</div>
+                                <div className="font-mono" style={{ fontSize:9, color:'var(--stone-400)' }}>{item.created_at || ''}</div>
+                              </div>
+                              <button
+                                disabled={isCurrent}
+                                onClick={() => restoreCaseToSnapshot(item.snapshot_id)}
+                                className="px-3 py-1.5 rounded-lg text-xs font-semibold transition-all duration-200"
+                                style={{ background:isCurrent ? 'var(--stone-200)' : 'var(--accent)', color:isCurrent ? 'var(--stone-500)' : 'var(--stone-50)' }}>
+                                {isCurrent ? 'Etapa atual' : 'Voltar para esta etapa'}
+                              </button>
+                            </div>
+                            {renderSnapshotResponse(snapshot)}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </div>
+              )}
               {agentDetail ? <AgentDetailModal agentId={agentDetail} state={caseState} events={events} onClose={() => setAgentDetail(null)} /> : null}
             </div>
           </div>

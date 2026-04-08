@@ -382,3 +382,84 @@ async def test_run_adversarial_graph_registers_round_and_stops_for_human_review(
     assert result.rodada_atual == 1
     assert len(result.rodadas) == 1
     assert result.critica_atual is not None
+
+
+@pytest.mark.anyio
+async def test_run_adversarial_graph_appends_new_round_after_human_review(monkeypatch):
+    previous_round = {
+        "numero": 1,
+        "resumo_rodada": "primeira rodada",
+        "critica_contraparte": {
+            "falhas_processuais": [],
+            "argumentos_materiais_fracos": [
+                {
+                    "finding_id": "r1-argumentos_materiais_fracos-1",
+                    "descricao": "fragilidade inicial",
+                    "argumento_contrario": "ataque inicial",
+                    "secao_afetada": "dos_fatos",
+                }
+            ],
+            "jurisprudencia_faltante": [],
+            "score_de_risco": 55,
+            "analise_contestacao": "ha problema",
+            "recomendacao": "revisar",
+        },
+        "secoes_revisadas": ["dos_fatos"],
+        "edicoes_humanas": {"dos_fatos": "texto revisado"},
+    }
+    initial = RatioEscritorioState(
+        caso_id="caso-1",
+        tipo_peca="peticao_inicial",
+        gate1_aprovado=True,
+        gate2_aprovado=True,
+        peca_sections={"dos_fatos": "texto revisado"},
+        rodada_atual=1,
+        rodadas=[previous_round],
+        critica_atual=previous_round["critica_contraparte"],
+        status="revisao_humana",
+        workflow_stage="revisao_humana",
+        usuario_finaliza=False,
+    )
+    store = _FakeStore(initial)
+
+    async def fake_contraparte_node(state):  # noqa: ARG001
+        return {
+            "status": "adversarial",
+            "workflow_stage": "adversarial",
+            "critica_atual": {
+                "falhas_processuais": [],
+                "argumentos_materiais_fracos": [
+                    {
+                        "descricao": "nova fragilidade",
+                        "argumento_contrario": "novo ataque",
+                        "secao_afetada": "do_direito",
+                    }
+                ],
+                "jurisprudencia_faltante": [],
+                "score_de_risco": 25,
+                "analise_contestacao": "melhorou, mas ainda ha risco",
+                "recomendacao": "revisar",
+            },
+        }
+
+    monkeypatch.setattr(
+        "backend.escritorio.graph.adversarial_graph.contraparte_node",
+        fake_contraparte_node,
+    )
+    monkeypatch.setattr(
+        "backend.escritorio.graph.adversarial_graph.anti_sycophancy_node",
+        lambda state: {"status": "adversarial", "workflow_stage": "adversarial", "contraparte_retries": 0},
+    )
+    monkeypatch.setattr(
+        "backend.escritorio.graph.adversarial_graph.sycophancy_router",
+        lambda state: "aceita",
+    )
+
+    result = await run_adversarial_graph(initial, store)
+
+    assert result.workflow_stage == "revisao_humana"
+    assert result.rodada_atual == 2
+    assert len(result.rodadas) == 2
+    assert result.rodadas[0].numero == 1
+    assert result.rodadas[1].numero == 2
+    assert result.rodadas[1].critica_contraparte.argumentos_materiais_fracos[0].descricao == "nova fragilidade"

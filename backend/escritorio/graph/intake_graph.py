@@ -6,7 +6,7 @@ from typing import Any, Callable
 from langgraph.graph import END, START, StateGraph
 
 from backend.escritorio.intake_llm import generate_intake_with_gemini
-from backend.escritorio.models import RatioEscritorioState
+from backend.escritorio.models import IntakeMessage, RatioEscritorioState
 
 log = logging.getLogger(__name__)
 
@@ -23,14 +23,27 @@ async def intake_node(state: RatioEscritorioState) -> dict[str, Any]:
     fatos = list(parsed.get("fatos_estruturados") or [])
     provas = list(parsed.get("provas_disponiveis") or [])
     pontos = list(parsed.get("pontos_atencao") or [])
+    resposta_conversacional = str(parsed.get("resposta_conversacional_clara") or "").strip()
+    perguntas_pendentes = list(parsed.get("perguntas_pendentes") or [])
+    triagem_suficiente = bool(parsed.get("triagem_suficiente"))
 
     has_structured_data = len(fatos) > 0
     status = "gate1" if has_structured_data else "intake"
-    log.info("intake_node: concluido — status=%s (fatos=%d)", status, len(fatos))
+    log.info("intake_node: concluido - status=%s (fatos=%d)", status, len(fatos))
+
+    updated_history = list(state.intake_history or [])
+    if resposta_conversacional:
+        if not updated_history or updated_history[-1].role != "assistant" or updated_history[-1].content != resposta_conversacional:
+            updated_history.append(IntakeMessage(role="assistant", content=resposta_conversacional))
+
     return {
         "fatos_estruturados": fatos,
         "provas_disponiveis": provas,
         "pontos_atencao": pontos,
+        "resposta_conversacional_clara": resposta_conversacional,
+        "perguntas_pendentes": perguntas_pendentes,
+        "triagem_suficiente": triagem_suficiente,
+        "intake_history": updated_history,
         "status": status,
         "workflow_stage": status,
     }

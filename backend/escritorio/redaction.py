@@ -34,6 +34,26 @@ def _format_teses_for_redaction_prompt(state: RatioEscritorioState) -> list[str]
     return lines
 
 
+def _format_legislation_row(row: dict[str, object]) -> str:
+    article = str(row.get("article") or row.get("artigo") or "").strip()
+    diploma = str(row.get("diploma") or row.get("title") or row.get("doc_id") or "Norma sem id").strip()
+    if article and diploma:
+        return f"- art. {article} do {diploma}"
+    if article:
+        return f"- art. {article}"
+    return f"- {diploma}"
+
+
+def _group_complementary_legislation(state: RatioEscritorioState) -> dict[str, list[str]]:
+    grouped = {"processual": [], "material": [], "pedidos": []}
+    for row in state.pesquisa_legislacao_complementar[:12]:
+        categoria = str(row.get("categoria") or "material").strip().lower()
+        if categoria not in grouped:
+            categoria = "material"
+        grouped[categoria].append(_format_legislation_row(row))
+    return grouped
+
+
 def build_redaction_prompt(state: RatioEscritorioState) -> str:
     facts = (state.fatos_brutos or "").strip() or "Sem fatos informados."
     teses = _format_teses_for_redaction_prompt(state)
@@ -41,10 +61,17 @@ def build_redaction_prompt(state: RatioEscritorioState) -> str:
         f"- {row.get('processo') or row.get('doc_id') or 'Documento sem id'}"
         for row in state.pesquisa_jurisprudencia[:10]
     ] or ["- Sem jurisprudencia curada"]
-    legislacao = [
-        f"- {row.get('diploma') or row.get('doc_id') or 'Norma sem id'}"
-        for row in state.pesquisa_legislacao[:10]
-    ] or ["- Sem legislacao curada"]
+    legislacao = [_format_legislation_row(row) for row in state.pesquisa_legislacao[:10]] or ["- Sem legislacao curada"]
+    grouped_legislation = _group_complementary_legislation(state)
+    complementary_lines = []
+    if any(grouped_legislation.values()):
+        for label, items in grouped_legislation.items():
+            if not items:
+                continue
+            complementary_lines.append(label.upper() + ":")
+            complementary_lines.extend(items)
+    else:
+        complementary_lines = ["- Sem legislacao complementar"]
 
     return (
         "Voce e um advogado redator especialista em contencioso.\n"
@@ -57,7 +84,9 @@ def build_redaction_prompt(state: RatioEscritorioState) -> str:
         + "\n".join(teses)
         + "\n\nJurisprudencia:\n"
         + "\n".join(jurisprudencia)
-        + "\n\nLegislacao:\n"
+        + "\n\nLegislacao complementar:\n"
+        + "\n".join(complementary_lines)
+        + "\n\nLegislacao base da pesquisa:\n"
         + "\n".join(legislacao)
     )
 
@@ -151,6 +180,10 @@ def build_section_evidence_pack(
             if candidate.canonical_key:
                 pool_keys.append(candidate.canonical_key)
     for row in state.pesquisa_legislacao:
+        for candidate in _candidate_from_research_row(row):
+            if candidate.canonical_key:
+                pool_keys.append(candidate.canonical_key)
+    for row in state.pesquisa_legislacao_complementar:
         for candidate in _candidate_from_research_row(row):
             if candidate.canonical_key:
                 pool_keys.append(candidate.canonical_key)

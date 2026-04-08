@@ -60,6 +60,37 @@ def test_build_redaction_prompt_includes_theo_research_text_per_tese():
     assert "Theo identificou tese subsidiaria de dano moral" in prompt
 
 
+def test_build_redaction_prompt_includes_complementary_legislation_groups():
+    state = RatioEscritorioState(
+        caso_id="caso-1",
+        tipo_peca="peticao_inicial",
+        fatos_brutos="Autor pede gratuidade de justica e inversao do onus da prova.",
+        teses=[
+            TeseJuridica(
+                id="t1",
+                descricao="Responsabilidade objetiva",
+                tipo="principal",
+                resposta_pesquisa="Theo concluiu que ha defeito do servico.",
+            )
+        ],
+        pesquisa_legislacao=[
+            {"doc_id": "lei-1", "diploma": "CDC", "article": "14", "categoria": "material"},
+        ],
+        pesquisa_legislacao_complementar=[
+            {"doc_id": "lei-2", "diploma": "CPC", "article": "98", "categoria": "processual"},
+            {"doc_id": "lei-3", "diploma": "CDC", "article": "6", "categoria": "material"},
+        ],
+    )
+
+    prompt = build_redaction_prompt(state)
+
+    assert "Legislacao complementar" in prompt
+    assert "PROCESSUAL" in prompt
+    assert "MATERIAL" in prompt
+    assert "art. 98 do CPC" in prompt
+    assert "art. 6 do CDC" in prompt
+
+
 def test_parse_sections_payload_returns_dict_of_sections():
     payload = """
     {

@@ -148,3 +148,86 @@ def test_case_download_endpoint_returns_generated_docx(monkeypatch, tmp_path: Pa
 
     assert response.status_code == 200
     assert response.content == b"docx-bytes"
+
+
+def test_case_restore_endpoint_restores_selected_snapshot(monkeypatch, tmp_path: Path):
+    root = tmp_path / "ratio_escritorio"
+    monkeypatch.setenv("RATIO_ESCRITORIO_ROOT", str(root))
+    client = TestClient(app)
+
+    client.post(
+        "/api/escritorio/cases",
+        json={"caso_id": "caso-1", "tipo_peca": "peticao_inicial"},
+    )
+    client.post(
+        "/api/escritorio/cases/caso-1/gates/gate1",
+        json={"approved": True},
+    )
+    client.post(
+        "/api/escritorio/cases/caso-1/draft",
+        json={"sections": {"fatos": "minuta inicial"}},
+    )
+
+    snapshots = client.get("/api/escritorio/cases/caso-1/snapshots")
+    pesquisa_snapshot = next(s for s in snapshots.json()["snapshots"] if s["stage"] == "pesquisa")
+
+    response = client.post(
+        f"/api/escritorio/cases/caso-1/restore",
+        json={"snapshot_id": pesquisa_snapshot["id"]},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["state"]["status"] == "pesquisa"
+    assert payload["state"]["workflow_stage"] == "pesquisa"
+
+    events = client.get("/api/escritorio/cases/caso-1/events").json()["events"]
+    assert events[-1]["event_type"] == "case.restored"
+    assert events[-1]["data"]["snapshot_id"] == pesquisa_snapshot["id"]
+
+
+def test_case_restore_endpoint_returns_404_for_unknown_snapshot(monkeypatch, tmp_path: Path):
+    root = tmp_path / "ratio_escritorio"
+    monkeypatch.setenv("RATIO_ESCRITORIO_ROOT", str(root))
+    client = TestClient(app)
+
+    client.post(
+        "/api/escritorio/cases",
+        json={"caso_id": "caso-1", "tipo_peca": "peticao_inicial"},
+    )
+
+    response = client.post(
+        "/api/escritorio/cases/caso-1/restore",
+        json={"snapshot_id": 9999},
+    )
+
+    assert response.status_code == 404
+    assert response.json()["detail"]["code"] == "snapshot_not_found"
+
+
+def test_case_history_endpoint_returns_stage_timeline(monkeypatch, tmp_path: Path):
+    root = tmp_path / "ratio_escritorio"
+    monkeypatch.setenv("RATIO_ESCRITORIO_ROOT", str(root))
+    client = TestClient(app)
+
+    client.post(
+        "/api/escritorio/cases",
+        json={"caso_id": "caso-1", "tipo_peca": "peticao_inicial"},
+    )
+    client.post(
+        "/api/escritorio/cases/caso-1/gates/gate1",
+        json={"approved": True},
+    )
+    client.post(
+        "/api/escritorio/cases/caso-1/draft",
+        json={"sections": {"fatos": "minuta inicial"}},
+    )
+
+    response = client.get("/api/escritorio/cases/caso-1/history")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["history"][0]["stage"] == "intake"
+    assert payload["history"][-1]["stage"] == "redacao"
+    assert payload["history"][-1]["snapshot_id"] > 0
+    assert payload["history"][-1]["summary"]

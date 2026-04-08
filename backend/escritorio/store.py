@@ -225,6 +225,28 @@ class CaseStore:
             for row in rows
         ]
 
+    def load_snapshot(self, snapshot_id: int) -> dict[str, Any] | None:
+        with self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT id, stage, state_json, created_at
+                FROM case_snapshots
+                WHERE id = ?
+                LIMIT 1
+                """,
+                (snapshot_id,),
+            ).fetchone()
+
+        if row is None:
+            return None
+
+        return {
+            "id": row["id"],
+            "stage": row["stage"],
+            "state": json.loads(row["state_json"]),
+            "created_at": row["created_at"],
+        }
+
     def load_latest_state(self) -> RatioEscritorioState | None:
         snapshot = self.load_latest_snapshot()
         if snapshot is None:

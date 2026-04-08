@@ -21,6 +21,19 @@ def test_build_case_decomposition_prompt_mentions_3_to_5_objective_theses():
     assert "Cliente relata cobrancas indevidas e negativacao." in prompt
 
 
+def test_build_case_decomposition_prompt_includes_new_intake_information():
+    state = RatioEscritorioState(
+        caso_id="caso-1",
+        tipo_peca="peticao_inicial",
+        fatos_brutos="Relato inicial.\nO reu e o Banco X e houve pedido de justica gratuita.",
+    )
+
+    prompt = build_case_decomposition_prompt(state)
+
+    assert "Banco X" in prompt
+    assert "justica gratuita" in prompt
+
+
 def test_parse_teses_payload_validates_json_list():
     payload = """
     [
@@ -56,7 +69,7 @@ async def test_decompose_case_with_gemini_defaults_to_gemini_3_flash_preview(mon
 
     assert captured["model"] == "gemini-3-flash-preview"
     assert teses[0].descricao == "CDC"
-    assert getattr(getattr(captured["config"], "http_options", None), "timeout", None) == 45000
+    assert getattr(getattr(captured["config"], "http_options", None), "timeout", None) == 120000
 
 
 def test_parse_teses_payload_unwraps_envelope_object():

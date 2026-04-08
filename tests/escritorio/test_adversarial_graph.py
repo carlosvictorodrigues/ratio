@@ -1,5 +1,6 @@
 import pytest
 
+from backend.escritorio.adversarial import apply_human_revision
 from backend.escritorio.graph.adversarial_graph import build_adversarial_graph
 from backend.escritorio.models import RatioEscritorioState
 
@@ -220,3 +221,64 @@ def test_default_verificador_node_uses_real_verifier_layer(monkeypatch):
     assert captured["sections"]["do_direito"] == "Conforme REsp 1.234.567/SP."
     assert result["verificacoes"][0]["level"] == "exact_match"
     assert result["workflow_stage"] == "verificacao"
+
+
+def test_apply_human_revision_without_finalize_keeps_review_loop_open():
+    state = RatioEscritorioState(
+        caso_id="caso-1",
+        tipo_peca="peticao_inicial",
+        peca_sections={"dos_fatos": "Texto original."},
+        rodada_atual=1,
+        rodadas=[
+            {
+                "numero": 1,
+                "resumo_rodada": "primeira rodada",
+                "critica_contraparte": {
+                    "falhas_processuais": [],
+                    "argumentos_materiais_fracos": [
+                        {
+                            "finding_id": "r1-argumentos_materiais_fracos-1",
+                            "descricao": "fragilidade inicial",
+                            "argumento_contrario": "ataque inicial",
+                            "secao_afetada": "dos_fatos",
+                        }
+                    ],
+                    "jurisprudencia_faltante": [],
+                    "score_de_risco": 55,
+                    "analise_contestacao": "ha problema",
+                    "recomendacao": "revisar",
+                },
+            }
+        ],
+        critica_atual={
+            "falhas_processuais": [],
+            "argumentos_materiais_fracos": [
+                {
+                    "finding_id": "r1-argumentos_materiais_fracos-1",
+                    "descricao": "fragilidade inicial",
+                    "argumento_contrario": "ataque inicial",
+                    "secao_afetada": "dos_fatos",
+                }
+            ],
+            "jurisprudencia_faltante": [],
+            "score_de_risco": 55,
+            "analise_contestacao": "ha problema",
+            "recomendacao": "revisar",
+        },
+        status="revisao_humana",
+        workflow_stage="revisao_humana",
+    )
+
+    updated = apply_human_revision(
+        state,
+        section_updates={"dos_fatos": "Texto revisado."},
+        notes="Reforcei o fato central.",
+        finalize=False,
+    )
+
+    assert updated.usuario_finaliza is False
+    assert updated.status == "revisao_humana"
+    assert updated.workflow_stage == "revisao_humana"
+    assert updated.rodada_atual == 1
+    assert len(updated.rodadas) == 1
+    assert updated.rodadas[0].edicoes_humanas["dos_fatos"] == "Texto revisado."

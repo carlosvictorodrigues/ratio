@@ -85,6 +85,7 @@ class RatioEscritorioState(BaseModel):
     teses: list[TeseJuridica] = Field(default_factory=list)
     pesquisa_jurisprudencia: list[dict[str, Any]] = Field(default_factory=list)
     pesquisa_legislacao: list[dict[str, Any]] = Field(default_factory=list)
+    pesquisa_legislacao_complementar: list[dict[str, Any]] = Field(default_factory=list)
     peca_sections: dict[str, str] = Field(default_factory=dict)
     proveniencia: dict[str, list[str]] = Field(default_factory=dict)
     evidence_pack: dict[str, list[str]] = Field(default_factory=dict)
@@ -93,6 +94,9 @@ class RatioEscritorioState(BaseModel):
     critica_atual: CriticaContraparte | None = None
     intake_history: list[IntakeMessage] = Field(default_factory=list)
     intake_checklist: IntakeChecklist = Field(default_factory=IntakeChecklist)
+    resposta_conversacional_clara: str = ""
+    perguntas_pendentes: list[str] = Field(default_factory=list)
+    triagem_suficiente: bool = False
     gate1_aprovado: bool = False
     gate2_aprovado: bool = False
     usuario_finaliza: bool = False

@@ -18,8 +18,8 @@ def test_escritorio_frontend_no_longer_contains_mock_runtime_data():
 def test_escritorio_frontend_uses_named_confirmations_instead_of_gate_labels():
     html = _read("frontend/Escritorio/escritorio.html")
 
-    assert "Confirmação da Triagem" in html
-    assert "Confirmação da Pesquisa" in html
+    assert 'gateLabel="Confirma' in html
+    assert 'gateDesc="Base de pesquisa suficiente para redigir?' in html
     assert "Gate {gate}" not in html
 
 
@@ -28,6 +28,8 @@ def test_escritorio_frontend_renders_theo_textual_output_per_tese():
 
     assert "resposta_pesquisa" in html
     assert "Theo ainda nao concluiu esta tese." in html
+    assert "LEGISLACAO COMPLEMENTAR" in html
+    assert "legislationComplementary" in html
 
 
 def test_escritorio_frontend_uses_single_draft_modal_for_helena_sections():
@@ -39,6 +41,16 @@ def test_escritorio_frontend_uses_single_draft_modal_for_helena_sections():
     assert "Object.entries(draftSections || {})" in html
     assert "editSec" not in html
     assert "editContent" not in html
+
+
+def test_escritorio_frontend_renders_clara_conversational_gate1_panel():
+    html = _read("frontend/Escritorio/escritorio.html")
+
+    assert "resposta_conversacional_clara" in html
+    assert "perguntas_pendentes" in html
+    assert "Responder perguntas da Clara" in html
+    assert "Prosseguir assim mesmo" in html
+    assert "TRIAGEM DA CLARA" in html
 
 
 def test_escritorio_frontend_prefers_active_case_on_restore_instead_of_delivery_case():
@@ -81,7 +93,28 @@ def test_escritorio_frontend_hides_marco_finalize_controls_after_verification_st
 def test_escritorio_frontend_renders_auditor_cards_with_real_verification_details():
     html = _read("frontend/Escritorio/escritorio.html")
 
-    assert "title: v.referencia || v.section || v.item || v.check || 'Verificação'" in html
+    assert "title: v.referencia || v.section || v.item || v.check || 'Verifica" in html
     assert "sub: v.level || v.result || v.status || 'ok'" in html
     assert "c.verification && isExpanded" in html
     assert "DETALHE DA VERIFICACAO" in html
+
+
+def test_escritorio_frontend_exposes_history_and_restore_controls():
+    html = _read("frontend/Escritorio/escritorio.html")
+
+    assert "getHistory: (id) => api._f(`/cases/${id}/history`)" in html
+    assert "getSnapshots: (id) => api._f(`/cases/${id}/snapshots`)" in html
+    assert "restoreSnapshot: (id, snapshotId) => api._f(`/cases/${id}/restore`" in html
+    assert "do fluxo" in html
+    assert "Voltar para esta etapa" in html
+
+
+def test_escritorio_frontend_renders_snapshot_responses_inside_history_modal():
+    html = _read("frontend/Escritorio/escritorio.html")
+
+    assert "historyOpen" in html
+    assert "historyItems" in html
+    assert "snapshotMap" in html
+    assert "snapshot.state?.teses" in html
+    assert "snapshot.state?.peca_sections" in html
+    assert "snapshot.state?.critica_atual" in html
