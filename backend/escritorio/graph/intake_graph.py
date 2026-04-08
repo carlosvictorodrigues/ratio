@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import logging
+import inspect
 from typing import Any, Callable
 
 from langgraph.graph import END, START, StateGraph
 
+from backend.escritorio.costing import merge_usage_into_state
 from backend.escritorio.intake_llm import generate_intake_with_gemini
 from backend.escritorio.models import IntakeMessage, RatioEscritorioState
 
@@ -14,10 +16,15 @@ log = logging.getLogger(__name__)
 async def intake_node(state: RatioEscritorioState) -> dict[str, Any]:
     log.info("intake_node: chamando Gemini para analise de intake...")
     try:
-        parsed = await generate_intake_with_gemini(state)
+        if "return_usage" in inspect.signature(generate_intake_with_gemini).parameters:
+            parsed, usage_entry = await generate_intake_with_gemini(state, return_usage=True)
+        else:
+            parsed = await generate_intake_with_gemini(state)
+            usage_entry = None
     except Exception:
         log.exception("intake_node: falha ao gerar intake com Gemini")
         parsed = {}
+        usage_entry = None
 
     log.info("intake_node: resposta Gemini recebida. Processando...")
     fatos = list(parsed.get("fatos_estruturados") or [])
@@ -44,6 +51,7 @@ async def intake_node(state: RatioEscritorioState) -> dict[str, Any]:
         "perguntas_pendentes": perguntas_pendentes,
         "triagem_suficiente": triagem_suficiente,
         "intake_history": updated_history,
+        **merge_usage_into_state(state, usage_entry),
         "status": status,
         "workflow_stage": status,
     }

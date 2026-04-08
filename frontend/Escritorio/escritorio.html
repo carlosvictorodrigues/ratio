@@ -60,9 +60,10 @@
     }
     .rail-btn {
       width: 32px; height: 32px; border: 0; background: transparent;
-      color: var(--stone-400); border-radius: 6px; display: grid; place-items: center;
+      color: var(--stone-500); border-radius: 6px; display: grid; place-items: center;
       cursor: pointer; position: relative; transition: color 140ms ease, background-color 140ms ease;
     }
+    [data-theme="light"] .rail-btn { color: var(--stone-400); }
     .rail-btn:hover { color: var(--stone-900); background: rgba(255,255,255,0.06); }
     [data-theme="light"] .rail-btn:hover { background: rgba(214,211,209,0.45); }
     .rail-btn.active { color: var(--stone-900); }
@@ -160,12 +161,24 @@
     };
 
     /* ══════════ ICON HELPER ══════════ */
+    function resolveLucideIconNode(name) {
+      const raw = String(name || '').trim();
+      if (!raw || !window.lucide || !window.lucide.icons) return null;
+      const normalized = raw
+        .split('-')
+        .filter(Boolean)
+        .map(part => part.charAt(0).toUpperCase() + part.slice(1))
+        .join('');
+      return window.lucide.icons[normalized] || window.lucide.icons[raw] || null;
+    }
+
     function Icon({ name, className = "w-5 h-5", style, size, strokeWidth }) {
       const ref = useRef(null);
       useEffect(() => {
-        if (ref.current && lucide.icons[name]) {
+        const iconNode = resolveLucideIconNode(name);
+        if (ref.current && iconNode && window.lucide && typeof window.lucide.createElement === 'function') {
           ref.current.innerHTML = '';
-          const el = lucide.createElement(lucide.icons[name]);
+          const el = window.lucide.createElement(iconNode);
           if (className) el.setAttribute('class', className);
           /* Apply size directly to SVG so strokes render at correct scale */
           const sz = size || (style && style.width) || null;
@@ -529,12 +542,6 @@
               {hasAnalysis && (
                 <div className="rounded-lg p-4 anim-fade" style={{ background:'var(--stone-50)', border:'1px solid var(--stone-200)', borderLeft:'3px solid var(--agent-intake)' }}>
                   <p className="text-xs font-semibold mb-3" style={{ color:'var(--agent-intake)' }}>TRIAGEM DA CLARA</p>
-                  {respostaClara && (
-                    <div className="mb-3 p-3 rounded-lg" style={{ background:'var(--stone-100)', border:'1px solid var(--stone-200)' }}>
-                      <p className="text-xs font-semibold mb-1" style={{ color:'var(--agent-intake)' }}>Clara</p>
-                      <p className="text-xs leading-relaxed" style={{ color:'var(--stone-700)' }}>{respostaClara}</p>
-                    </div>
-                  )}
                   {fatos.length > 0 && (
                     <div className="mb-3">
                       <p className="text-xs font-semibold mb-1" style={{ color:'var(--stone-600)' }}>Fatos Estruturados ({fatos.length})</p>
@@ -554,8 +561,8 @@
                     </div>
                   )}
                   {perguntasPendentes.length > 0 && (
-                    <div className="mt-3">
-                      <p className="text-xs font-semibold mb-1" style={{ color:'var(--stone-600)' }}>Perguntas pendentes ({perguntasPendentes.length})</p>
+                    <div className="mt-3 p-3 rounded-lg" style={{ background:'var(--stone-100)', border:'1px solid var(--accent)44' }}>
+                      <p className="text-xs font-semibold mb-2" style={{ color:'var(--accent)' }}>O QUE A CLARA AINDA PRECISA CONFIRMAR</p>
                       <ul className="space-y-1">
                         {perguntasPendentes.map((pergunta, i) => (
                           <li key={i} className="text-xs pl-3" style={{ color:'var(--stone-700)', borderLeft:'2px solid var(--accent)' }}>{pergunta}</li>
@@ -586,11 +593,6 @@
               )}
               {hasAnalysis && !showGate && (
                 <div className="flex justify-center gap-3 anim-fade">
-                  <button onClick={() => inputRef.current?.focus()} className="px-4 py-2 text-xs font-medium rounded-lg transition-all duration-200"
-                    style={{ background:'var(--stone-100)', color:'var(--agent-intake)', border:'1px solid var(--agent-intake)44' }}
-                    onMouseEnter={e => e.target.style.filter='brightness(0.98)'} onMouseLeave={e => e.target.style.filter='none'}>
-                    Responder perguntas da Clara
-                  </button>
                   <button onClick={handleAnalyze} disabled={analyzing} className="px-4 py-2 text-xs font-medium rounded-lg transition-all duration-200"
                     style={{ background:'var(--stone-200)', color:'var(--stone-700)' }}
                     onMouseEnter={e => e.target.style.filter='brightness(0.95)'} onMouseLeave={e => e.target.style.filter='none'}>
@@ -608,7 +610,7 @@
             <div className="flex items-end rounded-lg p-2 transition-colors duration-200" style={{ background:'var(--stone-100)', border:'1px solid var(--stone-200)' }}>
               <textarea ref={inputRef} value={input} onChange={e => setInput(e.target.value)}
                 onKeyDown={e => { if (e.key==='Enter' && !e.shiftKey) { e.preventDefault(); send(); } }}
-                placeholder="Descreva os fatos do caso..." rows={2}
+                placeholder={hasAnalysis ? "Responda às perguntas da Clara ou acrescente novos fatos..." : "Descreva os fatos do caso..."} rows={2}
                 className="flex-1 bg-transparent border-none outline-none resize-none px-2 text-sm" style={{ color:'var(--stone-900)' }} />
               <button onClick={send} disabled={loading || analyzing} className="p-2 rounded transition-opacity" style={{ color:'var(--agent-intake)', opacity: (loading||analyzing)?0.4:1 }}>
                 <Icon name="send" className="w-4 h-4" />

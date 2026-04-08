@@ -84,9 +84,11 @@ def test_drafting_graph_compiles_with_gate2_interrupt():
 async def test_default_redator_node_uses_real_redaction_layer(monkeypatch):
     captured = {}
 
-    async def fake_generate_sections(current_state: RatioEscritorioState):
+    async def fake_generate_sections(current_state: RatioEscritorioState, return_usage: bool = False):
         captured["caso_id"] = current_state.caso_id
-        return {"dos_fatos": "Conforme REsp 1.234.567/SP, texto redigido"}
+        payload = {"dos_fatos": "Conforme REsp 1.234.567/SP, texto redigido"}
+        usage = {"model": "gemini-3.1-pro-preview", "estimated_cost_usd": 0.0021, "prompt_tokens": 400, "completion_tokens": 120, "total_tokens": 520}
+        return (payload, usage) if return_usage else payload
 
     monkeypatch.setattr(
         "backend.escritorio.graph.drafting_graph.generate_sections_with_gemini",
@@ -109,6 +111,8 @@ async def test_default_redator_node_uses_real_redaction_layer(monkeypatch):
     assert "resp_1234567" in result["proveniencia"]["dos_fatos"]
     assert "resp_1234567" in result["evidence_pack"]["dos_fatos"]
     assert result["workflow_stage"] == "redacao"
+    assert result["custo_total_usd"] == 0.0021
+    assert result["token_log"][0]["model"] == "gemini-3.1-pro-preview"
 
 
 @pytest.mark.anyio

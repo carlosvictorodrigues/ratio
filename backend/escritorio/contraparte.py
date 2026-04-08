@@ -12,6 +12,7 @@ from backend.escritorio._llm_utils import (
     parse_json_payload,
 )
 from backend.escritorio.config import DEFAULT_LLM_TIMEOUT_MS, DEFAULT_REASONING_MODEL
+from backend.escritorio.costing import build_usage_entry
 from backend.escritorio.models import CriticaContraparte, RatioEscritorioState
 from backend.escritorio.tools.ratio_tools import ratio_search
 
@@ -157,11 +158,12 @@ async def generate_critique_with_gemini(
     *,
     client=None,
     model: str | None = None,
+    return_usage: bool = False,
 ) -> dict:
     prompt = build_contraparte_prompt(state)
     configured_model = (model or DEFAULT_REASONING_MODEL).strip()
 
-    def _invoke() -> dict:
+    def _invoke():
         active_client = client
         if active_client is None:
             from rag.query import get_gemini_client
@@ -176,7 +178,11 @@ async def generate_critique_with_gemini(
         text = getattr(response, "text", None)
         if not text:
             raise ValueError("Resposta vazia na geracao de critica adversarial.")
-        return parse_critique_payload(text)
+        parsed = parse_critique_payload(text)
+        usage = build_usage_entry(model_name=configured_model, response=response, operation="contraparte")
+        if return_usage:
+            return parsed, usage
+        return parsed
 
     return await anyio.to_thread.run_sync(_invoke)
 

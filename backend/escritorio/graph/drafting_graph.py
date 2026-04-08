@@ -9,6 +9,7 @@ from langgraph.graph import END, START, StateGraph
 
 log = logging.getLogger(__name__)
 
+from backend.escritorio.costing import merge_usage_into_state
 from backend.escritorio.models import RatioEscritorioState, TeseJuridica
 from backend.escritorio.planning import (
     decompose_case_with_gemini,
@@ -21,6 +22,20 @@ from backend.escritorio.redaction import (
 )
 from backend.escritorio.tools.google_search import search_google_legislation
 from backend.escritorio.tools.ratio_tools import merge_ranked_results, search_tese_bundle
+
+
+async def _call_with_optional_usage(fn, *args, **kwargs):
+    if "return_usage" in inspect.signature(fn).parameters:
+        result = fn(*args, return_usage=True, **kwargs)
+        if inspect.isawaitable(result):
+            result = await result
+        if isinstance(result, tuple) and len(result) == 2:
+            return result
+        return result, None
+    result = fn(*args, **kwargs)
+    if inspect.isawaitable(result):
+        result = await result
+    return result, None
 
 
 def _dedupe_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -105,6 +120,16 @@ async def pesquisar_teses(
     jurisprudencia: list[dict[str, Any]] = []
     legislacao: list[dict[str, Any]] = []
     legislacao_complementar: list[dict[str, Any]] = []
+    token_entries: list[dict[str, Any]] = []
+
+    if not state.teses and decompose_case_fn is None:
+        decomposed, decompose_usage = await _call_with_optional_usage(decompose_case_with_gemini, state)
+        teses = _dedupe_teses([
+            item if isinstance(item, TeseJuridica) else TeseJuridica.model_validate(item)
+            for item in (decomposed or _fallback_teses(state))
+        ])
+        if decompose_usage:
+            token_entries.append(decompose_usage)
 
     for tese in teses:
         log.info("pesquisar_teses: iniciando busca para tese %s", tese.id)
@@ -134,6 +159,20 @@ async def pesquisar_teses(
         jurisprudencia.extend(docs_favor)
         jurisprudencia.extend(docs_contra)
         legislacao.extend(docs_lei)
+        favor_meta = (bundle.get("jurisprudencia_favoravel") or {}).get("meta") or {}
+        search_cost = float(favor_meta.get("estimated_cost_usd") or 0.0)
+        if search_cost > 0:
+            token_entries.append(
+                {
+                    "provider": "gemini",
+                    "model": favor_meta.get("selected_model") or favor_meta.get("model") or "",
+                    "operation": f"tese_search:{tese.id}",
+                    "prompt_tokens": int(favor_meta.get("prompt_tokens") or 0),
+                    "completion_tokens": int(favor_meta.get("completion_tokens") or 0),
+                    "total_tokens": int(favor_meta.get("total_tokens") or 0),
+                    "estimated_cost_usd": search_cost,
+                }
+            )
 
         if on_tese_result is not None:
             partial_delta = {
@@ -141,6 +180,7 @@ async def pesquisar_teses(
                 "pesquisa_jurisprudencia": list(jurisprudencia),
                 "pesquisa_legislacao": list(legislacao),
                 "pesquisa_legislacao_complementar": list(legislacao_complementar),
+                **merge_usage_into_state(state, *token_entries),
                 "status": "pesquisa",
                 "workflow_stage": "pesquisa",
             }
@@ -148,9 +188,9 @@ async def pesquisar_teses(
             if inspect.isawaitable(callback_result):
                 await callback_result
 
-    planned_queries = active_legislation_query_plan(state, teses)
-    if inspect.isawaitable(planned_queries):
-        planned_queries = await planned_queries
+    planned_queries, legislation_plan_usage = await _call_with_optional_usage(active_legislation_query_plan, state, teses)
+    if legislation_plan_usage:
+        token_entries.append(legislation_plan_usage)
 
     for query_item in list(planned_queries or []):
         consulta = " ".join(str(query_item.get("consulta") or "").split()).strip()
@@ -175,6 +215,7 @@ async def pesquisar_teses(
         "pesquisa_jurisprudencia": jurisprudencia,
         "pesquisa_legislacao": legislacao,
         "pesquisa_legislacao_complementar": legislacao_complementar,
+        **merge_usage_into_state(state, *token_entries),
         "status": "pesquisa",
         "workflow_stage": "pesquisa",
     }
@@ -217,13 +258,14 @@ def gate2_router(state: RatioEscritorioState) -> str:
 
 
 async def redator_node(state: RatioEscritorioState) -> dict[str, Any]:
-    sections = await generate_sections_with_gemini(state)
+    sections, usage_entry = await _call_with_optional_usage(generate_sections_with_gemini, state)
     provenance = infer_section_provenance(sections)
     evidence_pack = build_section_evidence_pack(state, sections)
     return {
         "peca_sections": sections,
         "proveniencia": provenance,
         "evidence_pack": evidence_pack,
+        **merge_usage_into_state(state, usage_entry),
         "status": "redacao",
         "workflow_stage": "redacao",
     }

@@ -129,9 +129,9 @@ def test_sycophancy_router_accepts_after_retry_limit_for_missing_critique():
 async def test_default_contraparte_node_uses_real_contraparte_layer(monkeypatch):
     captured = {}
 
-    async def fake_generate_critique(current_state: RatioEscritorioState):
+    async def fake_generate_critique(current_state: RatioEscritorioState, return_usage: bool = False):
         captured["sections"] = dict(current_state.peca_sections)
-        return {
+        payload = {
             "falhas_processuais": [],
             "argumentos_materiais_fracos": [],
             "jurisprudencia_faltante": [],
@@ -139,6 +139,8 @@ async def test_default_contraparte_node_uses_real_contraparte_layer(monkeypatch)
             "analise_contestacao": "ha risco",
             "recomendacao": "revisar",
         }
+        usage = {"model": "gemini-3.1-pro-preview", "estimated_cost_usd": 0.0018, "prompt_tokens": 350, "completion_tokens": 90, "total_tokens": 440}
+        return (payload, usage) if return_usage else payload
 
     monkeypatch.setattr(
         "backend.escritorio.graph.adversarial_graph.generate_critique_with_gemini",
@@ -158,6 +160,8 @@ async def test_default_contraparte_node_uses_real_contraparte_layer(monkeypatch)
     assert captured["sections"]["dos_fatos"] == "Texto dos fatos."
     assert result["critica_atual"]["score_de_risco"] == 15
     assert result["workflow_stage"] == "adversarial"
+    assert result["custo_total_usd"] == 0.0018
+    assert result["token_log"][0]["model"] == "gemini-3.1-pro-preview"
 
 
 @pytest.mark.anyio

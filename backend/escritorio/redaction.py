@@ -15,6 +15,7 @@ from backend.escritorio.config import (
     DEFAULT_REASONING_FALLBACK_MODEL,
     DEFAULT_REASONING_MODEL,
 )
+from backend.escritorio.costing import build_usage_entry
 from backend.escritorio.models import RatioEscritorioState
 from backend.escritorio.verifier import CitationCandidate, canonicalize_candidate, extract_citation_candidates
 
@@ -216,7 +217,7 @@ def _generate_json_with_fallback(*, prompt: str, client=None, model: str | None 
     fallback_model = DEFAULT_REASONING_FALLBACK_MODEL.strip()
     config = make_json_response_config(timeout_ms=DEFAULT_LLM_TIMEOUT_MS)
 
-    def _invoke_model(model_name: str) -> str:
+    def _invoke_model(model_name: str):
         kwargs = {"model": model_name, "contents": prompt}
         if config is not None:
             kwargs["config"] = config
@@ -224,7 +225,7 @@ def _generate_json_with_fallback(*, prompt: str, client=None, model: str | None 
         text = getattr(response, "text", None)
         if not text:
             raise ValueError("Resposta vazia do modelo de redacao.")
-        return text
+        return text, build_usage_entry(model_name=model_name, response=response, operation="redaction")
 
     try:
         return _invoke_model(primary_model)
@@ -239,13 +240,17 @@ async def generate_sections_with_gemini(
     *,
     client=None,
     model: str | None = None,
+    return_usage: bool = False,
 ) -> dict[str, str]:
     prompt = build_redaction_prompt(state)
     configured_model = (model or DEFAULT_REASONING_MODEL).strip()
 
-    def _invoke() -> dict[str, str]:
-        text = _generate_json_with_fallback(prompt=prompt, client=client, model=configured_model)
-        return parse_sections_payload(text)
+    def _invoke():
+        text, usage = _generate_json_with_fallback(prompt=prompt, client=client, model=configured_model)
+        parsed = parse_sections_payload(text)
+        if return_usage:
+            return parsed, usage
+        return parsed
 
     return await anyio.to_thread.run_sync(_invoke)
 
@@ -255,12 +260,16 @@ async def generate_revision_with_gemini(
     *,
     client=None,
     model: str | None = None,
+    return_usage: bool = False,
 ) -> dict[str, str]:
     prompt = build_revision_prompt(revision_payload)
     configured_model = (model or DEFAULT_REASONING_MODEL).strip()
 
-    def _invoke() -> dict[str, str]:
-        text = _generate_json_with_fallback(prompt=prompt, client=client, model=configured_model)
-        return parse_sections_payload(text)
+    def _invoke():
+        text, usage = _generate_json_with_fallback(prompt=prompt, client=client, model=configured_model)
+        parsed = parse_sections_payload(text)
+        if return_usage:
+            return parsed, usage
+        return parsed
 
     return await anyio.to_thread.run_sync(_invoke)

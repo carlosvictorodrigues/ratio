@@ -47,9 +47,9 @@ def test_intake_graph_can_advance_to_gate1_when_gate_is_approved():
 async def test_default_intake_node_uses_real_llm_layer(monkeypatch):
     captured = {}
 
-    async def fake_generate_intake(current_state: RatioEscritorioState):
+    async def fake_generate_intake(current_state: RatioEscritorioState, return_usage: bool = False):
         captured["fatos"] = current_state.fatos_brutos
-        return {
+        payload = {
             "fatos_estruturados": ["fato llm"],
             "provas_disponiveis": ["boleto"],
             "pontos_atencao": ["prazo"],
@@ -57,6 +57,8 @@ async def test_default_intake_node_uses_real_llm_layer(monkeypatch):
             "perguntas_pendentes": ["Quem e o reu?"],
             "triagem_suficiente": False,
         }
+        usage = {"model": "gemini-3-flash-preview", "estimated_cost_usd": 0.0004, "prompt_tokens": 100, "completion_tokens": 50, "total_tokens": 150}
+        return (payload, usage) if return_usage else payload
 
     monkeypatch.setattr(
         "backend.escritorio.graph.intake_graph.generate_intake_with_gemini",
@@ -78,3 +80,5 @@ async def test_default_intake_node_uses_real_llm_layer(monkeypatch):
     assert result["resposta_conversacional_clara"] == "Preciso confirmar o polo passivo."
     assert result["perguntas_pendentes"] == ["Quem e o reu?"]
     assert result["triagem_suficiente"] is False
+    assert result["custo_total_usd"] == 0.0004
+    assert result["token_log"][0]["model"] == "gemini-3-flash-preview"

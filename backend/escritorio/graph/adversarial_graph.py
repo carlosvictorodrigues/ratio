@@ -3,12 +3,14 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 import os
+import inspect
 from typing import Any, Callable
 
 from langgraph.graph import END, START, StateGraph
 
 log = logging.getLogger(__name__)
 
+from backend.escritorio.costing import merge_usage_into_state
 from backend.escritorio.contraparte import (
     enrich_critique_with_contrary_jurisprudence,
     generate_critique_with_gemini,
@@ -22,13 +24,28 @@ from backend.escritorio.store import slugify_case_id
 from backend.escritorio.verifier import verify_sections
 
 
+async def _call_with_optional_usage(fn, *args, **kwargs):
+    if "return_usage" in inspect.signature(fn).parameters:
+        result = fn(*args, return_usage=True, **kwargs)
+        if inspect.isawaitable(result):
+            result = await result
+        if isinstance(result, tuple) and len(result) == 2:
+            return result
+        return result, None
+    result = fn(*args, **kwargs)
+    if inspect.isawaitable(result):
+        result = await result
+    return result, None
+
+
 async def contraparte_node(state: RatioEscritorioState) -> dict[str, Any]:
-    critique = await generate_critique_with_gemini(state)
+    critique, usage_entry = await _call_with_optional_usage(generate_critique_with_gemini, state)
     critique = await enrich_critique_with_contrary_jurisprudence(critique)
     return {
         "status": "adversarial",
         "workflow_stage": "adversarial",
         "critica_atual": critique,
+        **merge_usage_into_state(state, usage_entry),
     }
 
 
@@ -84,11 +101,12 @@ async def redator_revisao_node(state: RatioEscritorioState) -> dict[str, Any]:
         human_notes=current_round.apontamentos_humanos if current_round else None,
         edited_sections=current_round.secoes_revisadas if current_round else None,
     )
-    revised_sections = await generate_revision_with_gemini(revision_payload)
+    revised_sections, usage_entry = await _call_with_optional_usage(generate_revision_with_gemini, revision_payload)
     merged_sections = dict(state.peca_sections)
     merged_sections.update(revised_sections)
     return {
         "peca_sections": merged_sections,
+        **merge_usage_into_state(state, usage_entry),
         "status": "adversarial",
         "workflow_stage": "adversarial",
     }

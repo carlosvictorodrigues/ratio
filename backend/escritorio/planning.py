@@ -16,6 +16,7 @@ from backend.escritorio._llm_utils import (
     unwrap_envelope,
 )
 from backend.escritorio.config import DEFAULT_LLM_TIMEOUT_MS, DEFAULT_PESQUISADOR_MODEL
+from backend.escritorio.costing import build_usage_entry
 from backend.escritorio.models import RatioEscritorioState, TeseJuridica
 
 _TIPO_VALUES = {"principal", "subsidiaria"}
@@ -247,11 +248,12 @@ async def decompose_case_with_gemini(
     *,
     client=None,
     model: str | None = None,
+    return_usage: bool = False,
 ) -> list[TeseJuridica]:
     prompt = build_case_decomposition_prompt(state)
     configured_model = (model or DEFAULT_PESQUISADOR_MODEL).strip()
 
-    def _invoke() -> list[TeseJuridica]:
+    def _invoke():
         active_client = client
         if active_client is None:
             from rag.query import get_gemini_client
@@ -266,7 +268,11 @@ async def decompose_case_with_gemini(
         text = getattr(response, "text", None)
         if not text:
             raise ValueError("Resposta vazia na decomposicao de teses.")
-        return parse_teses_payload(text)
+        parsed = parse_teses_payload(text)
+        usage = build_usage_entry(model_name=configured_model, response=response, operation="decompose_teses")
+        if return_usage:
+            return parsed, usage
+        return parsed
 
     return await anyio.to_thread.run_sync(_invoke)
 
@@ -277,11 +283,12 @@ async def plan_legislation_queries_with_gemini(
     *,
     client=None,
     model: str | None = None,
+    return_usage: bool = False,
 ) -> list[dict[str, str]]:
     prompt = build_legislation_query_prompt(state, teses)
     configured_model = (model or DEFAULT_PESQUISADOR_MODEL).strip()
 
-    def _invoke() -> list[dict[str, str]]:
+    def _invoke():
         active_client = client
         if active_client is None:
             from rag.query import get_gemini_client
@@ -296,9 +303,16 @@ async def plan_legislation_queries_with_gemini(
         text = getattr(response, "text", None)
         if not text:
             raise ValueError("Resposta vazia no planejamento de consultas legislativas.")
-        return parse_legislation_queries_payload(text)
+        parsed = parse_legislation_queries_payload(text)
+        usage = build_usage_entry(model_name=configured_model, response=response, operation="plan_legislation_queries")
+        if return_usage:
+            return parsed, usage
+        return parsed
 
     try:
         return await anyio.to_thread.run_sync(_invoke)
     except Exception:
-        return fallback_legislation_queries(state, teses)
+        fallback = fallback_legislation_queries(state, teses)
+        if return_usage:
+            return fallback, None
+        return fallback

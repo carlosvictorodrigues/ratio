@@ -15,6 +15,14 @@ def test_escritorio_frontend_no_longer_contains_mock_runtime_data():
     assert "const AGENT_OUTPUTS" not in html
 
 
+def test_escritorio_frontend_resolves_lucide_icon_names_from_kebab_case():
+    html = _read("frontend/Escritorio/escritorio.html")
+
+    assert "resolveLucideIconNode" in html
+    assert "split('-')" in html
+    assert "lucide.icons[normalized]" in html
+
+
 def test_escritorio_frontend_uses_named_confirmations_instead_of_gate_labels():
     html = _read("frontend/Escritorio/escritorio.html")
 
@@ -48,9 +56,11 @@ def test_escritorio_frontend_renders_clara_conversational_gate1_panel():
 
     assert "resposta_conversacional_clara" in html
     assert "perguntas_pendentes" in html
-    assert "Responder perguntas da Clara" in html
     assert "Prosseguir assim mesmo" in html
     assert "TRIAGEM DA CLARA" in html
+    assert "O QUE A CLARA AINDA PRECISA CONFIRMAR" in html
+    assert "Responder perguntas da Clara" not in html
+    assert "Responda às perguntas da Clara ou acrescente novos fatos" in html
 
 
 def test_escritorio_frontend_prefers_active_case_on_restore_instead_of_delivery_case():

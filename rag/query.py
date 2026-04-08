@@ -3190,6 +3190,10 @@ da prosa com conectivo de fechamento ("Em suma,...",
         "used_fallback": False,
         "selected_model": "",
         "selected_hit_max_tokens": False,
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "total_tokens": 0,
+        "estimated_cost_usd": 0.0,
     }
 
     def _record_attempt(model_name: str, finish_reason: str, text: str) -> bool:
@@ -3266,6 +3270,16 @@ da prosa com conectivo de fechamento ("Em suma,...",
                 f"(thinking_budget={int(generation_thinking_budget)}).",
                 file=sys.stderr,
             )
+        try:
+            from backend.escritorio.costing import build_usage_entry
+
+            usage_entry = build_usage_entry(model_name=primary_model, response=response, operation="rag_generation")
+            diagnostics["prompt_tokens"] = usage_entry.get("prompt_tokens", 0)
+            diagnostics["completion_tokens"] = usage_entry.get("completion_tokens", 0)
+            diagnostics["total_tokens"] = usage_entry.get("total_tokens", 0)
+            diagnostics["estimated_cost_usd"] = usage_entry.get("estimated_cost_usd", 0.0)
+        except Exception:
+            pass
         if primary_text and not primary_hit_max_tokens:
             diagnostics["selected_model"] = primary_model
             diagnostics["used_fallback"] = False
@@ -3294,6 +3308,16 @@ da prosa com conectivo de fechamento ("Em suma,...",
                     f"(thinking_budget={int(generation_thinking_budget)}).",
                     file=sys.stderr,
                 )
+            try:
+                from backend.escritorio.costing import build_usage_entry
+
+                usage_entry = build_usage_entry(model_name=fallback_model, response=fallback, operation="rag_generation")
+                diagnostics["prompt_tokens"] = usage_entry.get("prompt_tokens", 0)
+                diagnostics["completion_tokens"] = usage_entry.get("completion_tokens", 0)
+                diagnostics["total_tokens"] = usage_entry.get("total_tokens", 0)
+                diagnostics["estimated_cost_usd"] = usage_entry.get("estimated_cost_usd", 0.0)
+            except Exception:
+                pass
             if text:
                 diagnostics["selected_model"] = fallback_model
                 diagnostics["used_fallback"] = True
