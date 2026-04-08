@@ -44,6 +44,7 @@ class TeseJuridica(BaseModel):
     id: str
     descricao: str
     tipo: Literal["principal", "subsidiaria"] = "principal"
+    resposta_pesquisa: str = ""
     jurisprudencia_favoravel: list[dict[str, Any]] = Field(default_factory=list)
     jurisprudencia_contraria: list[dict[str, Any]] = Field(default_factory=list)
     legislacao: list[dict[str, Any]] = Field(default_factory=list)

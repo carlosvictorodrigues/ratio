@@ -7,6 +7,7 @@
   <link rel="icon" type="image/x-icon" href="/escritorio/assets/favicon.ico" />
   <link rel="icon" type="image/png" sizes="32x32" href="/escritorio/assets/favicon-32x32.png" />
   <link rel="icon" type="image/png" sizes="48x48" href="/escritorio/assets/favicon-48x48.png" />
+  <link rel="apple-touch-icon" sizes="180x180" href="/escritorio/assets/apple-touch-icon.png" />
   <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
   <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
@@ -80,6 +81,11 @@
       },
       createCase: (id, tipo, area) => api._f('/cases', { method: 'POST', body: JSON.stringify({ caso_id: id, tipo_peca: tipo, area_direito: area }) }),
       listCases: () => api._f('/cases'),
+      deleteCase: (id) => api._f(`/cases/${id}`, { method: 'DELETE' }),
+      archiveCase: (id, archived) => api._f(`/cases/${id}/archive`, { method: 'POST', body: JSON.stringify({ archived }) }),
+      renameCase: (id, name) => api._f(`/cases/${id}/rename`, { method: 'POST', body: JSON.stringify({ name }) }),
+      openFolder: (id) => api._f(`/cases/${id}/open-folder`, { method: 'POST' }),
+      getFolder: (id) => api._f(`/cases/${id}/folder`),
       getCase: (id) => api._f(`/cases/${id}`),
       getPipeline: (id) => api._f(`/cases/${id}/pipeline`),
       getEvents: (id) => api._f(`/cases/${id}/events`),
@@ -119,17 +125,23 @@
     };
 
     /* ══════════ ICON HELPER ══════════ */
-    function Icon({ name, className = "w-5 h-5", style }) {
+    function Icon({ name, className = "w-5 h-5", style, size, strokeWidth }) {
       const ref = useRef(null);
       useEffect(() => {
         if (ref.current && lucide.icons[name]) {
           ref.current.innerHTML = '';
           const el = lucide.createElement(lucide.icons[name]);
           if (className) el.setAttribute('class', className);
+          /* Apply size directly to SVG so strokes render at correct scale */
+          const sz = size || (style && style.width) || null;
+          if (sz) { el.setAttribute('width', String(sz)); el.setAttribute('height', String(sz)); }
+          if (strokeWidth) el.setAttribute('stroke-width', String(strokeWidth));
+          /* Inherit color from style */
+          if (style && style.color) el.style.color = style.color;
           ref.current.appendChild(el);
         }
-      }, [name, className]);
-      return <span ref={ref} style={{ display:'inline-flex', alignItems:'center', ...(style||{}) }} />;
+      }, [name, className, size, strokeWidth, style && style.color]);
+      return <span ref={ref} style={{ display:'inline-flex', alignItems:'center', justifyContent:'center', ...(style||{}) }} />;
     }
 
     /* ══════════ SHARED COMPONENTS ══════════ */
@@ -552,24 +564,27 @@
 
     /* ══════════ WORKSPACE MODE ══════════ */
     const WorkspaceMode = ({ casoId, state, events, onStateUpdate }) => {
-      const [editSec, setEditSec] = useState(null);
-      const [editContent, setEditContent] = useState('');
+      const [draftModalOpen, setDraftModalOpen] = useState(false);
+      const [draftSections, setDraftSections] = useState({});
       const [showGate2, setShowGate2] = useState(false);
       const [running, setRunning] = useState(false);
       const [expandedCardKey, setExpandedCardKey] = useState(null);
+      const [collapsedFindingKeys, setCollapsedFindingKeys] = useState({});
+      const [expandedVerificationKeys, setExpandedVerificationKeys] = useState({});
 
       const currentPhase = STATUS_TO_PHASE[state?.status] ?? 1;
       const sections = state?.peca_sections || {};
       const teses = state?.teses || [];
       const critica = state?.critica_atual;
-      const rodadas = state?.rodadas || [];
       const verificacoes = state?.verificacoes || [];
 
       /* Derive all falhas from critica_atual */
       const allFalhas = critica ? [
         ...(critica.falhas_processuais || []),
         ...(critica.argumentos_materiais_fracos || []),
-      ] : [];
+      ].filter(Boolean) : [];
+
+      const canFinalizeRevision = state?.status === 'adversarial' || state?.status === 'revisao_humana';
 
       const handleRun = async () => {
         setRunning(true);
@@ -593,12 +608,15 @@
         setShowGate2(false);
       };
 
-      const handleSaveSection = async () => {
-        if (!editSec) return;
-        const updated = { ...sections, [editSec]: editContent };
-        const resp = await api.submitDraft(casoId, updated);
+      const handleOpenDraftModal = () => {
+        setDraftSections({ ...sections });
+        setDraftModalOpen(true);
+      };
+
+      const handleSaveDraft = async () => {
+        const resp = await api.submitDraft(casoId, draftSections);
         if (resp && resp.state) onStateUpdate(resp.state);
-        setEditSec(null);
+        setDraftModalOpen(false);
       };
 
       const handleDismissFinding = async (findingId) => {
@@ -609,6 +627,20 @@
       const handleFinalize = async () => {
         const resp = await api.submitRevision(casoId, {}, '', true);
         if (resp && resp.state) onStateUpdate(resp.state);
+      };
+
+      const handleDownloadDocx = () => {
+        if (state?.output_docx_path) {
+          window.open(`/api/escritorio/cases/${casoId}/download`, '_blank');
+        }
+      };
+
+      const toggleFindingCollapsed = (cardKey) => {
+        setCollapsedFindingKeys(prev => ({ ...prev, [cardKey]: !prev[cardKey] }));
+      };
+
+      const toggleVerificationExpanded = (cardKey) => {
+        setExpandedVerificationKeys(prev => ({ ...prev, [cardKey]: !(prev[cardKey] ?? true) }));
       };
 
       const phaseAgentMap = { 0:'intake', 1:'pesquisador', 2:'redator', 3:'contraparte', 4:'auditor' };
@@ -630,32 +662,41 @@
               },
             }];
           case 1: /* Research */
-            return teses.map(t => ({
+            return teses.map((t, idx) => ({
+              key: `tese-${t.id || idx}`,
               title: t.descricao,
-              sub: `${(t.jurisprudencia_favoravel || []).length} favoraveis, ${(t.jurisprudencia_contraria || []).length} contrarios | ${t.confianca}`,
+              sub: (t.resposta_pesquisa || 'Theo ainda nao concluiu esta tese.').slice(0, 120),
               color: 'var(--agent-pesquisador)',
               tese: t,
             }));
           case 2: /* Drafting */
-            return Object.entries(sections).map(([key, content]) => ({
-              title: key,
-              sub: (content || '').slice(0, 80) + (content && content.length > 80 ? '...' : ''),
+            if (Object.keys(sections).length === 0) return [];
+            return [{
+              key: 'draft-summary',
+              title: 'Minuta atualizada',
+              sub: Object.entries(sections).slice(0, 2).map(([key, content]) => `${key}: ${(content || '').slice(0, 48)}`).join(' | ') || 'Clique para revisar a minuta completa.',
               color: 'var(--agent-redator)',
-              sectionKey: key,
-              onClick: () => { setEditSec(key); setEditContent(content); },
-            }));
+              onClick: handleOpenDraftModal,
+              draft: {
+                sections: Object.entries(sections),
+                total: Object.keys(sections).length,
+              },
+            }];
           case 3: /* Adversarial */
-            return allFalhas.map(f => ({
-              title: `[${f.gravidade}] ${f.descricao.slice(0,55)}${f.descricao.length>55?'...':''}`,
-              sub: f.argumento_contrario ? f.argumento_contrario.slice(0,65) : f.secao_afetada,
+            return allFalhas.map((f, idx) => ({
+              key: `finding-${f.finding_id || idx}`,
+              title: `[${f.gravidade || 'media'}] ${(f.descricao || 'Critica').slice(0,55)}${(f.descricao || '').length>55?'...':''}`,
+              sub: (f.argumento_contrario || f.descricao || f.secao_afetada || 'Sem detalhe adicional.').slice(0, 84),
               color: 'var(--agent-contraparte)',
               finding: f,
             }));
           case 4: /* Delivery */
-            return verificacoes.map(v => ({
-              title: v.item || v.check || 'Verificação',
-              sub: v.result || v.status || 'ok',
+            return verificacoes.map((v, idx) => ({
+              key: `verification-${idx}`,
+              title: v.referencia || v.section || v.item || v.check || 'Verificação',
+              sub: v.level || v.result || v.status || 'ok',
               color: 'var(--agent-auditor)',
+              verification: v,
             }));
           default: return [];
         }
@@ -698,8 +739,10 @@
                   {/* Cards */}
                   <div className="flex-1 p-2 overflow-y-auto space-y-2">
                     {cards.map((c, ci) => {
-                      const cardKey = c.key || (c.tese && `tese-${c.tese.id}`) || `card-${i}-${ci}`;
-                      const isExpanded = expandedCardKey === cardKey;
+                      const cardKey = c.key || `card-${i}-${ci}`;
+                      const isExpanded = c.verification ? isVerificationExpanded : expandedCardKey === cardKey;
+                      const isFindingCollapsed = !!collapsedFindingKeys[cardKey];
+                      const isVerificationExpanded = expandedVerificationKeys[cardKey] ?? true;
                       const expandable = c.tese || c.intake;
                       const onCardClick = c.onClick || (expandable ? () => setExpandedCardKey(isExpanded ? null : cardKey) : undefined);
                       return (
@@ -707,8 +750,18 @@
                         className={`p-3 rounded-lg transition-all duration-200 ${onCardClick ? 'cursor-pointer' : ''}`}
                         style={{ background:'var(--stone-200)', border:'1px solid var(--stone-300)', borderLeft:`3px solid ${c.color}` }}
                         onMouseEnter={e => e.currentTarget.style.transform='translateY(-1px)'} onMouseLeave={e => e.currentTarget.style.transform='none'}>
-                        <h4 className="text-xs font-semibold mb-1" style={{ color:'var(--stone-900)' }}>{c.title}</h4>
-                        <p className="leading-relaxed line-clamp-2" style={{ fontSize:10, color:'var(--stone-500)' }}>{c.sub}</p>
+                        <div className="flex items-center justify-between mb-1">
+                          <h4 className="text-xs font-semibold" style={{ color:'var(--stone-900)' }}>{c.title}</h4>
+                          {(expandable || c.verification) && (
+                            <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--stone-400)"
+                              strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
+                              className="transition-transform duration-200 flex-shrink-0 ml-2"
+                              style={{ transform: (c.verification ? isVerificationExpanded : isExpanded) ? 'rotate(180deg)' : 'rotate(0deg)' }}>
+                              <polyline points="6 9 12 15 18 9"></polyline>
+                            </svg>
+                          )}
+                        </div>
+                        {!c.finding && !c.verification && <p className="leading-relaxed line-clamp-2" style={{ fontSize:10, color:'var(--stone-500)' }}>{c.sub}</p>}
                         {/* Expanded intake details */}
                         {c.intake && isExpanded && (
                           <div className="mt-2.5 pt-2 space-y-2" style={{ borderTop:'1px solid var(--stone-300)' }}>
@@ -740,27 +793,102 @@
                         )}
                         {/* Expanded tese details */}
                         {c.tese && isExpanded && (
-                          <div className="mt-2.5 pt-2 space-y-1.5" style={{ borderTop:'1px solid var(--stone-300)' }}>
-                            {(c.tese.jurisprudencia_favoravel || []).map((d, di) => (
-                              <div key={di} className="p-2 rounded" style={{ background:'var(--stone-100)', border:'1px solid var(--stone-200)' }}>
-                                <span className="font-mono font-medium" style={{ fontSize:9, color:'var(--agent-pesquisador)' }}>{d.processo || d.process || 'doc'} {d.tribunal ? `· ${d.tribunal}` : ''}</span>
-                                <p className="font-cite italic mt-0.5" style={{ fontSize:10, color:'var(--stone-500)' }}>{d.ementa || d.summary || ''}</p>
+                          <div className="mt-2.5 pt-2 space-y-2" style={{ borderTop:'1px solid var(--stone-300)' }}>
+                            <div className="p-2 rounded" style={{ background:'var(--stone-100)', border:'1px solid var(--stone-200)' }}>
+                              <div className="font-mono font-bold mb-1" style={{ fontSize:9, color:'var(--agent-pesquisador)' }}>ANALISE DO THEO</div>
+                              <p className="leading-relaxed" style={{ fontSize:10, color:'var(--stone-700)' }}>
+                                {c.tese.resposta_pesquisa || 'Theo ainda nao concluiu esta tese.'}
+                              </p>
+                            </div>
+                            <div className="grid grid-cols-2 gap-2">
+                              <div className="p-2 rounded" style={{ background:'var(--stone-100)', border:'1px solid var(--stone-200)' }}>
+                                <div className="font-mono font-bold mb-1" style={{ fontSize:9, color:'var(--agent-pesquisador)' }}>JURISPRUDENCIA</div>
+                                <span style={{ fontSize:10, color:'var(--stone-600)' }}>{(c.tese.jurisprudencia_favoravel || []).length} docs favoraveis</span>
                               </div>
-                            ))}
-                            {(c.tese.legislacao || []).map((l, li) => (
-                              <div key={`l${li}`} className="p-2 rounded" style={{ background:'var(--stone-100)', border:'1px solid var(--stone-200)' }}>
-                                <span className="font-mono font-medium" style={{ fontSize:9, color:'var(--agent-auditor)' }}>{l.artigo || l.ref || JSON.stringify(l).slice(0,60)}</span>
+                              <div className="p-2 rounded" style={{ background:'var(--stone-100)', border:'1px solid var(--stone-200)' }}>
+                                <div className="font-mono font-bold mb-1" style={{ fontSize:9, color:'var(--agent-auditor)' }}>LEGISLACAO</div>
+                                <span style={{ fontSize:10, color:'var(--stone-600)' }}>{(c.tese.legislacao || []).length} referencias</span>
                               </div>
-                            ))}
+                            </div>
                           </div>
                         )}
-                        {/* Dismiss button for adversarial findings */}
+                        {c.draft && (
+                          <div className="mt-2.5 pt-2 space-y-2" style={{ borderTop:'1px solid var(--stone-300)' }}>
+                            <div className="font-mono font-bold" style={{ fontSize:9, color:'var(--agent-redator)' }}>SECOES ({c.draft.total})</div>
+                            <div className="space-y-1">
+                              {c.draft.sections.slice(0, 4).map(([key, content]) => (
+                                <div key={key} className="rounded px-2 py-1.5" style={{ background:'var(--stone-100)', border:'1px solid var(--stone-200)' }}>
+                                  <span className="font-semibold" style={{ fontSize:10, color:'var(--stone-800)' }}>{key}</span>
+                                  <p className="mt-0.5" style={{ fontSize:10, color:'var(--stone-500)' }}>{(content || '').slice(0, 84)}{(content || '').length > 84 ? '...' : ''}</p>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
                         {c.finding && (
-                          <button onClick={(e) => { e.stopPropagation(); handleDismissFinding(c.finding.finding_id); }}
-                            className="mt-2 px-2 py-1 text-xs rounded transition-colors"
-                            style={{ border:'1px solid var(--stone-300)', color:'var(--stone-500)', fontSize:9 }}>
-                            Descartar
-                          </button>
+                          <div className="mt-2.5 pt-2 space-y-2" style={{ borderTop:'1px solid var(--stone-300)' }}>
+                            <p className="leading-relaxed" style={{ fontSize:10, color:'var(--stone-500)' }}>{c.sub}</p>
+                            {!isFindingCollapsed && (
+                              <>
+                                {c.finding.descricao && (
+                                  <div className="p-2 rounded space-y-1" style={{ background:'var(--stone-100)', border:'1px solid var(--stone-200)' }}>
+                                    <div className="font-mono font-bold" style={{ fontSize:9, color:'var(--agent-contraparte)' }}>DESCRICAO COMPLETA</div>
+                                    <p style={{ fontSize:10, color:'var(--stone-700)' }}>{c.finding.descricao}</p>
+                                  </div>
+                                )}
+                                {c.finding.secao_afetada && (
+                                  <div className="p-2 rounded space-y-1" style={{ background:'var(--stone-100)', border:'1px solid var(--stone-200)' }}>
+                                    <div className="font-mono font-bold" style={{ fontSize:9, color:'var(--agent-contraparte)' }}>SECAO AFETADA</div>
+                                    <p style={{ fontSize:10, color:'var(--stone-700)' }}>{c.finding.secao_afetada}</p>
+                                  </div>
+                                )}
+                                {c.finding.argumento_contrario && (
+                                  <div className="p-2 rounded space-y-1" style={{ background:'var(--stone-100)', border:'1px solid var(--stone-200)' }}>
+                                    <div className="font-mono font-bold" style={{ fontSize:9, color:'var(--agent-contraparte)' }}>ARGUMENTO CONTRARIO</div>
+                                    <p style={{ fontSize:10, color:'var(--stone-700)' }}>{c.finding.argumento_contrario}</p>
+                                  </div>
+                                )}
+                              </>
+                            )}
+                            <div className="flex space-x-2">
+                              <button onClick={(e) => { e.stopPropagation(); toggleFindingCollapsed(cardKey); }}
+                                className="px-2 py-1 text-xs rounded transition-colors"
+                                style={{ border:'1px solid var(--stone-300)', color:'var(--stone-500)', fontSize:9 }}>
+                                {isFindingCollapsed ? 'Mostrar detalhe' : 'Ocultar detalhe'}
+                              </button>
+                              <button onClick={(e) => { e.stopPropagation(); handleDismissFinding(c.finding.finding_id); }}
+                                className="px-2 py-1 text-xs rounded transition-colors"
+                                style={{ border:'1px solid var(--stone-300)', color:'var(--stone-500)', fontSize:9 }}>
+                                Descartar
+                              </button>
+                            </div>
+                          </div>
+                        )}
+                        {c.verification && (
+                          <div className="mt-2.5 pt-2 space-y-2" style={{ borderTop:'1px solid var(--stone-300)' }}>
+                            <p className="leading-relaxed" style={{ fontSize:10, color:'var(--stone-500)' }}>{c.sub}</p>
+                            {c.verification && isExpanded && (
+                              <>
+                                <div className="p-2 rounded space-y-1" style={{ background:'var(--stone-100)', border:'1px solid var(--stone-200)' }}>
+                                  <div className="font-mono font-bold" style={{ fontSize:9, color:'var(--agent-auditor)' }}>DETALHE DA VERIFICACAO</div>
+                                  <p style={{ fontSize:10, color:'var(--stone-700)' }}>
+                                    {c.verification.detail || c.verification.detalhe || c.verification.referencia || c.verification.section || c.verification.item || c.verification.check || 'Sem detalhe adicional.'}
+                                  </p>
+                                </div>
+                                <div className="p-2 rounded space-y-1" style={{ background:'var(--stone-100)', border:'1px solid var(--stone-200)' }}>
+                                  <div className="font-mono font-bold" style={{ fontSize:9, color:'var(--agent-auditor)' }}>STATUS</div>
+                                  <p style={{ fontSize:10, color:'var(--stone-700)' }}>
+                                    {c.verification.blocking ? 'Bloqueante' : (c.verification.level || c.verification.result || c.verification.status || 'ok')}
+                                  </p>
+                                </div>
+                              </>
+                            )}
+                            <button onClick={(e) => { e.stopPropagation(); toggleVerificationExpanded(cardKey); }}
+                              className="px-2 py-1 text-xs rounded transition-colors"
+                              style={{ border:'1px solid var(--stone-300)', color:'var(--stone-500)', fontSize:9 }}>
+                              {isVerificationExpanded ? 'Ocultar detalhe' : 'Mostrar detalhe'}
+                            </button>
+                          </div>
                         )}
                       </div>
                       );
@@ -781,14 +909,16 @@
                         <div className="font-mono mb-2" style={{ fontSize:9, color:'var(--stone-500)' }}>
                           Recomendacao: <strong style={{ color:'var(--stone-700)' }}>{critica.recomendacao}</strong>
                         </div>
-                        <div className="flex space-x-2">
-                          <button onClick={handleRun} disabled={running} className="flex-1 py-1.5 font-semibold rounded transition-all duration-200"
-                            style={{ fontSize:10, border:'1px solid var(--agent-contraparte)55', color:'var(--agent-contraparte)', opacity: running ? 0.5 : 1 }}>
-                            {running ? 'Executando...' : '+ Rodada'}
-                          </button>
-                          <button onClick={handleFinalize} className="flex-1 py-1.5 font-semibold rounded transition-all duration-200"
-                            style={{ fontSize:10, background:'var(--agent-auditor)', color:'white' }}>Finalizar</button>
-                        </div>
+                        {canFinalizeRevision && (
+                          <div className="flex space-x-2">
+                            <button onClick={handleRun} disabled={running} className="flex-1 py-1.5 font-semibold rounded transition-all duration-200"
+                              style={{ fontSize:10, border:'1px solid var(--agent-contraparte)55', color:'var(--agent-contraparte)', opacity: running ? 0.5 : 1 }}>
+                              {running ? 'Executando...' : '+ Rodada'}
+                            </button>
+                            <button onClick={handleFinalize} className="flex-1 py-1.5 font-semibold rounded transition-all duration-200"
+                              style={{ fontSize:10, background:'var(--agent-auditor)', color:'white' }}>Finalizar</button>
+                          </div>
+                        )}
                       </div>
                     )}
 
@@ -819,25 +949,48 @@
                       </button>
                     </div>
                   )}
+
+                  {i === 4 && state?.output_docx_path && (
+                    <div className="px-2 pb-2">
+                      <button onClick={handleDownloadDocx}
+                        className="w-full py-2 font-semibold rounded-lg flex items-center justify-center transition-all duration-200"
+                        style={{ fontSize:10, background:'var(--agent-auditor)', color:'white' }}>
+                        <Icon name="download" className="w-3 h-3 mr-1" /> Baixar .docx
+                      </button>
+                    </div>
+                  )}
                 </div>
               );
             })}
           </div>
 
-          {/* Editor modal */}
-          {editSec && (
+          {draftModalOpen && (
             <div className="fixed inset-0 z-50 flex items-center justify-center anim-fade" style={{ background:'rgba(0,0,0,0.5)', backdropFilter:'blur(6px)' }}>
-              <div className="w-full max-w-2xl max-h-[80vh] flex flex-col rounded-xl anim-slide" style={{ background:'var(--stone-100)', border:'1px solid var(--stone-300)', boxShadow:'0 24px 48px rgba(0,0,0,0.3)' }}>
+              <div className="w-full max-w-4xl max-h-[85vh] flex flex-col rounded-xl anim-slide" style={{ background:'var(--stone-100)', border:'1px solid var(--stone-300)', boxShadow:'0 24px 48px rgba(0,0,0,0.3)' }}>
                 <div className="flex items-center justify-between p-4" style={{ borderBottom:'1px solid var(--stone-200)' }}>
-                  <h3 className="font-serif text-lg font-bold" style={{ color:'var(--stone-900)' }}>{editSec}</h3>
+                  <div>
+                    <h3 className="font-serif text-lg font-bold" style={{ color:'var(--stone-900)' }}>Minuta estruturada</h3>
+                    <p style={{ fontSize:10, color:'var(--stone-500)' }}>Edite todas as seções em uma única janela e salve no final.</p>
+                  </div>
                   <div className="flex items-center space-x-2">
-                    <button onClick={handleSaveSection} className="px-4 py-1.5 text-xs font-semibold rounded-lg transition-all duration-200"
-                      style={{ background:'var(--accent)', color:'var(--stone-50)' }}>Salvar</button>
-                    <button onClick={() => setEditSec(null)} style={{ color:'var(--stone-400)' }}><Icon name="x" className="w-4 h-4" /></button>
+                    <button onClick={handleSaveDraft} className="px-4 py-1.5 text-xs font-semibold rounded-lg transition-all duration-200"
+                      style={{ background:'var(--accent)', color:'var(--stone-50)' }}>Salvar alteracoes</button>
+                    <button onClick={() => setDraftModalOpen(false)} style={{ color:'var(--stone-400)' }}><Icon name="x" className="w-4 h-4" /></button>
                   </div>
                 </div>
-                <textarea className="flex-1 p-5 bg-transparent border-none outline-none resize-none text-sm leading-relaxed"
-                  style={{ color:'var(--stone-800)' }} value={editContent} onChange={e => setEditContent(e.target.value)} />
+                <div className="flex-1 overflow-y-auto p-4 space-y-4">
+                  {Object.entries(draftSections || {}).map(([key, content]) => (
+                    <div key={key} className="space-y-2">
+                      <div className="font-mono font-bold" style={{ fontSize:10, color:'var(--agent-redator)' }}>{key}</div>
+                      <textarea
+                        className="w-full min-h-[132px] p-3 rounded-lg bg-transparent border-none outline-none resize-y text-sm leading-relaxed"
+                        style={{ color:'var(--stone-800)', background:'var(--stone-50)', border:'1px solid var(--stone-200)' }}
+                        value={content || ''}
+                        onChange={e => setDraftSections(prev => ({ ...prev, [key]: e.target.value }))}
+                      />
+                    </div>
+                  ))}
+                </div>
               </div>
             </div>
           )}
@@ -919,12 +1072,57 @@
     };
 
     /* ══════════ MAIN APP ══════════ */
+    const isTerminalCaseStatus = (status) => ['entrega', 'finalizado'].includes(status);
+
+    const findInitialCaseId = (cases, saved) => {
+      const savedCase = (cases || []).find(c => c.caso_id === saved);
+      const savedStatus = savedCase?.status;
+      const activeSaved = saved && !isTerminalCaseStatus(savedStatus);
+      if (activeSaved) return saved;
+      const firstActive = cases.find(c => !isTerminalCaseStatus(c.status));
+      return firstActive?.caso_id || saved || cases[0]?.caso_id || '';
+    };
+
     function App() {
       const [theme, setTheme] = useState('dark');
       const [casoId, setCasoId] = useState('');
       const [caseState, setCaseState] = useState(null); // RatioEscritorioState from backend
       const [events, setEvents] = useState([]);
       const [agentDetail, setAgentDetail] = useState(null);
+      const [caseList, setCaseList] = useState([]);
+      const [sidebarOpen, setSidebarOpen] = useState(true);
+      const [caseMenu, setCaseMenu] = useState(null);   // { caso_id, x, y }
+      const [renamingId, setRenamingId] = useState(null);
+      const [renameValue, setRenameValue] = useState('');
+
+      /* ── Persist & restore active case ── */
+      const switchToCase = useCallback(async (id) => {
+        setCasoId(id);
+        localStorage.setItem('ratio_escritorio_caso_id', id);
+        const full = await api.getCase(id);
+        if (full && full.state) setCaseState(full.state);
+        const evts = await api.getEvents(id);
+        if (evts && evts.events) setEvents(evts.events);
+      }, []);
+
+      const refreshCaseList = useCallback(async () => {
+        const list = await api.listCases();
+        const cases = Array.isArray(list) ? list : [];
+        setCaseList(cases);
+        return cases;
+      }, []);
+
+      /* Restore last case on mount */
+      useEffect(() => {
+        (async () => {
+          const cases = await refreshCaseList();
+          const saved = localStorage.getItem('ratio_escritorio_caso_id');
+          const initialCaseId = findInitialCaseId(cases, saved);
+          if (initialCaseId) {
+            await switchToCase(initialCaseId);
+          }
+        })();
+      }, [refreshCaseList, switchToCase]);
 
       const toggleTheme = () => {
         const next = theme === 'dark' ? 'light' : 'dark';
@@ -976,12 +1174,13 @@
       const startCase = async (tipo) => {
         const id = `caso_${Date.now()}`;
         setCasoId(id);
+        localStorage.setItem('ratio_escritorio_caso_id', id);
         const resp = await api.createCase(id, tipo, '');
         if (resp) {
-          // createCase returns the case summary, fetch full state
           const full = await api.getCase(id);
           if (full && full.state) setCaseState(full.state);
         }
+        await refreshCaseList();
       };
 
       const handleStateUpdate = (newState) => {
@@ -1002,34 +1201,242 @@
         return () => clearInterval(iv);
       }, [casoId, mode]);
 
+      /* Close case context menu on outside click */
+      useEffect(() => {
+        if (!caseMenu) return;
+        const handler = () => setCaseMenu(null);
+        document.addEventListener('click', handler);
+        return () => document.removeEventListener('click', handler);
+      }, [caseMenu]);
+
       return (
         <div className="flex h-screen w-full overflow-hidden" style={{ background:'var(--stone-50)', color:'var(--stone-900)' }}>
-          {/* ── LEFT RAIL ── */}
-          <div className="w-14 h-full flex flex-col items-center py-5 space-y-5 shrink-0"
-            style={{ background:'var(--stone-100)', borderRight:'1px solid var(--stone-200)' }}>
-            <div className="w-8 h-8 rounded flex items-center justify-center font-serif font-bold text-sm mb-2"
-              style={{ background: theme==='dark'?'var(--stone-900)':'var(--accent)', color:'var(--stone-50)' }}>R</div>
-            {['search','clock','bookmark'].map(ic =>
-              <button key={ic} className="p-1 rounded transition-colors duration-200" style={{ color:'var(--stone-400)' }}
-                onMouseEnter={e => e.target.style.color='var(--stone-700)'} onMouseLeave={e => e.target.style.color='var(--stone-400)'}>
-                <Icon name={ic} className="w-[18px] h-[18px]" />
-              </button>
-            )}
-            <div className="w-6 h-px" style={{ background:'var(--stone-300)' }} />
-            <div className="relative flex items-center justify-center w-full">
-              <div className="absolute left-0 w-1 h-7 rounded-r" style={{ background:'var(--accent)' }} />
-              <Icon name="briefcase" className="w-[18px] h-[18px]" style={{ color:'var(--accent)' }} />
+          {/* ── LEFT RAIL + CASE SIDEBAR ── */}
+          <div className="h-full flex shrink-0">
+            {/* Icon rail — matches main app .left-rail exactly */}
+            <div className="h-full flex flex-col items-center shrink-0"
+              style={{ width:56, padding:'24px 0 20px', gap:18, background:'var(--stone-100)', borderRight:'1px solid var(--stone-200)' }}>
+              {/* Brand mark — .rail-brand */}
+              <div style={{ width:32, height:32, borderRadius:4, display:'grid', placeItems:'center',
+                background: theme==='dark' ? '#e8e5e2' : 'var(--stone-900)',
+                color: theme==='dark' ? '#141210' : 'var(--stone-50)',
+                boxShadow: theme==='dark' ? '0 1px 4px rgba(0,0,0,0.3)' : '0 1px 4px rgba(0,0,0,0.12)' }}>
+                <Icon name="scale" size={16} strokeWidth={1.75} />
+              </div>
+              {/* Nav — .rail-nav */}
+              <div className="flex flex-col items-center" style={{ gap:14, flex:1, marginTop:8 }}>
+                {/* Meus Casos */}
+                {(() => {
+                  const hoverBg = theme==='dark' ? 'rgba(255,255,255,0.06)' : 'rgba(214,211,209,0.45)';
+                  const activeBg = theme==='dark' ? 'rgba(255,255,255,0.08)' : 'rgba(214,211,209,0.45)';
+                  const indicatorBg = theme==='dark' ? 'var(--accent)' : 'var(--stone-900)';
+                  const RailBtn = ({ icon, active, onClick, title, color, mt }) => (
+                    <button onClick={onClick} className="relative"
+                      style={{ width:32, height:32, border:0, borderRadius:6, display:'grid', placeItems:'center', cursor:'pointer',
+                        background: active ? activeBg : 'transparent',
+                        color: color || (active ? 'var(--stone-900)' : 'var(--stone-400)'),
+                        transition:'color 140ms ease, background-color 140ms ease',
+                        ...(mt ? { marginTop:'auto' } : {}) }}
+                      title={title}
+                      onMouseEnter={e => { e.currentTarget.style.background=hoverBg; if (!color) e.currentTarget.style.color='var(--stone-900)'; }}
+                      onMouseLeave={e => { if (!active) { e.currentTarget.style.background='transparent'; if (!color) e.currentTarget.style.color='var(--stone-400)'; }}}>
+                      {active && <div style={{ position:'absolute', left:-12, top:6, bottom:6, width:2, borderRadius:'0 2px 2px 0', background: indicatorBg }} />}
+                      <Icon name={icon} size={16} strokeWidth={1.75} />
+                    </button>
+                  );
+                  return (<>
+                    <RailBtn icon="folder" active={sidebarOpen} onClick={() => { setSidebarOpen(!sidebarOpen); refreshCaseList(); }} title="Meus Casos" />
+                    <RailBtn icon="file-plus" onClick={() => startCase('peticao_inicial')} title="Novo Caso" />
+                    {casoId && (
+                      <div className="relative" style={{ width:32, height:32, display:'grid', placeItems:'center' }}>
+                        <div style={{ position:'absolute', left:-12, top:6, bottom:6, width:2, borderRadius:'0 2px 2px 0', background:'var(--accent)' }} />
+                        <Icon name="briefcase" size={16} strokeWidth={1.75} style={{ color:'var(--accent)' }} />
+                      </div>
+                    )}
+                  </>);
+                })()}
+              </div>
+              {/* Bottom — .rail-settings */}
+              {(() => {
+                const hoverBg = theme==='dark' ? 'rgba(255,255,255,0.06)' : 'rgba(214,211,209,0.45)';
+                const RailBtnBottom = ({ icon, onClick, title, mt }) => (
+                  <button onClick={onClick}
+                    style={{ width:32, height:32, border:0, borderRadius:6, display:'grid', placeItems:'center', cursor:'pointer',
+                      background:'transparent', color:'var(--stone-400)',
+                      transition:'color 140ms ease, background-color 140ms ease',
+                      ...(mt ? { marginTop:'auto' } : {}) }}
+                    title={title}
+                    onMouseEnter={e => { e.currentTarget.style.background=hoverBg; e.currentTarget.style.color='var(--stone-900)'; }}
+                    onMouseLeave={e => { e.currentTarget.style.background='transparent'; e.currentTarget.style.color='var(--stone-400)'; }}>
+                    <Icon name={icon} size={16} strokeWidth={1.75} />
+                  </button>
+                );
+                return (<>
+                  <RailBtnBottom icon={theme==='dark'?'sun':'moon'} onClick={toggleTheme} title={theme==='dark'?'Tema claro':'Tema escuro'} mt />
+                  <RailBtnBottom icon="settings" title="Configuracoes" />
+                </>);
+              })()}
             </div>
-            <button className="p-1 rounded transition-colors duration-200" style={{ color:'var(--stone-400)' }}>
-              <Icon name="folder" className="w-[18px] h-[18px]" />
-            </button>
-            <div className="flex-1" />
-            <button onClick={toggleTheme} className="p-1 rounded transition-colors duration-200" style={{ color:'var(--stone-400)' }}>
-              <Icon name={theme==='dark'?'sun':'moon'} className="w-[18px] h-[18px]" />
-            </button>
-            <button className="p-1 rounded" style={{ color:'var(--stone-400)' }}>
-              <Icon name="settings" className="w-[18px] h-[18px]" />
-            </button>
+
+            {/* Case sidebar panel */}
+            {sidebarOpen && (
+              <div className="w-64 h-full flex flex-col anim-fade" style={{ background:'var(--stone-100)', borderRight:'1px solid var(--stone-200)' }}>
+                <div className="px-4 py-4 flex items-center justify-between" style={{ borderBottom:'1px solid var(--stone-200)' }}>
+                  <span className="font-mono font-bold" style={{ fontSize:11, letterSpacing:'0.08em', color:'var(--stone-700)' }}>MEUS CASOS</span>
+                  <span className="font-mono" style={{ fontSize:9, color:'var(--stone-400)' }}>{caseList.length}</span>
+                </div>
+                <div className="flex-1 overflow-y-auto p-2 space-y-1.5">
+                  {caseList.length === 0 && (
+                    <p className="text-center py-8" style={{ fontSize:11, color:'var(--stone-400)' }}>Nenhum caso criado</p>
+                  )}
+                  {caseList.map(c => {
+                    const isActive = c.caso_id === casoId;
+                    const menuOpen = caseMenu?.caso_id === c.caso_id;
+                    const isRenaming = renamingId === c.caso_id;
+                    const displayName = c.area_direito || c.tipo_peca || c.caso_id;
+                    return (
+                      <div key={c.caso_id} className="relative group">
+                        {/* Card row */}
+                        <div
+                          onClick={() => { if (!isRenaming) { switchToCase(c.caso_id); setSidebarOpen(false); } }}
+                          className="p-2.5 rounded-lg cursor-pointer transition-all duration-200"
+                          style={{
+                            background: isActive ? 'var(--accent-dim)' : 'transparent',
+                            border: isActive ? '1px solid var(--accent)33' : '1px solid transparent',
+                          }}
+                          onMouseEnter={e => { if (!isActive) e.currentTarget.style.background='var(--stone-200)'; }}
+                          onMouseLeave={e => { if (!isActive) e.currentTarget.style.background='transparent'; }}>
+
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center space-x-2 min-w-0 flex-1">
+                              <Icon name={c.tipo_peca === 'contestacao' ? 'shield' : 'file-text'}
+                                className="w-3.5 h-3.5 flex-shrink-0"
+                                style={{ color: isActive ? 'var(--accent)' : 'var(--stone-400)' }} />
+                              {isRenaming ? (
+                                <input
+                                  autoFocus
+                                  value={renameValue}
+                                  onChange={e => setRenameValue(e.target.value)}
+                                  onClick={e => e.stopPropagation()}
+                                  onKeyDown={e => {
+                                    if (e.key === 'Enter') {
+                                      api.renameCase(c.caso_id, renameValue).then(() => { setRenamingId(null); refreshCaseList(); });
+                                    } else if (e.key === 'Escape') { setRenamingId(null); }
+                                  }}
+                                  onBlur={() => {
+                                    api.renameCase(c.caso_id, renameValue).then(() => { setRenamingId(null); refreshCaseList(); });
+                                  }}
+                                  className="flex-1 min-w-0 rounded px-1.5 py-0.5 text-xs font-medium outline-none"
+                                  style={{ background:'var(--stone-100)', border:'1px solid var(--accent)', color:'var(--stone-900)' }}
+                                />
+                              ) : (
+                                <span className="text-xs font-medium truncate flex-1"
+                                  style={{ color: isActive ? 'var(--accent)' : 'var(--stone-700)' }}>
+                                  {displayName}
+                                </span>
+                              )}
+                            </div>
+                            {/* ⋯ menu trigger */}
+                            {!isRenaming && (
+                              <button
+                                onClick={e => {
+                                  e.stopPropagation();
+                                  setCaseMenu(menuOpen ? null : { caso_id: c.caso_id });
+                                }}
+                                className="opacity-0 group-hover:opacity-100 p-1 rounded transition-all duration-200 flex-shrink-0 ml-1"
+                                style={{ color: menuOpen ? 'var(--stone-700)' : 'var(--stone-400)', background: menuOpen ? 'var(--stone-300)' : 'transparent' }}>
+                                <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
+                                  <circle cx="12" cy="5" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="12" cy="19" r="2"/>
+                                </svg>
+                              </button>
+                            )}
+                          </div>
+
+                          <div className="flex items-center space-x-2 mt-1 ml-5">
+                            <span className="font-mono" style={{ fontSize:8, color:'var(--stone-400)' }}>{c.status || 'novo'}</span>
+                            {c.updated_at && (
+                              <span className="font-mono" style={{ fontSize:8, color:'var(--stone-400)' }}>
+                                {new Date(c.updated_at).toLocaleDateString('pt-BR', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' })}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* Dropdown menu */}
+                        {menuOpen && (
+                          <div
+                            className="absolute z-50 rounded-lg overflow-hidden anim-fade"
+                            style={{ right:4, top:'100%', minWidth:168, background:'var(--stone-50)', border:'1px solid var(--stone-300)', boxShadow:'0 8px 24px rgba(0,0,0,0.18)' }}
+                            onClick={e => e.stopPropagation()}>
+                            {/* Abrir pasta */}
+                            <button
+                              onClick={() => {
+                                api.openFolder(c.caso_id).catch(() => {
+                                  // fallback: show path
+                                  api.getFolder(c.caso_id).then(r => r?.path && alert('Pasta: ' + r.path));
+                                });
+                                setCaseMenu(null);
+                              }}
+                              className="w-full flex items-center space-x-2.5 px-3 py-2 text-xs transition-colors duration-150"
+                              style={{ color:'var(--stone-700)' }}
+                              onMouseEnter={e => e.currentTarget.style.background='var(--stone-100)'}
+                              onMouseLeave={e => e.currentTarget.style.background='transparent'}>
+                              <Icon name="folder-open" className="w-3.5 h-3.5 flex-shrink-0" style={{ color:'var(--stone-400)' }} />
+                              <span>Abrir pasta</span>
+                            </button>
+                            {/* Renomear */}
+                            <button
+                              onClick={() => {
+                                setRenamingId(c.caso_id);
+                                setRenameValue(displayName);
+                                setCaseMenu(null);
+                              }}
+                              className="w-full flex items-center space-x-2.5 px-3 py-2 text-xs transition-colors duration-150"
+                              style={{ color:'var(--stone-700)' }}
+                              onMouseEnter={e => e.currentTarget.style.background='var(--stone-100)'}
+                              onMouseLeave={e => e.currentTarget.style.background='transparent'}>
+                              <Icon name="pencil" className="w-3.5 h-3.5 flex-shrink-0" style={{ color:'var(--stone-400)' }} />
+                              <span>Renomear</span>
+                            </button>
+                            {/* Divider */}
+                            <div style={{ height:1, background:'var(--stone-200)', margin:'2px 0' }} />
+                            {/* Excluir */}
+                            <button
+                              onClick={() => {
+                                setCaseMenu(null);
+                                if (confirm(`Excluir "${displayName}"?\nEsta ação não pode ser desfeita.`)) {
+                                  api.deleteCase(c.caso_id).then(() => {
+                                    refreshCaseList();
+                                    if (c.caso_id === casoId) {
+                                      setCasoId(''); setCaseState(null); setEvents([]);
+                                      localStorage.removeItem('ratio_escritorio_caso_id');
+                                    }
+                                  });
+                                }
+                              }}
+                              className="w-full flex items-center space-x-2.5 px-3 py-2 text-xs transition-colors duration-150"
+                              style={{ color:'#ef4444' }}
+                              onMouseEnter={e => e.currentTarget.style.background='#fef2f2'}
+                              onMouseLeave={e => e.currentTarget.style.background='transparent'}>
+                              <Icon name="trash-2" className="w-3.5 h-3.5 flex-shrink-0" />
+                              <span>Excluir caso</span>
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+                <div className="p-3" style={{ borderTop:'1px solid var(--stone-200)' }}>
+                  <button onClick={() => startCase('peticao_inicial')}
+                    className="w-full py-2 rounded-lg text-xs font-semibold transition-all duration-200"
+                    style={{ background:'var(--accent)', color:'var(--stone-50)' }}
+                    onMouseEnter={e => e.target.style.filter='brightness(1.12)'} onMouseLeave={e => e.target.style.filter='none'}>
+                    + Novo Caso
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
 
           {/* ── MAIN ── */}

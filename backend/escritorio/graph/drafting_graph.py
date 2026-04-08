@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import anyio
+import inspect
 import logging
 from typing import Any, Callable
 
@@ -40,22 +42,37 @@ def _fallback_teses(state: RatioEscritorioState) -> list[TeseJuridica]:
     return [TeseJuridica(id="t1", descricao=descricao[:160], tipo="principal")]
 
 
+def _dedupe_teses(teses: list[TeseJuridica]) -> list[TeseJuridica]:
+    """Remove teses with identical descriptions (case/whitespace-insensitive)."""
+    import re as _re
+    seen: set[str] = set()
+    unique: list[TeseJuridica] = []
+    for t in teses:
+        key = _re.sub(r"\s+", " ", (t.descricao or "").strip().lower())
+        if key and key not in seen:
+            seen.add(key)
+            unique.append(t)
+    if unique:
+        return unique
+    return teses  # never return empty
+
+
 async def decompose_case_into_teses(
     state: RatioEscritorioState,
     *,
     decompose_case_fn: Callable[[RatioEscritorioState], Any] | None = None,
 ) -> list[TeseJuridica]:
     if state.teses:
-        return list(state.teses)
+        return _dedupe_teses(list(state.teses))
 
     active_decompose = decompose_case_fn or decompose_case_with_gemini
     try:
         decomposed = await active_decompose(state)
         if decomposed:
-            return [
+            return _dedupe_teses([
                 item if isinstance(item, TeseJuridica) else TeseJuridica.model_validate(item)
                 for item in decomposed
-            ]
+            ])
     except Exception:
         pass
 
@@ -68,6 +85,7 @@ async def pesquisar_teses(
     decompose_case_fn: Callable[[RatioEscritorioState], Any] | None = None,
     search_bundle_fn: Callable[..., Any] | None = None,
     legislation_search_fn: Callable[[str], Any] | None = None,
+    on_tese_result: Callable[[dict[str, Any]], Any] | None = None,
 ) -> dict[str, Any]:
     teses = await decompose_case_into_teses(
         state,
@@ -96,11 +114,13 @@ async def pesquisar_teses(
             contraria_query=None,
             legislacao_operation=_search_legislacao_tese,
         )
+        resposta_pesquisa = str((bundle.get("jurisprudencia_favoravel") or {}).get("answer") or "").strip()
         docs_favor = list((bundle.get("jurisprudencia_favoravel") or {}).get("docs", []))
         docs_contra = list((bundle.get("jurisprudencia_contraria") or {}).get("docs", []))
         docs_lei = list(bundle.get("legislacao") or [])
 
         tese_data = tese.model_dump(mode="json")
+        tese_data["resposta_pesquisa"] = resposta_pesquisa
         tese_data["jurisprudencia_favoravel"] = docs_favor
         tese_data["jurisprudencia_contraria"] = docs_contra
         tese_data["legislacao"] = docs_lei
@@ -108,6 +128,18 @@ async def pesquisar_teses(
         jurisprudencia.extend(docs_favor)
         jurisprudencia.extend(docs_contra)
         legislacao.extend(docs_lei)
+
+        if on_tese_result is not None:
+            partial_delta = {
+                "teses": list(enriched_teses),
+                "pesquisa_jurisprudencia": list(jurisprudencia),
+                "pesquisa_legislacao": list(legislacao),
+                "status": "pesquisa",
+                "workflow_stage": "pesquisa",
+            }
+            callback_result = on_tese_result(partial_delta)
+            if inspect.isawaitable(callback_result):
+                await callback_result
 
     return {
         "teses": enriched_teses,

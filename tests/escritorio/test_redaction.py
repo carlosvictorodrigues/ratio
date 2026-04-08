@@ -30,6 +30,36 @@ def test_build_redaction_prompt_mentions_sectioned_output_and_sources():
     assert "REsp 123" in prompt
 
 
+def test_build_redaction_prompt_includes_theo_research_text_per_tese():
+    state = RatioEscritorioState(
+        caso_id="caso-1",
+        tipo_peca="peticao_inicial",
+        fatos_brutos="Cliente relata cobrança indevida.",
+        teses=[
+            TeseJuridica(
+                id="t1",
+                descricao="Responsabilidade objetiva",
+                tipo="principal",
+                resposta_pesquisa="Theo concluiu que a banca responde objetivamente pelos danos materiais.",
+            ),
+            TeseJuridica(
+                id="t2",
+                descricao="Dano moral",
+                tipo="subsidiaria",
+                resposta_pesquisa="Theo identificou tese subsidiaria de dano moral in re ipsa.",
+            ),
+        ],
+    )
+
+    prompt = build_redaction_prompt(state)
+
+    assert "Analise do Theo" in prompt
+    assert "Responsabilidade objetiva" in prompt
+    assert "Theo concluiu que a banca responde objetivamente" in prompt
+    assert "Dano moral" in prompt
+    assert "Theo identificou tese subsidiaria de dano moral" in prompt
+
+
 def test_parse_sections_payload_returns_dict_of_sections():
     payload = """
     {
@@ -72,7 +102,7 @@ async def test_generate_sections_with_gemini_defaults_to_reasoning_model():
 
     assert captured["model"] == "gemini-3.1-pro-preview"
     assert sections["dos_fatos"] == "Texto dos fatos."
-    assert getattr(getattr(captured["config"], "http_options", None), "timeout", None) == 45000
+    assert getattr(getattr(captured["config"], "http_options", None), "timeout", None) == 120000
 
 
 def test_build_revision_prompt_mentions_preserve_human_anchors_and_edited_sections():
@@ -122,7 +152,36 @@ async def test_generate_revision_with_gemini_uses_reasoning_model():
 
     assert captured["model"] == "gemini-3.1-pro-preview"
     assert sections["dos_fatos"] == "Texto revisado."
-    assert getattr(getattr(captured["config"], "http_options", None), "timeout", None) == 45000
+    assert getattr(getattr(captured["config"], "http_options", None), "timeout", None) == 120000
+
+
+@pytest.mark.anyio
+async def test_generate_sections_with_gemini_falls_back_to_flash_preview_on_deadline():
+    captured_models = []
+
+    class _FakeModels:
+        def generate_content(self, *, model, contents, config=None):
+            captured_models.append((model, getattr(getattr(config, "http_options", None), "timeout", None)))
+            if len(captured_models) == 1:
+                raise RuntimeError("504 DEADLINE_EXCEEDED")
+            return type("Resp", (), {"text": '{"dos_fatos":"Texto fallback."}'})()
+
+    class _FakeClient:
+        models = _FakeModels()
+
+    state = RatioEscritorioState(
+        caso_id="caso-1",
+        tipo_peca="peticao_inicial",
+        fatos_brutos="Cliente relata cobrança indevida.",
+    )
+
+    sections = await generate_sections_with_gemini(state, client=_FakeClient())
+
+    assert sections["dos_fatos"] == "Texto fallback."
+    assert captured_models == [
+        ("gemini-3.1-pro-preview", 120000),
+        ("gemini-3-flash-preview", 120000),
+    ]
 
 
 def test_parse_sections_payload_strips_fences_and_trailing():

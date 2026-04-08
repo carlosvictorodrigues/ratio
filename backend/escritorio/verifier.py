@@ -52,6 +52,7 @@ _CASO_COMPOSTO_PATTERN = re.compile(
     r"(?i)\b(AgInt|AgRg|EDcl|EAREsp|EREsp|AREsp)\s+(?:no|na)\s+"
     r"(REsp|HC|MS|RMS|ARE|AI)\s+(\d[\d\.\-/A-Z]*)"
 )
+_PLACEHOLDER_PATTERN = re.compile(r"[^\n\r]*\[VERIFICAR\][^\n\r]*", re.IGNORECASE)
 
 
 class CitationCandidate(BaseModel):
@@ -95,6 +96,17 @@ def _normalize_class_name(raw_text: str | None) -> str | None:
         return None
     normalized = normalize_legal_text(raw_text)
     return _CLASS_ALIASES.get(normalized, normalized.upper())
+
+
+def _infer_nearby_tribunal(raw_text: str, *, start: int, end: int) -> str | None:
+    left = max(0, start - 120)
+    right = min(len(raw_text), end + 120)
+    window = normalize_legal_text(raw_text[left:right])
+    if "supremo tribunal federal" in window or re.search(r"\bstf\b", window):
+        return "stf"
+    if "superior tribunal de justica" in window or re.search(r"\bstj\b", window):
+        return "stj"
+    return None
 
 
 def validar_cnj(numero_cnj: str) -> bool:
@@ -186,12 +198,13 @@ def extract_citation_candidates(text: str) -> list[CitationCandidate]:
 
     for match in _TEMA_PATTERN.finditer(raw_text):
         citation = match.group(0)
+        tribunal = _normalize_tribunal(match.group(2)) or _infer_nearby_tribunal(raw_text, start=match.start(), end=match.end())
         candidates.append(
             CitationCandidate(
                 kind="tema_repetitivo",
                 raw_text=citation,
                 normalized_text=normalize_legal_text(citation),
-                tribunal=_normalize_tribunal(match.group(2)),
+                tribunal=tribunal,
                 number=match.group(1),
             )
         )
@@ -328,7 +341,34 @@ def verify_sections(
     for section_name, content in state.peca_sections.items():
         evidence_pack = list(state.evidence_pack.get(section_name, [])) or list(state.proveniencia.get(section_name, []))
         seen: set[tuple[str, str]] = set()
+        placeholder_refs: list[str] = []
+
+        for placeholder_match in _PLACEHOLDER_PATTERN.finditer(str(content or "")):
+            referencia = placeholder_match.group(0).strip()
+            if not referencia:
+                continue
+            dedupe_key = (section_name, referencia)
+            if dedupe_key in seen:
+                continue
+            seen.add(dedupe_key)
+            placeholder_refs.append(referencia)
+            results.append(
+                {
+                    "section": section_name,
+                    "referencia": referencia,
+                    "canonical_key": None,
+                    "level": "unverified",
+                    "exists": False,
+                    "provenance_ok": False,
+                    "match_row": None,
+                    "blocking": True,
+                    "kind": "placeholder",
+                }
+            )
+
         for candidate in extract_citation_candidates(content):
+            if any((candidate.raw_text or "").strip() and (candidate.raw_text in ref) for ref in placeholder_refs):
+                continue
             dedupe_key = (section_name, candidate.canonical_key or candidate.raw_text)
             if dedupe_key in seen:
                 continue
@@ -349,6 +389,8 @@ def verify_sections(
                     "exists": match.exists,
                     "provenance_ok": validate_provenance(candidate.canonical_key, evidence_pack),
                     "match_row": match.row,
+                    "blocking": match.level == "unverified",
+                    "kind": "citation",
                 }
             )
 

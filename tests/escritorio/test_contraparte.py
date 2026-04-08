@@ -27,6 +27,20 @@ def test_build_contraparte_prompt_uses_only_piece_sections():
     assert "isso nao deve ir ao prompt da contraparte" not in prompt
 
 
+def test_build_contraparte_prompt_requires_structured_fields_for_each_finding():
+    state = RatioEscritorioState(
+        caso_id="caso-1",
+        tipo_peca="peticao_inicial",
+        peca_sections={"dos_fatos": "Texto dos fatos."},
+    )
+
+    prompt = build_contraparte_prompt(state)
+
+    assert "secao_afetada" in prompt
+    assert "argumento_contrario" in prompt
+    assert "Nao deixe secao_afetada ou argumento_contrario vazios" in prompt
+
+
 def test_parse_critique_payload_returns_structured_dict():
     payload = """
     {
@@ -82,7 +96,7 @@ async def test_generate_critique_with_gemini_defaults_to_reasoning_model():
 
     assert captured["model"] == "gemini-3.1-pro-preview"
     assert critique["score_de_risco"] == 15
-    assert getattr(getattr(captured["config"], "http_options", None), "timeout", None) == 45000
+    assert getattr(getattr(captured["config"], "http_options", None), "timeout", None) == 120000
 
 
 def test_parse_critique_payload_strips_fences_and_trailing():
@@ -183,6 +197,20 @@ def test_parse_critique_payload_preserves_rich_falha_dict():
     falha = critique["falhas_processuais"][0]
     assert falha["descricao"] == "lacuna probatoria"
     assert falha["secao_afetada"] == "dos_fatos"
+
+
+def test_parse_critique_payload_fills_missing_auxiliary_fields_from_descricao():
+    payload = (
+        '{"falhas_processuais":[{"descricao":"incompetencia absoluta"}],'
+        '"argumentos_materiais_fracos":[],"jurisprudencia_faltante":[],'
+        '"score_de_risco":30,"analise_contestacao":"x","recomendacao":"revisar"}'
+    )
+
+    critique = parse_critique_payload(payload)
+
+    falha = critique["falhas_processuais"][0]
+    assert falha["secao_afetada"] == "geral"
+    assert falha["argumento_contrario"] == "incompetencia absoluta"
 
 
 def test_parse_critique_payload_coerces_jurisprudencia_faltante_dicts():

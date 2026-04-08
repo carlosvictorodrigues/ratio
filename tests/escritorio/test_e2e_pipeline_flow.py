@@ -63,6 +63,7 @@ async def mock_drafting_research(state: RatioEscritorioState, store) -> RatioEsc
             id="t1",
             descricao="Responsabilidade Objetiva do Fornecedor",
             tipo="principal",
+            resposta_pesquisa="Theo concluiu que a tese principal envolve responsabilidade objetiva da banca pelo defeito de seguranca do certame.",
             jurisprudencia_favoravel=[{"processo": "REsp 1.234.567/SP", "tribunal": "STJ", "ementa": "Dano moral in re ipsa."}],
             jurisprudencia_contraria=[],
             legislacao=[{"artigo": "Art. 14 CDC", "texto": "Responsabilidade objetiva."}],
@@ -72,6 +73,7 @@ async def mock_drafting_research(state: RatioEscritorioState, store) -> RatioEsc
             id="t2",
             descricao="Prazo de Exclusao — Sumula 548/STJ",
             tipo="subsidiaria",
+            resposta_pesquisa="Theo identificou uma tese subsidiaria ligada ao prazo de exclusao e ao dever de retirada do apontamento.",
             jurisprudencia_favoravel=[{"processo": "AgInt AREsp 1.799.837/SP", "tribunal": "STJ"}],
             jurisprudencia_contraria=[],
             legislacao=[{"artigo": "Sumula 548/STJ"}],
@@ -209,7 +211,8 @@ async def test_full_e2e_pipeline_flow(tmp_path):
     state = await run_escritorio_pipeline(
         store=store,
         run_intake_graph_fn=mock_intake_graph,
-        run_drafting_graph_fn=_build_drafting_fn(mock_drafting_research, mock_drafting_redaction),
+        run_drafting_graph_fn=mock_drafting_research,
+        run_redacao_graph_fn=mock_drafting_redaction,
         run_adversarial_graph_fn=mock_adversarial_graph,
     )
     assert state.status == "gate1", f"Expected gate1 after intake_graph, got {state.status}"
@@ -229,7 +232,8 @@ async def test_full_e2e_pipeline_flow(tmp_path):
     state = await run_escritorio_pipeline(
         store=store,
         run_intake_graph_fn=mock_intake_graph,
-        run_drafting_graph_fn=_build_drafting_fn(mock_drafting_research, mock_drafting_redaction),
+        run_drafting_graph_fn=mock_drafting_research,
+        run_redacao_graph_fn=mock_drafting_redaction,
         run_adversarial_graph_fn=mock_adversarial_graph,
     )
 
@@ -240,6 +244,7 @@ async def test_full_e2e_pipeline_flow(tmp_path):
     assert len(state.pesquisa_legislacao) == 2
     assert state.teses[0].descricao == "Responsabilidade Objetiva do Fornecedor"
     assert state.teses[0].confianca == "alta"
+    assert "responsabilidade objetiva" in state.teses[0].resposta_pesquisa.lower()
     assert state.gate2_aprovado is False  # Not yet approved
 
     # ── Step 5: Approve gate2 ──
@@ -256,13 +261,14 @@ async def test_full_e2e_pipeline_flow(tmp_path):
     state = await run_escritorio_pipeline(
         store=store,
         run_intake_graph_fn=mock_intake_graph,
-        run_drafting_graph_fn=_build_drafting_fn(mock_drafting_research, mock_drafting_redaction),
+        run_drafting_graph_fn=mock_drafting_research,
+        run_redacao_graph_fn=mock_drafting_redaction,
         run_adversarial_graph_fn=mock_adversarial_graph,
     )
 
     # After redaction + adversarial, should be finalizado
-    assert state.output_docx_path != "", f"Expected output_docx_path, got empty"
-    assert state.status == "finalizado", f"Expected finalizado, got {state.status}"
+    assert state.output_docx_path == "", "Document should not be generated before adversarial/finalizacao"
+    assert state.status == "redacao", f"Expected redacao, got {state.status}"
 
     # ── Step 7: Verify final state ──
     assert len(state.peca_sections) == 3
@@ -270,6 +276,18 @@ async def test_full_e2e_pipeline_flow(tmp_path):
     assert "Do Direito" in state.peca_sections
     assert "Dos Pedidos" in state.peca_sections
 
+    assert state.critica_atual is None
+
+    state = await run_escritorio_pipeline(
+        store=store,
+        run_intake_graph_fn=mock_intake_graph,
+        run_drafting_graph_fn=mock_drafting_research,
+        run_redacao_graph_fn=mock_drafting_redaction,
+        run_adversarial_graph_fn=mock_adversarial_graph,
+    )
+
+    assert state.output_docx_path != "", f"Expected output_docx_path, got empty"
+    assert state.status == "finalizado", f"Expected finalizado, got {state.status}"
     # Adversarial review completed
     assert state.critica_atual is not None
     assert state.critica_atual.score_de_risco == 12
@@ -311,7 +329,8 @@ async def test_gate2_pauses_before_redaction(tmp_path):
     state = await run_escritorio_pipeline(
         store=store,
         run_intake_graph_fn=mock_intake_graph,
-        run_drafting_graph_fn=_build_drafting_fn(mock_drafting_research, mock_drafting_redaction),
+        run_drafting_graph_fn=mock_drafting_research,
+        run_redacao_graph_fn=mock_drafting_redaction,
         run_adversarial_graph_fn=mock_adversarial_graph,
     )
 

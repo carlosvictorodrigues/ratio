@@ -92,11 +92,15 @@ async def ratio_search(
     date_from: str | None = None,
     date_to: str | None = None,
 ) -> dict[str, Any]:
+    normalized_query = str(query or "").strip()
+    if not normalized_query:
+        return {"answer": "", "docs": [], "meta": {"skipped_empty_query": True}}
+
     runner = run_query_fn or _get_run_query()
 
     def _invoke() -> dict[str, Any]:
         kwargs = dict(
-            query=query,
+            query=normalized_query,
             sources=sources,
             tribunais=tribunais,
             tipos=tipos,
@@ -139,14 +143,14 @@ async def search_tese_bundle(
         favoravel_query,
         prefer_recent=True,
         persona="parecer",
-        reranker_backend="gemini",
+        reranker_backend="local",
     )
     if contraria_query:
         contraria_coro = ratio_search_fn(
             contraria_query,
             prefer_recent=True,
             persona="parecer",
-            reranker_backend="gemini",
+            reranker_backend="local",
         )
     else:
         async def _empty_contraria():

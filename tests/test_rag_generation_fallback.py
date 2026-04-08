@@ -10,6 +10,16 @@ class _FakeResponse:
         self.candidates = [SimpleNamespace(finish_reason=finish_reason)]
 
 
+class _FakeEmbedding:
+    def __init__(self, values: list[float]) -> None:
+        self.values = values
+
+
+class _FakeEmbedResponse:
+    def __init__(self, values: list[float]) -> None:
+        self.embeddings = [_FakeEmbedding(values)]
+
+
 class _FakeModels:
     def __init__(self, responses: list[_FakeResponse]) -> None:
         self._responses = list(responses)
@@ -27,6 +37,22 @@ class _FakeModels:
 class _FakeClient:
     def __init__(self, responses: list[_FakeResponse]) -> None:
         self.models = _FakeModels(responses)
+
+
+class _FakeEmbedModels:
+    def __init__(self) -> None:
+        self.configs: list[object] = []
+
+    def embed_content(self, *, model, contents, config):  # noqa: ANN001
+        self.configs.append(config)
+        if len(self.configs) == 1:
+            raise ValueError("value RETRIEVAL_QUERY must be a list given an array path requests[]")
+        return _FakeEmbedResponse([0.25, 0.5, 0.75])
+
+
+class _FakeEmbedClient:
+    def __init__(self) -> None:
+        self.models = _FakeEmbedModels()
 
 
 def test_generate_answer_uses_fallback_when_primary_hits_max_tokens(monkeypatch):
@@ -48,6 +74,18 @@ def test_generate_answer_uses_fallback_when_primary_hits_max_tokens(monkeypatch)
 
     assert answer == "resposta completa"
     assert fake_client.models.calls == ["modelo-principal", "modelo-fallback"]
+
+
+def test_embed_query_retries_without_task_type_when_sdk_rejects_batch_path(monkeypatch):
+    fake_client = _FakeEmbedClient()
+    monkeypatch.setattr(query_mod, "get_gemini_client", lambda: fake_client)
+
+    values = query_mod.embed_query("responsabilidade civil por fraude em concurso")
+
+    assert values == [0.25, 0.5, 0.75]
+    assert len(fake_client.models.configs) == 2
+    assert getattr(fake_client.models.configs[0], "task_type", None) == "RETRIEVAL_QUERY"
+    assert getattr(fake_client.models.configs[1], "task_type", None) is None
 
 
 def test_build_generation_config_notice_reports_max_tokens_and_fallback():

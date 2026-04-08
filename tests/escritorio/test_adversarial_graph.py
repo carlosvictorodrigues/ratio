@@ -90,6 +90,25 @@ def test_default_formatador_node_generates_docx(monkeypatch, tmp_path):
     assert result["output_docx_path"].endswith("peticao_final.docx")
 
 
+def test_formatador_node_keeps_generating_delivery_even_when_verification_is_unverified(monkeypatch, tmp_path):
+    monkeypatch.setenv("RATIO_ESCRITORIO_ROOT", str(tmp_path / "ratio_escritorio"))
+
+    from backend.escritorio.graph.adversarial_graph import formatador_node
+
+    result = formatador_node(
+        RatioEscritorioState(
+            caso_id="caso-1",
+            tipo_peca="peticao_inicial",
+            peca_sections={"dos_fatos": "Texto dos fatos."},
+            verificacoes=[{"referencia": "Tema 512 [VERIFICAR]", "level": "unverified", "blocking": True}],
+        )
+    )
+
+    assert result["workflow_stage"] == "entrega"
+    assert result["status"] == "entrega"
+    assert result["output_docx_path"].endswith(".docx")
+
+
 def test_sycophancy_router_accepts_after_retry_limit_for_missing_critique():
     from backend.escritorio.graph.adversarial_graph import anti_sycophancy_node, sycophancy_router
 

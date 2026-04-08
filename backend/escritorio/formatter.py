@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 from docx import Document
@@ -14,6 +15,28 @@ from backend.escritorio.models import RatioEscritorioState
 
 class FormatadorPeticao:
     BLACK = RGBColor(0, 0, 0)
+    SECTION_ORDER = (
+        "enderecamento",
+        "qualificacao",
+        "fatos",
+        "fundamentacao_juridica_responsabilidade",
+        "fundamentacao_juridica_danos_materiais",
+        "fundamentacao_juridica_danos_morais",
+        "fundamentacao_juridica_perda_chance",
+        "pedidos",
+        "valor_da_causa",
+    )
+    SUBSECTION_TITLES = {
+        "fundamentacao_juridica_responsabilidade": "Da Responsabilidade Civil",
+        "fundamentacao_juridica_danos_materiais": "Dos Danos Materiais",
+        "fundamentacao_juridica_danos_morais": "Dos Danos Morais",
+        "fundamentacao_juridica_perda_chance": "Da Perda de uma Chance",
+    }
+    EMPHASIS_RE = re.compile(
+        r"(in re ipsa|Tema\s+\d+(?:\.\d+)?|(?:REsp|RE|ARE|AREsp|AgInt|AgRg|EDcl|EAREsp|EREsp)\s+\d[\d\.\-\/]*|art\.?\s*\d+[A-Za-zº°\-]*(?:,\s*§\s*\d+[A-Za-zº°\-]*)?)",
+        re.IGNORECASE,
+    )
+    QUOTE_BLOCK_RE = re.compile(r"^(.*?:)\s*[\"'“”](.{60,}?)[\"'“”]\s*(.*)$", re.DOTALL)
 
     def __init__(self, *, output_dir: str | Path):
         self.output_dir = Path(output_dir).expanduser()
@@ -84,6 +107,30 @@ class FormatadorPeticao:
         self.doc.add_heading(titulo, level=1)
         self.doc.add_paragraph(conteudo)
 
+    def add_heading_text(self, titulo: str, *, level: int = 1) -> None:
+        self.doc.add_heading(titulo, level=level)
+
+    def add_paragraph_with_emphasis(self, texto: str) -> None:
+        paragraph = self.doc.add_paragraph()
+        paragraph.paragraph_format.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+        text = str(texto or "").strip()
+        last_end = 0
+        for match in self.EMPHASIS_RE.finditer(text):
+            if match.start() > last_end:
+                paragraph.add_run(text[last_end:match.start()])
+            token = match.group(0)
+            run = paragraph.add_run(token)
+            if token.lower() == "in re ipsa":
+                run.italic = True
+            else:
+                run.bold = True
+            run.font.name = "Times New Roman"
+            run.font.size = Pt(12)
+            run.font.color.rgb = self.BLACK
+            last_end = match.end()
+        if last_end < len(text):
+            paragraph.add_run(text[last_end:])
+
     def add_citacao_longa(self, texto: str):
         paragraph = self.doc.add_paragraph(str(texto or "").strip())
         paragraph.paragraph_format.left_indent = Cm(4)
@@ -94,7 +141,24 @@ class FormatadorPeticao:
             run.font.name = "Times New Roman"
             run.font.size = Pt(10)
             run.font.color.rgb = self.BLACK
+            run.italic = True
         return paragraph
+
+    def add_structured_content(self, conteudo: str) -> None:
+        paragraphs = [part.strip() for part in re.split(r"\n\s*\n", str(conteudo or "")) if part.strip()]
+        if not paragraphs:
+            return
+        for paragraph_text in paragraphs:
+            quote_match = self.QUOTE_BLOCK_RE.match(paragraph_text)
+            if quote_match:
+                prefix, quote, suffix = quote_match.groups()
+                if prefix.strip():
+                    self.add_paragraph_with_emphasis(prefix.strip())
+                self.add_citacao_longa(quote.strip())
+                if suffix.strip():
+                    self.add_paragraph_with_emphasis(suffix.strip())
+                continue
+            self.add_paragraph_with_emphasis(paragraph_text)
 
     def add_citacao(self, texto: str, *, verificada: bool = True):
         paragraph = self.doc.add_paragraph()
@@ -131,14 +195,65 @@ class FormatadorPeticao:
         fld_end.set(qn("w:fldCharType"), "end")
         run._element.append(fld_end)
 
+    def _save_with_fallback(self, preferred_path: Path) -> Path:
+        try:
+            self.doc.save(preferred_path)
+            return preferred_path
+        except PermissionError:
+            for index in range(1, 21):
+                candidate = preferred_path.with_name(f"{preferred_path.stem}-{index}{preferred_path.suffix}")
+                try:
+                    self.doc.save(candidate)
+                    return candidate
+                except PermissionError:
+                    continue
+            raise
+
     def gerar(self, state: RatioEscritorioState, verificacoes: list[dict]) -> str:
         self.add_cabecalho(processo=state.caso_id)
-        enderecamento = getattr(state, "enderecamento", "") or ""
+        sections = dict(state.peca_sections or {})
+        enderecamento = getattr(state, "enderecamento", "") or sections.get("enderecamento", "") or ""
         if enderecamento:
             self.add_enderecamento(enderecamento)
+            sections.pop("enderecamento", None)
 
-        for titulo, conteudo in state.peca_sections.items():
-            self.add_secao(titulo.upper().replace("_", " "), conteudo)
+        ordered_keys = [key for key in self.SECTION_ORDER if key in sections] + [key for key in sections if key not in self.SECTION_ORDER]
+        rendered_fundamentos = False
+        fundamento_index = 1
+
+        for titulo in ordered_keys:
+            conteudo = sections.get(titulo, "")
+            if titulo == "qualificacao":
+                self.add_heading_text("QUALIFICACAO", level=1)
+                self.add_structured_content(conteudo)
+                continue
+            if titulo == "fatos":
+                self.add_heading_text("1. DOS FATOS", level=1)
+                self.add_structured_content(conteudo)
+                continue
+            if titulo.startswith("fundamentacao_juridica_"):
+                if not rendered_fundamentos:
+                    self.add_heading_text("2. DOS FUNDAMENTOS JURIDICOS", level=1)
+                    rendered_fundamentos = True
+                subsection_title = self.SUBSECTION_TITLES.get(
+                    titulo,
+                    titulo.replace("fundamentacao_juridica_", "").replace("_", " ").title(),
+                )
+                self.add_heading_text(f"2.{fundamento_index}. {subsection_title}", level=2)
+                fundamento_index += 1
+                self.add_structured_content(conteudo)
+                continue
+            if titulo == "pedidos":
+                self.add_heading_text("3. DOS PEDIDOS", level=1)
+                self.add_structured_content(conteudo)
+                continue
+            if titulo == "valor_da_causa":
+                self.add_heading_text("4. DO VALOR DA CAUSA", level=1)
+                self.add_structured_content(conteudo)
+                continue
+
+            self.add_heading_text(titulo.upper().replace("_", " "), level=1)
+            self.add_structured_content(conteudo)
 
         for verificacao in verificacoes:
             referencia = str(verificacao.get("referencia") or "").strip()
@@ -149,5 +264,5 @@ class FormatadorPeticao:
 
         self.add_numeracao_paginas()
         output_path = self.output_dir / "peticao_final.docx"
-        self.doc.save(output_path)
-        return str(output_path)
+        saved_path = self._save_with_fallback(output_path)
+        return str(saved_path)

@@ -2,6 +2,7 @@ from pathlib import Path
 
 from fastapi.testclient import TestClient
 
+from backend.escritorio.store import CaseIndex, CaseStore
 from backend.main import app
 
 
@@ -92,3 +93,58 @@ def test_case_history_events_are_enriched_for_frontend_runtime(monkeypatch, tmp_
     assert payload["agent"] == "intake"
     assert "Triagem" in payload["text"]
     assert payload["data"]["approved"] is True
+
+
+def test_case_history_events_preserve_custom_agent_payload_text(monkeypatch, tmp_path: Path):
+    root = tmp_path / "ratio_escritorio"
+    monkeypatch.setenv("RATIO_ESCRITORIO_ROOT", str(root))
+    client = TestClient(app)
+
+    client.post(
+        "/api/escritorio/cases",
+        json={"caso_id": "caso-1", "tipo_peca": "peticao_inicial"},
+    )
+
+    index = CaseIndex(root)
+    store = CaseStore(index.resolve_case_dir("caso-1"))
+    store.append_event(
+        "pesquisador.started",
+        {
+            "agent": "pesquisador",
+            "text": "Iniciando pesquisa jurisprudencial...",
+        },
+    )
+
+    events = client.get("/api/escritorio/cases/caso-1/events")
+
+    assert events.status_code == 200
+    payload = events.json()["events"][-1]
+    assert payload["event_type"] == "pesquisador.started"
+    assert payload["agent"] == "pesquisador"
+    assert payload["text"] == "Iniciando pesquisa jurisprudencial..."
+    assert payload["data"]["agent"] == "pesquisador"
+
+
+def test_case_download_endpoint_returns_generated_docx(monkeypatch, tmp_path: Path):
+    root = tmp_path / "ratio_escritorio"
+    monkeypatch.setenv("RATIO_ESCRITORIO_ROOT", str(root))
+    client = TestClient(app)
+
+    client.post(
+        "/api/escritorio/cases",
+        json={"caso_id": "caso-1", "tipo_peca": "peticao_inicial"},
+    )
+
+    index = CaseIndex(root)
+    store = CaseStore(index.resolve_case_dir("caso-1"))
+    output_path = store.output_dir / "peticao_final.docx"
+    output_path.write_bytes(b"docx-bytes")
+    state = store.load_latest_state().model_copy(
+        update={"output_docx_path": str(output_path), "status": "entrega", "workflow_stage": "entrega"}
+    )
+    store.save_snapshot(state, stage="entrega")
+
+    response = client.get("/api/escritorio/cases/caso-1/download")
+
+    assert response.status_code == 200
+    assert response.content == b"docx-bytes"

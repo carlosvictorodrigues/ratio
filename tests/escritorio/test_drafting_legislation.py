@@ -1,6 +1,6 @@
 import pytest
 
-from backend.escritorio.graph.drafting_graph import pesquisar_teses
+from backend.escritorio.graph.drafting_graph import _search_legislation, pesquisar_teses
 from backend.escritorio.models import RatioEscritorioState, TeseJuridica
 
 
@@ -33,3 +33,15 @@ async def test_pesquisar_teses_executes_legislation_operation():
 
     assert result["pesquisa_legislacao"] == [{"doc_id": "lei-1", "diploma": "CDC", "article": "14"}]
     assert result["teses"][0]["legislacao"] == [{"doc_id": "lei-1", "diploma": "CDC", "article": "14"}]
+
+
+@pytest.mark.anyio
+async def test_default_search_legislation_uses_anyio_thread_bridge(monkeypatch):
+    monkeypatch.setattr(
+        "backend.escritorio.graph.drafting_graph.search_google_legislation",
+        lambda query, limit=10: [{"doc_id": f"lei-{query}", "limit": limit}],
+    )
+
+    result = await _search_legislation("cdc")
+
+    assert result == [{"doc_id": "lei-cdc", "limit": 10}]

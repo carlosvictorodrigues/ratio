@@ -10,14 +10,33 @@ from backend.escritorio._llm_utils import (
     parse_json_payload,
     unwrap_envelope,
 )
-from backend.escritorio.config import DEFAULT_LLM_TIMEOUT_MS, DEFAULT_REASONING_MODEL
+from backend.escritorio.config import (
+    DEFAULT_LLM_TIMEOUT_MS,
+    DEFAULT_REASONING_FALLBACK_MODEL,
+    DEFAULT_REASONING_MODEL,
+)
 from backend.escritorio.models import RatioEscritorioState
 from backend.escritorio.verifier import CitationCandidate, canonicalize_candidate, extract_citation_candidates
 
 
+def _format_teses_for_redaction_prompt(state: RatioEscritorioState) -> list[str]:
+    if not state.teses:
+        return ["- Sem teses estruturadas"]
+
+    lines: list[str] = []
+    for tese in state.teses:
+        tipo = str(tese.tipo or "principal").strip()
+        descricao = str(tese.descricao or "").strip() or "Tese sem descricao"
+        resposta = str(tese.resposta_pesquisa or "").strip()
+        lines.append(f"- [{tipo}] {descricao}")
+        if resposta:
+            lines.append(f"  Analise do Theo: {resposta}")
+    return lines
+
+
 def build_redaction_prompt(state: RatioEscritorioState) -> str:
     facts = (state.fatos_brutos or "").strip() or "Sem fatos informados."
-    teses = [f"- {tese.descricao}" for tese in state.teses] or ["- Sem teses estruturadas"]
+    teses = _format_teses_for_redaction_prompt(state)
     jurisprudencia = [
         f"- {row.get('processo') or row.get('doc_id') or 'Documento sem id'}"
         for row in state.pesquisa_jurisprudencia[:10]
@@ -145,6 +164,43 @@ def build_section_evidence_pack(
     return evidence_pack
 
 
+def _is_retryable_generation_error(exc: Exception) -> bool:
+    message = str(exc or "").lower()
+    return any(
+        hint in message
+        for hint in ("deadline_exceeded", "deadline expired", "504", "resource_exhausted", "429", "timeout")
+    )
+
+
+def _generate_json_with_fallback(*, prompt: str, client=None, model: str | None = None) -> str:
+    active_client = client
+    if active_client is None:
+        from rag.query import get_gemini_client
+
+        active_client = get_gemini_client()
+
+    primary_model = (model or DEFAULT_REASONING_MODEL).strip()
+    fallback_model = DEFAULT_REASONING_FALLBACK_MODEL.strip()
+    config = make_json_response_config(timeout_ms=DEFAULT_LLM_TIMEOUT_MS)
+
+    def _invoke_model(model_name: str) -> str:
+        kwargs = {"model": model_name, "contents": prompt}
+        if config is not None:
+            kwargs["config"] = config
+        response = active_client.models.generate_content(**kwargs)
+        text = getattr(response, "text", None)
+        if not text:
+            raise ValueError("Resposta vazia do modelo de redacao.")
+        return text
+
+    try:
+        return _invoke_model(primary_model)
+    except Exception as exc:
+        if not fallback_model or fallback_model == primary_model or not _is_retryable_generation_error(exc):
+            raise
+        return _invoke_model(fallback_model)
+
+
 async def generate_sections_with_gemini(
     state: RatioEscritorioState,
     *,
@@ -155,20 +211,7 @@ async def generate_sections_with_gemini(
     configured_model = (model or DEFAULT_REASONING_MODEL).strip()
 
     def _invoke() -> dict[str, str]:
-        active_client = client
-        if active_client is None:
-            from rag.query import get_gemini_client
-
-            active_client = get_gemini_client()
-
-        config = make_json_response_config(timeout_ms=DEFAULT_LLM_TIMEOUT_MS)
-        kwargs = {"model": configured_model, "contents": prompt}
-        if config is not None:
-            kwargs["config"] = config
-        response = active_client.models.generate_content(**kwargs)
-        text = getattr(response, "text", None)
-        if not text:
-            raise ValueError("Resposta vazia na redacao de secoes.")
+        text = _generate_json_with_fallback(prompt=prompt, client=client, model=configured_model)
         return parse_sections_payload(text)
 
     return await anyio.to_thread.run_sync(_invoke)
@@ -184,20 +227,7 @@ async def generate_revision_with_gemini(
     configured_model = (model or DEFAULT_REASONING_MODEL).strip()
 
     def _invoke() -> dict[str, str]:
-        active_client = client
-        if active_client is None:
-            from rag.query import get_gemini_client
-
-            active_client = get_gemini_client()
-
-        config = make_json_response_config(timeout_ms=DEFAULT_LLM_TIMEOUT_MS)
-        kwargs = {"model": configured_model, "contents": prompt}
-        if config is not None:
-            kwargs["config"] = config
-        response = active_client.models.generate_content(**kwargs)
-        text = getattr(response, "text", None)
-        if not text:
-            raise ValueError("Resposta vazia na revisao de secoes.")
+        text = _generate_json_with_fallback(prompt=prompt, client=client, model=configured_model)
         return parse_sections_payload(text)
 
     return await anyio.to_thread.run_sync(_invoke)

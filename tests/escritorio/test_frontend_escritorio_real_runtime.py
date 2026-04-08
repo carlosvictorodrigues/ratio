@@ -21,3 +21,67 @@ def test_escritorio_frontend_uses_named_confirmations_instead_of_gate_labels():
     assert "Confirmação da Triagem" in html
     assert "Confirmação da Pesquisa" in html
     assert "Gate {gate}" not in html
+
+
+def test_escritorio_frontend_renders_theo_textual_output_per_tese():
+    html = _read("frontend/Escritorio/escritorio.html")
+
+    assert "resposta_pesquisa" in html
+    assert "Theo ainda nao concluiu esta tese." in html
+
+
+def test_escritorio_frontend_uses_single_draft_modal_for_helena_sections():
+    html = _read("frontend/Escritorio/escritorio.html")
+
+    assert "draftModalOpen" in html
+    assert "draftSections" in html
+    assert "Salvar alteracoes" in html
+    assert "Object.entries(draftSections || {})" in html
+    assert "editSec" not in html
+    assert "editContent" not in html
+
+
+def test_escritorio_frontend_prefers_active_case_on_restore_instead_of_delivery_case():
+    html = _read("frontend/Escritorio/escritorio.html")
+
+    assert "isTerminalCaseStatus" in html
+    assert "findInitialCaseId" in html
+    assert "const activeSaved = saved && !isTerminalCaseStatus" in html
+    assert "const firstActive = cases.find" in html
+
+
+def test_escritorio_frontend_uses_single_helena_card_and_expandable_marco_findings():
+    html = _read("frontend/Escritorio/escritorio.html")
+
+    assert "key: 'draft-summary'" in html
+    assert "draft: {" in html
+    assert "collapsedFindingKeys" in html
+    assert "Mostrar detalhe" in html
+    assert "Ocultar detalhe" in html
+    assert "DESCRICAO COMPLETA" in html
+    assert "c.finding.descricao" in html
+    assert "c.finding.secao_afetada &&" in html
+    assert "c.finding.argumento_contrario &&" in html
+
+
+def test_escritorio_frontend_shows_delivery_download_button_inside_workspace_column():
+    html = _read("frontend/Escritorio/escritorio.html")
+
+    assert "handleDownloadDocx" in html
+    assert "Baixar .docx" in html
+    assert "i === 4 && state?.output_docx_path" in html
+
+
+def test_escritorio_frontend_hides_marco_finalize_controls_after_verification_stage():
+    html = _read("frontend/Escritorio/escritorio.html")
+
+    assert "state?.status === 'adversarial' || state?.status === 'revisao_humana'" in html
+
+
+def test_escritorio_frontend_renders_auditor_cards_with_real_verification_details():
+    html = _read("frontend/Escritorio/escritorio.html")
+
+    assert "title: v.referencia || v.section || v.item || v.check || 'Verificação'" in html
+    assert "sub: v.level || v.result || v.status || 'ok'" in html
+    assert "c.verification && isExpanded" in html
+    assert "DETALHE DA VERIFICACAO" in html

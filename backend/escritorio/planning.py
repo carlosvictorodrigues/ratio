@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import logging
 import re
 from typing import Any
+
+log = logging.getLogger(__name__)
 
 import anyio
 
@@ -32,6 +35,10 @@ def build_case_decomposition_prompt(state: RatioEscritorioState) -> str:
     return (
         "Voce e um pesquisador juridico senior.\n"
         "Decomponha o caso abaixo em 3 a 5 teses juridicas objetivas.\n"
+        "REGRA CRITICA: cada tese deve ser DISTINTA das demais — aborde angulos "
+        "juridicos DIFERENTES (ex.: responsabilidade civil, dano moral, dano material, "
+        "falha na prestacao do servico, direito do consumidor, etc.).\n"
+        "NAO repita a mesma tese com redacao diferente.\n"
         "Retorne SOMENTE uma lista JSON de objetos com campos: id, descricao, tipo.\n"
         "Use tipo = principal ou subsidiaria.\n\n"
         f"Caso:\n{facts}"
@@ -101,10 +108,17 @@ def parse_teses_payload(raw_payload: str) -> list[TeseJuridica]:
         raise ValueError("Payload de teses deve ser uma lista JSON.")
 
     coerced: list[TeseJuridica] = []
+    seen_descriptions: set[str] = set()
     for index, item in enumerate(data):
         normalized = _coerce_tese_item(item, index)
         if normalized is None:
             continue
+        # Deduplicate by normalized description to avoid identical queries
+        desc_key = re.sub(r"\s+", " ", (normalized.get("descricao") or "").strip().lower())
+        if desc_key in seen_descriptions:
+            log.warning("parse_teses_payload: tese duplicada descartada: %s", desc_key[:80])
+            continue
+        seen_descriptions.add(desc_key)
         coerced.append(TeseJuridica.model_validate(normalized))
     if not coerced:
         raise ValueError("Payload de teses nao contem teses validas.")

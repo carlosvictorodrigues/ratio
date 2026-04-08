@@ -72,3 +72,102 @@ def test_formatador_add_numeracao_paginas_injeta_campo_page_no_rodape(tmp_path: 
 
     footer_xml = formatter.doc.sections[0].footer.paragraphs[0]._element.xml
     assert "PAGE" in footer_xml
+
+
+def test_formatador_peticao_salva_em_nome_alternativo_quando_docx_esta_bloqueado(tmp_path: Path):
+    state = RatioEscritorioState(
+        caso_id="caso-1",
+        tipo_peca="peticao_inicial",
+        peca_sections={"dos_fatos": "Texto dos fatos."},
+    )
+    formatter = FormatadorPeticao(output_dir=tmp_path)
+    original_save = formatter.doc.save
+    calls = []
+
+    def fake_save(path):  # noqa: ANN001
+        calls.append(Path(path).name)
+        if len(calls) == 1:
+            raise PermissionError("arquivo bloqueado")
+        return original_save(path)
+
+    formatter.doc.save = fake_save
+
+    path = formatter.gerar(state, verificacoes=[])
+
+    assert Path(path).exists()
+    assert Path(path).name != "peticao_final.docx"
+    assert Path(path).name.startswith("peticao_final-")
+
+
+def test_formatador_peticao_cria_hierarquia_juridica_numerada(tmp_path: Path):
+    state = RatioEscritorioState(
+        caso_id="caso-1",
+        tipo_peca="peticao_inicial",
+        peca_sections={
+            "qualificacao": "Autor qualificado.",
+            "fatos": "Texto dos fatos.",
+            "fundamentacao_juridica_responsabilidade": "Texto da responsabilidade.",
+            "fundamentacao_juridica_danos_materiais": "Texto dos danos materiais.",
+            "pedidos": "Texto dos pedidos.",
+            "valor_da_causa": "Texto do valor.",
+        },
+    )
+    formatter = FormatadorPeticao(output_dir=tmp_path)
+
+    path = formatter.gerar(state, verificacoes=[])
+
+    doc = Document(path)
+    texts = [p.text for p in doc.paragraphs if p.text.strip()]
+    assert "QUALIFICACAO" in texts
+    assert "1. DOS FATOS" in texts
+    assert "2. DOS FUNDAMENTOS JURIDICOS" in texts
+    assert any(text.startswith("2.1. Da Responsabilidade") for text in texts)
+    assert any(text.startswith("2.2. Dos Danos Materiais") for text in texts)
+    assert "3. DOS PEDIDOS" in texts
+    assert "4. DO VALOR DA CAUSA" in texts
+
+
+def test_formatador_peticao_converte_tese_firmada_em_bloco_recuado(tmp_path: Path):
+    state = RatioEscritorioState(
+        caso_id="caso-1",
+        tipo_peca="peticao_inicial",
+        peca_sections={
+            "fundamentacao_juridica_responsabilidade": (
+                "A tese firmada estabelece que: "
+                "'O Estado responde subsidiariamente por danos materiais causados aos candidatos.' "
+                "Resta cristalino o dever de indenizar."
+            )
+        },
+    )
+    formatter = FormatadorPeticao(output_dir=tmp_path)
+
+    path = formatter.gerar(state, verificacoes=[])
+
+    doc = Document(path)
+    quote_paragraph = next(
+        p for p in doc.paragraphs
+        if "O Estado responde subsidiariamente por danos materiais" in p.text
+    )
+    assert round((quote_paragraph.paragraph_format.left_indent.cm if quote_paragraph.paragraph_format.left_indent else 0), 1) == 4.0
+    assert any(run.italic for run in quote_paragraph.runs if run.text.strip())
+
+
+def test_formatador_peticao_destaca_referencias_e_latinismos_com_enfase(tmp_path: Path):
+    state = RatioEscritorioState(
+        caso_id="caso-1",
+        tipo_peca="peticao_inicial",
+        peca_sections={
+            "fundamentacao_juridica_danos_morais": "O dano moral 'in re ipsa' foi reconhecido no RE 662.405."
+        },
+    )
+    formatter = FormatadorPeticao(output_dir=tmp_path)
+
+    path = formatter.gerar(state, verificacoes=[])
+
+    doc = Document(path)
+    paragraph = next(
+        p for p in doc.paragraphs
+        if "O dano moral" in p.text
+    )
+    assert any(run.italic for run in paragraph.runs if "in re ipsa" in run.text)
+    assert any(run.bold for run in paragraph.runs if "RE 662.405" in run.text)

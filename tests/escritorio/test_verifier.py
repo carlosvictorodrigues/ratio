@@ -48,6 +48,17 @@ def test_extract_citation_candidates_handles_tema_lei_and_cnj():
     assert any(item.kind == "jurisprudencia" and item.class_name == "CNJ" for item in candidates)
 
 
+def test_extract_citation_candidates_infers_theme_tribunal_from_nearby_context():
+    text = (
+        "O Supremo Tribunal Federal, sob a sistemática da repercussão geral, "
+        "fixou entendimento no Tema 512 (RE 662.405)."
+    )
+
+    candidates = extract_citation_candidates(text)
+
+    assert any(item.kind == "tema_repetitivo" and item.number == "512" and item.tribunal == "stf" for item in candidates)
+
+
 def test_validar_cnj_rejects_invalid_number():
     assert validar_cnj("0001234-56.2024.8.26.0100") is False
 
@@ -258,3 +269,93 @@ def test_verify_sections_uses_section_provenance():
     assert results[0]["section"] == "do_direito"
     assert results[0]["level"] == "exact_match"
     assert results[0]["provenance_ok"] is True
+
+
+def test_verify_sections_reports_placeholder_markers_as_unverified():
+    class _FakeRegistry:
+        def open_table(self, raw_path, table_name):  # noqa: ARG002
+            raise AssertionError("placeholder verification should not hit LanceDB")
+
+    state = RatioEscritorioState(
+        caso_id="caso-1",
+        tipo_peca="peticao_inicial",
+        peca_sections={"do_direito": "Tema 512 [VERIFICAR]"},
+    )
+
+    results = verify_sections(
+        state,
+        registry=_FakeRegistry(),
+        lance_dir="C:/tmp/lancedb_store",
+    )
+
+    assert len(results) == 1
+    assert results[0]["section"] == "do_direito"
+    assert results[0]["referencia"] == "Tema 512 [VERIFICAR]"
+    assert results[0]["level"] == "unverified"
+    assert results[0]["kind"] == "placeholder"
+
+
+def test_verify_sections_accepts_theme_with_tribunal_inferred_from_context():
+    class _FakeArrowTable:
+        def __init__(self, rows):
+            self._rows = rows
+
+        def to_pylist(self):
+            return list(self._rows)
+
+    class _FakeLanceDataset:
+        def __init__(self, rows):
+            self.schema = type("Schema", (), {"names": list(rows[0].keys()) if rows else []})()
+            self._rows = rows
+
+        def to_table(self, columns=None, filter=None):  # noqa: ARG002
+            if columns:
+                return _FakeArrowTable([{key: row.get(key) for key in columns} for row in self._rows])
+            return _FakeArrowTable(self._rows)
+
+    class _FakeTable:
+        def __init__(self, rows):
+            self.rows = rows
+
+        def search(self, term):  # noqa: ARG002
+            return self
+
+        def limit(self, n):  # noqa: ARG002
+            return self
+
+        def to_list(self):
+            return list(self.rows)
+
+        def to_lance(self):
+            return _FakeLanceDataset(self.rows)
+
+    class _FakeRegistry:
+        def open_table(self, raw_path, table_name):  # noqa: ARG002
+            return _FakeTable(
+                [
+                    {
+                        "canonical_key": "tema_512_stf",
+                        "class_name": None,
+                        "number": "512",
+                    }
+                ]
+            )
+
+    state = RatioEscritorioState(
+        caso_id="caso-1",
+        tipo_peca="peticao_inicial",
+        peca_sections={
+            "do_direito": (
+                "O Supremo Tribunal Federal, sob a sistemática da repercussão geral, "
+                "fixou entendimento no Tema 512 (RE 662.405)."
+            )
+        },
+    )
+
+    results = verify_sections(
+        state,
+        registry=_FakeRegistry(),
+        lance_dir="C:/tmp/lancedb_store",
+    )
+
+    assert any(item["referencia"] == "Tema 512" and item["level"] == "exact_match" for item in results)

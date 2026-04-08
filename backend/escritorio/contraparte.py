@@ -42,7 +42,9 @@ def build_contraparte_prompt(state: RatioEscritorioState) -> str:
         "Voce e um advogado senior da parte contraria, implacavel.\n"
         "Seu objetivo e atacar a peca abaixo e encontrar falhas processuais, materiais e de lastro.\n"
         "Retorne SOMENTE um objeto JSON com os campos: falhas_processuais, argumentos_materiais_fracos, "
-        "jurisprudencia_faltante, score_de_risco, analise_contestacao, recomendacao.\n\n"
+        "jurisprudencia_faltante, score_de_risco, analise_contestacao, recomendacao.\n"
+        "Para CADA falha, preencha obrigatoriamente: secao_afetada, descricao, argumento_contrario.\n"
+        "Nao deixe secao_afetada ou argumento_contrario vazios. Se a critica for geral, use secao_afetada = 'geral'.\n\n"
         "Peca:\n"
         + "\n\n".join(sections)
     )
@@ -102,6 +104,11 @@ def _coerce_falha_item(item: Any) -> dict[str, Any]:
             )
             if fallback:
                 result["descricao"] = fallback
+        descricao = str(result.get("descricao") or "").strip()
+        if descricao and not str(result.get("secao_afetada") or "").strip():
+            result["secao_afetada"] = "geral"
+        if descricao and not str(result.get("argumento_contrario") or "").strip():
+            result["argumento_contrario"] = descricao
         return result
     text = coerce_to_string(item)
     return {"descricao": text} if text else {"descricao": ""}

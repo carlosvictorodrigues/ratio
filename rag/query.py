@@ -1290,15 +1290,32 @@ def min_max_scale(values: list[float]) -> list[float]:
     return [(v - low) / (high - low) for v in values]
 
 
+def _embed_query_config(*, include_task_type: bool) -> types.EmbedContentConfig:
+    config_kwargs: dict[str, Any] = {
+        "output_dimensionality": EMBED_DIM,
+    }
+    if include_task_type:
+        config_kwargs["task_type"] = "RETRIEVAL_QUERY"
+    return types.EmbedContentConfig(**config_kwargs)
+
+
 def embed_query(query: str) -> list[float]:
-    result = get_gemini_client().models.embed_content(
-        model="gemini-embedding-001",
-        contents=query,
-        config=types.EmbedContentConfig(
-            task_type="RETRIEVAL_QUERY",
-            output_dimensionality=EMBED_DIM,
-        ),
-    )
+    client = get_gemini_client()
+    try:
+        result = client.models.embed_content(
+            model="gemini-embedding-001",
+            contents=[query],
+            config=_embed_query_config(include_task_type=True),
+        )
+    except ValueError as exc:
+        message = str(exc)
+        if "requests[]" not in message or "RETRIEVAL_QUERY" not in message:
+            raise
+        result = client.models.embed_content(
+            model="gemini-embedding-001",
+            contents=[query],
+            config=_embed_query_config(include_task_type=False),
+        )
     return result.embeddings[0].values
 
 

@@ -121,6 +121,7 @@ async def test_drafting_graph_default_pesquisador_uses_real_decomposition_and_se
         assert contraria_query is None
         return {
             "jurisprudencia_favoravel": {
+                "answer": "Texto corrido do Theo sobre CDC.",
                 "docs": [{"doc_id": "doc-1", "_final_score": 0.8, "data_julgamento": "2024-01-01"}]
             },
             "jurisprudencia_contraria": {
@@ -131,6 +132,7 @@ async def test_drafting_graph_default_pesquisador_uses_real_decomposition_and_se
 
     def fake_redator(state: RatioEscritorioState):
         assert state.teses[0].descricao == "CDC"
+        assert state.teses[0].resposta_pesquisa == "Texto corrido do Theo sobre CDC."
         assert len(state.pesquisa_jurisprudencia) == 1
         assert len(state.pesquisa_legislacao) == 1
         return {
@@ -179,13 +181,14 @@ async def test_pesquisar_teses_aggregates_bundle_results_into_state():
         ],
     )
 
-    async def fake_search_bundle(*, favoravel_query: str, contraria_query: str, legislacao_operation, ratio_search_fn=None):  # noqa: ARG001
+    async def fake_search_bundle(*, favoravel_query: str, contraria_query: str | None, legislacao_operation, ratio_search_fn=None):  # noqa: ARG001
         return {
             "jurisprudencia_favoravel": {
+                "answer": f"Resposta Theo {favoravel_query}",
                 "docs": [{"doc_id": f"fav-{favoravel_query}", "_final_score": 0.9, "data_julgamento": "2024-01-01"}]
             },
             "jurisprudencia_contraria": {
-                "docs": [{"doc_id": f"con-{contraria_query}", "_final_score": 0.7, "data_julgamento": "2023-01-01"}]
+                "docs": []
             },
             "legislacao": [{"doc_id": "lei-1", "_final_score": 0.5, "data_julgamento": "2020-01-01"}],
         }
@@ -193,9 +196,11 @@ async def test_pesquisar_teses_aggregates_bundle_results_into_state():
     result = await pesquisar_teses(state, search_bundle_fn=fake_search_bundle)
 
     assert len(result["teses"]) == 2
-    assert len(result["pesquisa_jurisprudencia"]) == 4
+    assert len(result["pesquisa_jurisprudencia"]) == 2
     assert len(result["pesquisa_legislacao"]) == 2
     assert result["teses"][0]["jurisprudencia_favoravel"][0]["doc_id"].startswith("fav-")
+    assert result["teses"][0]["resposta_pesquisa"] == "Resposta Theo CDC"
+    assert result["teses"][1]["resposta_pesquisa"] == "Resposta Theo Dano moral"
 
 
 @pytest.mark.anyio
@@ -214,10 +219,10 @@ async def test_pesquisar_teses_uses_explicit_case_decomposition_before_fallback(
             TeseJuridica(id="t2", descricao="Dano moral por negativacao", tipo="subsidiaria"),
         ]
 
-    async def fake_search_bundle(*, favoravel_query: str, contraria_query: str, legislacao_operation, ratio_search_fn=None):  # noqa: ARG001
+    async def fake_search_bundle(*, favoravel_query: str, contraria_query: str | None, legislacao_operation, ratio_search_fn=None):  # noqa: ARG001
         return {
-            "jurisprudencia_favoravel": {"docs": [{"doc_id": f"fav-{favoravel_query}", "_final_score": 0.9}]},
-            "jurisprudencia_contraria": {"docs": [{"doc_id": f"con-{contraria_query}", "_final_score": 0.7}]},
+            "jurisprudencia_favoravel": {"answer": f"Pesquisa {favoravel_query}", "docs": [{"doc_id": f"fav-{favoravel_query}", "_final_score": 0.9}]},
+            "jurisprudencia_contraria": {"docs": []},
             "legislacao": [],
         }
 
@@ -229,6 +234,47 @@ async def test_pesquisar_teses_uses_explicit_case_decomposition_before_fallback(
 
     descricoes = [tese["descricao"] for tese in result["teses"]]
     assert descricoes == ["Cobranca indevida", "Dano moral por negativacao"]
+    assert result["teses"][0]["resposta_pesquisa"] == "Pesquisa Cobranca indevida"
+    assert result["teses"][1]["resposta_pesquisa"] == "Pesquisa Dano moral por negativacao"
+
+
+@pytest.mark.anyio
+async def test_pesquisar_teses_reports_progress_for_each_completed_tese():
+    state = RatioEscritorioState(
+        caso_id="caso-1",
+        tipo_peca="peticao_inicial",
+        gate1_aprovado=True,
+        teses=[
+            TeseJuridica(id="t1", descricao="CDC", tipo="principal"),
+            TeseJuridica(id="t2", descricao="Dano moral", tipo="subsidiaria"),
+        ],
+    )
+    progress = []
+
+    async def fake_search_bundle(*, favoravel_query: str, contraria_query: str | None, legislacao_operation, ratio_search_fn=None):  # noqa: ARG001
+        return {
+            "jurisprudencia_favoravel": {
+                "answer": f"Texto {favoravel_query}",
+                "docs": [{"doc_id": f"fav-{favoravel_query}", "_final_score": 0.9}],
+            },
+            "jurisprudencia_contraria": {"docs": []},
+            "legislacao": [],
+        }
+
+    async def on_tese_result(partial_delta: dict[str, object]) -> None:
+        progress.append(partial_delta)
+
+    result = await pesquisar_teses(
+        state,
+        search_bundle_fn=fake_search_bundle,
+        on_tese_result=on_tese_result,
+    )
+
+    assert len(progress) == 2
+    assert progress[0]["teses"][0]["resposta_pesquisa"] == "Texto CDC"
+    assert len(progress[0]["teses"]) == 1
+    assert progress[1]["teses"][1]["resposta_pesquisa"] == "Texto Dano moral"
+    assert len(result["teses"]) == 2
 
 
 @pytest.mark.anyio

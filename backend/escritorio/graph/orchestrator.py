@@ -44,52 +44,111 @@ async def run_intake_graph(state: RatioEscritorioState, store) -> RatioEscritori
 
 
 async def run_drafting_graph(state: RatioEscritorioState, store) -> RatioEscritorioState:
-    """Run drafting nodes sequentially with snapshots between steps.
+    """Pesquisa + curadoria only. Stops at gate2 for human review.
 
-    This replaces the previous single ``ainvoke`` call so that:
-      * the frontend (polling the snapshot) can see partial progress;
-      * a failure in the redator does not discard the research work.
+    The redator runs separately in run_redacao_graph, after the user
+    approves the research results via the gate2 UI.
     """
     from backend.escritorio.graph.drafting_graph import (
         curadoria_node,
-        pesquisador_node,
-        redator_node,
+        pesquisar_teses,
     )
 
-    log.info("orchestrator: running drafting graph for caso=%s", state.caso_id)
+    def _evt(event_type: str, payload: dict) -> None:
+        append = getattr(store, "append_event", None)
+        if callable(append):
+            append(event_type, payload)
+
+    log.info("orchestrator: run_drafting_graph (pesquisa) for caso=%s", state.caso_id)
+
+    # -- Theo starts
+    _evt("pesquisador.started", {
+        "agent": "pesquisador",
+        "text": "Iniciando pesquisa jurisprudencial...",
+    })
 
     # 1. Pesquisa (slow — multiple searches per tese)
-    delta = await _maybe_await(pesquisador_node(state))
-    state = _apply_delta(state, delta)
-    store.save_snapshot(state, stage="pesquisa")
-    log.info("orchestrator: pesquisador done - %d teses, %d juris, %d leis",
-             len(state.teses or []),
-             len(state.pesquisa_jurisprudencia or []),
-             len(state.pesquisa_legislacao or []))
+    working_state = state
 
-    # 2. Curadoria (dedup)
+    async def _on_tese_result(partial_delta: dict[str, Any]) -> None:
+        nonlocal working_state
+        working_state = _apply_delta(working_state, partial_delta)
+        store.save_snapshot(working_state, stage="pesquisa")
+
+        latest_tese = (partial_delta.get("teses") or [])[-1] if partial_delta.get("teses") else None
+        if isinstance(latest_tese, dict):
+            _evt("pesquisador.tese_pronta", {
+                "agent": "pesquisador",
+                "text": f"Tese pronta: {latest_tese.get('descricao', 'tese')}",
+                "tese_id": latest_tese.get("id"),
+                "tipo": latest_tese.get("tipo"),
+                "resposta_pesquisa": latest_tese.get("resposta_pesquisa", ""),
+            })
+
+    delta = await pesquisar_teses(working_state, on_tese_result=_on_tese_result)
+    state = _apply_delta(working_state, delta)
+    store.save_snapshot(state, stage="pesquisa")
+
+    n_teses = len(state.teses or [])
+    n_juris = len(state.pesquisa_jurisprudencia or [])
+    n_leis  = len(state.pesquisa_legislacao or [])
+    log.info("orchestrator: pesquisador done - %d teses, %d juris, %d leis", n_teses, n_juris, n_leis)
+    _evt("pesquisador.search_done", {
+        "agent": "pesquisador",
+        "text": f"{n_teses} teses · {n_juris} precedentes · {n_leis} dispositivos legais",
+        "teses_count": n_teses,
+        "juris_count": n_juris,
+        "leis_count": n_leis,
+    })
+
+    # 2. Curadoria (dedup + rerank)
     delta = await _maybe_await(curadoria_node(state))
     state = _apply_delta(state, delta)
     store.save_snapshot(state, stage="curadoria")
 
-    # 3. Auto-approve gate2 in non-interactive pipeline (mirrors previous router)
-    state = state.model_copy(update={
-        "gate2_aprovado": True,
-        "status": "redacao",
-        "workflow_stage": "redacao",
+    # 3. Signal gate2 — wait for human approval (frontend detects status="gate2")
+    _evt("pesquisador.gate2_ready", {
+        "agent": "pesquisador",
+        "text": "Pesquisa concluída. Aguardando revisão.",
     })
-    store.save_snapshot(state, stage="redacao")
+    log.info("orchestrator: pesquisa done — status=%s (aguardando gate2)", state.status)
+    return state
 
-    # 4. Redator (slow — LLM generation per section)
+
+async def run_redacao_graph(state: RatioEscritorioState, store) -> RatioEscritorioState:
+    """Redação only. Runs after gate2 is approved by the user."""
+    from backend.escritorio.graph.drafting_graph import redator_node
+
+    def _evt(event_type: str, payload: dict) -> None:
+        append = getattr(store, "append_event", None)
+        if callable(append):
+            append(event_type, payload)
+
+    log.info("orchestrator: run_redacao_graph for caso=%s", state.caso_id)
+    _evt("redator.started", {
+        "agent": "redator",
+        "text": "Iniciando redação da peça...",
+    })
+
     delta = await _maybe_await(redator_node(state))
     state = _apply_delta(state, delta)
     store.save_snapshot(state, stage=state.status)
-    log.info("orchestrator: drafting complete - status=%s", state.status)
+
+    _evt("redator.done", {
+        "agent": "redator",
+        "text": f"Peça redigida — {len(state.peca_sections or {})} seções.",
+    })
+    log.info("orchestrator: redação complete - status=%s", state.status)
     return state
 
 
 async def run_adversarial_graph(state: RatioEscritorioState, store) -> RatioEscritorioState:
-    """Run one critique/verificacao/finalizacao pass with snapshots per node."""
+    """Run one adversarial step.
+
+    When ``usuario_finaliza`` is false, generate/register critique and stop for
+    human review. After the user finalizes, rerun this stage to execute
+    verificacao + formatacao only.
+    """
     from backend.escritorio.graph.adversarial_graph import (
         anti_sycophancy_node,
         contraparte_node,
@@ -97,8 +156,20 @@ async def run_adversarial_graph(state: RatioEscritorioState, store) -> RatioEscr
         sycophancy_router,
         verificador_node,
     )
+    from backend.escritorio.adversarial import register_critique_round
 
     log.info("orchestrator: running adversarial graph for caso=%s", state.caso_id)
+
+    if state.usuario_finaliza:
+        delta = await _maybe_await(verificador_node(state))
+        state = _apply_delta(state, delta)
+        store.save_snapshot(state, stage="verificacao")
+
+        delta = await _maybe_await(formatador_node(state))
+        state = _apply_delta(state, delta)
+        store.save_snapshot(state, stage=state.status)
+        log.info("orchestrator: adversarial finalization complete - status=%s", state.status)
+        return state
 
     # Critique loop — matches the graph's contraparte/anti_sycophancy cycle,
     # but bounded to a small number of retries so we never spin forever.
@@ -115,18 +186,27 @@ async def run_adversarial_graph(state: RatioEscritorioState, store) -> RatioEscr
         decision = sycophancy_router(state)
         log.info("orchestrator: sycophancy_router attempt=%d decision=%s", attempt + 1, decision)
         if decision == "aceita":
-            break
+            if state.critica_atual is not None:
+                payload = (
+                    state.critica_atual.model_dump(mode="json")
+                    if hasattr(state.critica_atual, "model_dump")
+                    else state.critica_atual
+                )
+                state = register_critique_round(state, critique_payload=payload)
+            state = state.model_copy(update={
+                "status": "revisao_humana",
+                "workflow_stage": "revisao_humana",
+            })
+            store.save_snapshot(state, stage="revisao_humana")
+            log.info("orchestrator: adversarial critique complete - aguardando revisao humana")
+            return state
 
-    # Verificacao
-    delta = await _maybe_await(verificador_node(state))
-    state = _apply_delta(state, delta)
-    store.save_snapshot(state, stage="verificacao")
-
-    # Formatacao (gera DOCX final)
-    delta = await _maybe_await(formatador_node(state))
-    state = _apply_delta(state, delta)
-    store.save_snapshot(state, stage=state.status)
-    log.info("orchestrator: adversarial complete - status=%s", state.status)
+    state = state.model_copy(update={
+        "status": "revisao_humana",
+        "workflow_stage": "revisao_humana",
+    })
+    store.save_snapshot(state, stage="revisao_humana")
+    log.info("orchestrator: adversarial ended sem critica valida - aguardando revisao humana")
     return state
 
 
@@ -135,6 +215,7 @@ async def run_escritorio_pipeline(
     store,
     run_intake_graph_fn=run_intake_graph,
     run_drafting_graph_fn=run_drafting_graph,
+    run_redacao_graph_fn=run_redacao_graph,
     run_adversarial_graph_fn=run_adversarial_graph,
 ) -> RatioEscritorioState:
     async def _invoke_stage(fn, state: RatioEscritorioState):
@@ -164,27 +245,30 @@ async def run_escritorio_pipeline(
                 {"stage": "intake", "workflow_stage": state.workflow_stage, "status": state.status},
             )
 
+        # Pesquisa: runs until gate2 and stops for human review
         if state.gate1_aprovado and not state.gate2_aprovado:
             _append_event(
                 "pipeline.stage_started",
-                {"stage": "drafting", "workflow_stage": state.workflow_stage, "status": state.status},
+                {"stage": "pesquisa", "workflow_stage": state.workflow_stage, "status": state.status},
             )
             state = await _invoke_stage(run_drafting_graph_fn, state)
             _append_event(
                 "pipeline.stage_completed",
-                {"stage": "drafting", "workflow_stage": state.workflow_stage, "status": state.status},
+                {"stage": "pesquisa", "workflow_stage": state.workflow_stage, "status": state.status},
             )
 
+        # Redação: only after user approves gate2
         if state.gate2_aprovado and not state.peca_sections:
             _append_event(
                 "pipeline.stage_started",
-                {"stage": "redaction", "workflow_stage": state.workflow_stage, "status": state.status},
+                {"stage": "redacao", "workflow_stage": state.workflow_stage, "status": state.status},
             )
-            state = await _invoke_stage(run_drafting_graph_fn, state)
+            state = await _invoke_stage(run_redacao_graph_fn, state)
             _append_event(
                 "pipeline.stage_completed",
-                {"stage": "redaction", "workflow_stage": state.workflow_stage, "status": state.status},
+                {"stage": "redacao", "workflow_stage": state.workflow_stage, "status": state.status},
             )
+            return state
 
         if state.gate2_aprovado and state.peca_sections and not state.usuario_finaliza:
             _append_event(
@@ -196,6 +280,19 @@ async def run_escritorio_pipeline(
                 "pipeline.stage_completed",
                 {"stage": "adversarial", "workflow_stage": state.workflow_stage, "status": state.status},
             )
+            return state
+
+        if state.gate2_aprovado and state.peca_sections and state.usuario_finaliza:
+            _append_event(
+                "pipeline.stage_started",
+                {"stage": "entrega", "workflow_stage": state.workflow_stage, "status": state.status},
+            )
+            state = await _invoke_stage(run_adversarial_graph_fn, state)
+            _append_event(
+                "pipeline.stage_completed",
+                {"stage": "entrega", "workflow_stage": state.workflow_stage, "status": state.status},
+            )
+            return state
     except Exception as exc:
         _append_event(
             "pipeline.error",

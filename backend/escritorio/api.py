@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 from fastapi import APIRouter, HTTPException
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
 from backend.escritorio.adversarial import (
@@ -168,6 +169,12 @@ def _serialize_event_for_frontend(event: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(data, dict):
         data = {}
     agent, text = _describe_event(str(event.get("event_type") or ""), data)
+    payload_agent = str(data.get("agent") or "").strip()
+    payload_text = str(data.get("text") or "").strip()
+    if payload_agent:
+        agent = payload_agent
+    if payload_text:
+        text = payload_text
     return {
         **event,
         "type_name": event.get("event_type"),
@@ -241,6 +248,40 @@ def build_escritorio_router() -> APIRouter:
         if entry is None:
             raise HTTPException(status_code=404, detail={"code": "case_not_found", "caso_id": caso_id})
         return {"path": entry.get("path", "")}
+
+    @router.post("/cases/{caso_id}/open-folder")
+    def open_case_folder(caso_id: str) -> dict[str, Any]:
+        import os, subprocess, sys
+        index = _get_case_index()
+        entry = index.get_case(caso_id)
+        if entry is None:
+            raise HTTPException(status_code=404, detail={"code": "case_not_found", "caso_id": caso_id})
+        path = entry.get("path", "")
+        if not path or not os.path.exists(path):
+            raise HTTPException(status_code=404, detail={"code": "folder_not_found", "path": path})
+        try:
+            if sys.platform == "win32":
+                os.startfile(path)
+            elif sys.platform == "darwin":
+                subprocess.Popen(["open", path])
+            else:
+                subprocess.Popen(["xdg-open", path])
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail={"code": "open_failed", "error": str(exc)})
+        return {"opened": True, "path": path}
+
+    @router.get("/cases/{caso_id}/download")
+    def download_case_docx(caso_id: str):
+        index = _get_case_index()
+        _summary, state = _load_case_or_404(index, caso_id)
+        output_path = Path(str(state.output_docx_path or "")).expanduser()
+        if not output_path.is_file():
+            raise HTTPException(status_code=404, detail={"code": "docx_not_found", "path": str(output_path)})
+        return FileResponse(
+            str(output_path),
+            media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            filename=output_path.name,
+        )
 
     @router.get("/cases/{caso_id}")
     def get_case(caso_id: str) -> dict[str, Any]:
